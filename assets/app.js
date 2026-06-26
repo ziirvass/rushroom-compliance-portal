@@ -88,31 +88,62 @@
       .map((r) => Object.fromEntries(header.map((h, idx) => [h, (r[idx] ?? "").trim()])));
   }
 
-  /* ---------------- status model ---------------- */
-  const STATUS = {
-    done: { label: "Done", cls: "s-done" },
-    "in progress": { label: "In progress", cls: "s-progress" },
-    blocked: { label: "Blocked", cls: "s-blocked" },
-    "not started": { label: "Not started", cls: "s-todo" },
-  };
+  /* ---------------- status model ----------------
+   * The action-plan sheet uses free-text status ("Done (documented)", "Open",
+   * "Active"), so classification is fuzzy rather than an exact lookup. */
   const norm = (s) => (s || "").trim().toLowerCase();
-  function statusInfo(s) { return STATUS[norm(s)] || { label: s || "Not started", cls: "s-todo" }; }
+  const isDone = (s) => /\bdone\b|complete|closed|signed/.test(norm(s));
+  function statusInfo(raw) {
+    const s = norm(raw);
+    let cls = "s-todo";
+    if (isDone(s)) cls = "s-done";
+    else if (/progress|active|wip|started/.test(s)) cls = "s-progress";
+    else if (/block(?!er)|on hold|stuck/.test(s)) cls = "s-blocked";
+    return { label: (raw || "").trim() || "Open", cls, done: isDone(s) };
+  }
   const isTrue = (v) => /^(true|yes|y|1)$/i.test(String(v || "").trim());
   const audienceList = (v) => String(v || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
 
+  /* First non-empty value among the given (lowercased) header aliases. */
+  const pick = (r, ...keys) => {
+    for (const k of keys) { const v = r[k]; if (v != null && String(v).trim() !== "") return String(v).trim(); }
+    return "";
+  };
+
+  /* When the sheet has no audience column, infer it from the step text so the
+   * supplier view still shows the right rows. Everyone is "internal" by default. */
+  function deriveAudience(phase, action) {
+    const set = new Set(["internal"]);
+    const hay = `${phase} ${action}`.toLowerCase();
+    if (/supplier|reach|rohs|svhc|datasheet|declaration of compliance|component|psu|connector/.test(hay)) set.add("supplier");
+    if (/self-declaration|declaration of conformity|technical file|\bdoc\b|ce mark|review/.test(hay)) set.add("reviewer");
+    if (/install|manual|\buser\b|sop/.test(hay)) set.add("installer");
+    return Array.from(set);
+  }
+
   function normalizeStep(r) {
+    const phase = pick(r, "phase") || "Unphased";
+    const action = pick(r, "action", "action — what rushroom must do", "action - what rushroom must do");
+    const priority = pick(r, "priority");
+    const st = statusInfo(pick(r, "status"));
+    const presaleRaw = pick(r, "presale");
+    const audRaw = pick(r, "audience");
     return {
-      step: Number(r.step) || 0,
-      phase: r.phase || "Unphased",
-      action: r.action || "",
-      status: statusInfo(r.status).label,
-      cls: statusInfo(r.status).cls,
-      done: norm(r.status) === "done",
-      owner: r.owner || "",
-      presale: isTrue(r.presale),
-      audience: audienceList(r.audience),
-      doc: r.doc || "",
-      notes: r.notes || "",
+      step: Number(pick(r, "step")) || 0,
+      phase,
+      action,
+      status: st.label,
+      cls: st.cls,
+      done: st.done,
+      owner: pick(r, "owner", "who does it", "who"),
+      where: pick(r, "where / how", "where/how", "where", "how"),
+      evidence: pick(r, "output / evidence", "output/evidence", "evidence", "output"),
+      folder: pick(r, "folder"),
+      priority,
+      presale: presaleRaw ? isTrue(presaleRaw) : /blocker|gate/i.test(priority),
+      audience: audRaw ? audienceList(audRaw) : deriveAudience(phase, action),
+      doc: pick(r, "doc"),
+      notes: pick(r, "notes"),
     };
   }
 
@@ -140,7 +171,7 @@
       el("div", { class: "card stat" }, [
         el("h3", {}, "Overall readiness"),
         el("div", { class: "value" }, `${pct}%`),
-        el("div", { class: "progress" }, el("span", { style: `width:${pct}%` })),
+        el("div", { class: "progress", "aria-hidden": "true" }, el("span", { style: `width:${pct}%` })),
         el("div", { class: "sub" }, `${done} of ${total} steps complete`),
       ]),
       el("div", { class: "card stat" }, [
@@ -154,6 +185,25 @@
         el("div", { class: "sub" }, blocked ? "need action to unblock" : "nothing blocked"),
       ]),
     ]);
+  }
+
+  function phaseOverview(steps) {
+    const card = el("div", { class: "card phase-overview" }, el("h3", {}, "Progress by phase"));
+    const list = el("div", { class: "phase-bars" });
+    for (const [phase, items] of byPhase(steps)) {
+      const done = items.filter((s) => s.done).length;
+      const pct = items.length ? Math.round((done / items.length) * 100) : 0;
+      list.appendChild(el("div", { class: "phase-bar" }, [
+        el("div", { class: "phase-bar-head" }, [
+          el("span", {}, phase),
+          el("span", { class: "muted" }, `${done}/${items.length} · ${pct}%`),
+        ]),
+        el("div", { class: "progress", role: "progressbar", "aria-valuenow": String(pct), "aria-valuemin": "0", "aria-valuemax": "100", "aria-label": `${phase}: ${pct}% complete` },
+          el("span", { style: `width:${pct}%` })),
+      ]));
+    }
+    card.appendChild(list);
+    return card;
   }
 
   function blockersPanel(steps) {
@@ -175,8 +225,14 @@
     return card;
   }
 
+  function priorityPill(s) {
+    if (s.presale) return el("span", { class: "pill-presale" }, /blocker/i.test(s.priority) ? "blocker" : (s.priority || "pre-sale"));
+    if (!s.priority) return el("span", { class: "muted" }, "—");
+    return el("span", { class: "pill-priority" }, s.priority);
+  }
+
   function stepsTable(steps, { showAudience = false } = {}) {
-    const head = ["#", "Action", "Owner", "Status", ""];
+    const head = ["#", "Action", "Owner", "Status", "Priority"];
     if (showAudience) head.splice(3, 0, "Audience");
     const tbody = el("tbody");
     for (const s of steps) {
@@ -185,12 +241,13 @@
         el("td", {}, [
           s.action,
           s.doc ? el("span", {}, [" ", el("a", { href: s.doc, target: "_blank", rel: "noopener" }, "doc ↗")]) : null,
+          s.evidence ? el("div", { class: "evidence" }, `Evidence: ${s.evidence}`) : null,
         ]),
         el("td", {}, s.owner || "—"),
       ];
       if (showAudience) cells.push(el("td", { class: "muted" }, s.audience.join(", ") || "—"));
       cells.push(el("td", {}, statusBadge(s)));
-      cells.push(el("td", {}, s.presale ? el("span", { class: "pill-presale" }, "pre-sale") : null));
+      cells.push(el("td", {}, priorityPill(s)));
       tbody.appendChild(el("tr", {}, cells));
     }
     return el("div", { class: "table-wrap" },
@@ -247,7 +304,7 @@
   function sourceNotice(source) {
     if (source === "live") return null;
     return el("div", { class: "notice" },
-      "Showing bundled sample data. Connect the action-plan Google Sheet in assets/config.js (statusSheetCsvUrl) to read live status.");
+      "Showing the bundled snapshot of the action plan. Publish the action-plan Google Sheet to CSV and set statusSheetCsvUrl in assets/config.js to read live status.");
   }
 
   /* ---------------- accessible tabs ---------------- */
@@ -278,7 +335,7 @@
   /* ---------------- expose shared API ---------------- */
   window.Portal = {
     CFG, $, $$, el, portalHash, setupGate, loadSteps, norm,
-    summaryTiles, blockersPanel, phaseSections, stepsTable, documentLibrary,
+    summaryTiles, phaseOverview, blockersPanel, phaseSections, stepsTable, documentLibrary,
     sourceNotice, wireTabs, statusBadge,
   };
 
@@ -300,13 +357,16 @@
       const { steps, source } = await loadSteps();
       const tools = el("div", { class: "row-tools" }, [
         el("button", { class: "btn btn-sm", type: "button", onclick: refreshReadiness }, "↻ Reload status"),
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => window.print() }, "🖨 Print / Save PDF"),
+        CFG.statusSheetViewUrl ? el("a", { class: "btn btn-sm", href: CFG.statusSheetViewUrl, target: "_blank", rel: "noopener" }, "Open the plan ↗") : null,
         el("span", { class: "spacer" }),
-        el("span", { class: "updated" }, `${source === "live" ? "Live" : "Sample"} · loaded ${new Date().toLocaleTimeString("en-GB")}`),
+        el("span", { class: "updated" }, `${source === "live" ? "Live" : "Snapshot"} · loaded ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
       const frag = el("div", {}, [
         sourceNotice(source),
         tools,
         summaryTiles(steps),
+        phaseOverview(steps),
         blockersPanel(steps),
         el("h2", { class: "visually-hidden" }, "Steps by phase"),
         phaseSections(steps),

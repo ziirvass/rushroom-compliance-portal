@@ -1,6 +1,7 @@
 /* Rushroom AB — Compliance Portal (supplier view)
- * Slimmed page: only supplier-relevant documents and supplier step statuses.
- * Reuses shared helpers from window.Portal (app.js). Nothing internal is shown.
+ * Slimmed page: only supplier-relevant documents and supplier step statuses,
+ * plus a declaration-upload panel. Reuses shared helpers from window.Portal
+ * (app.js). Nothing internal is shown.
  */
 (() => {
   "use strict";
@@ -8,14 +9,29 @@
 
   const P = window.Portal;
   if (!P) { console.error("supplier.js requires app.js (window.Portal) to load first"); return; }
-  const { el, setupGate, loadSteps, summaryTiles, phaseSections, documentLibrary, sourceNotice } = P;
+  const { el, CFG, setupGate, loadSteps, summaryTiles, phaseOverview, phaseSections, documentLibrary, sourceNotice } = P;
 
   const init = () => setupGate(render);
 
   async function render() {
     P.wireTabs(P.$("#tablist"));
     await refreshSteps();
-    P.$("#documents-panel").replaceChildren(documentLibrary("supplier"));
+    P.$("#documents-panel").replaceChildren(el("div", {}, [
+      uploadPanel(),
+      documentLibrary("supplier"),
+    ]));
+  }
+
+  /* Declaration upload — links out to a configured form/endpoint (Google Form,
+   * Formspree, Drive upload-request…), since GitHub Pages can't accept uploads. */
+  function uploadPanel() {
+    if (!CFG.supplierUploadUrl) return null;
+    return el("div", { class: "card upload-card" }, [
+      el("h3", {}, "Submit your declaration"),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" },
+        "Return your signed Supplier Declaration of Compliance, test reports, datasheets and RoHS/REACH declarations here."),
+      el("a", { class: "btn btn-primary", href: CFG.supplierUploadUrl, target: "_blank", rel: "noopener" }, "Upload declaration ↗"),
+    ]);
   }
 
   async function refreshSteps() {
@@ -30,13 +46,15 @@
       }
       const tools = el("div", { class: "row-tools" }, [
         el("button", { class: "btn btn-sm", type: "button", onclick: refreshSteps }, "↻ Reload status"),
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => window.print() }, "🖨 Print / Save PDF"),
         el("span", { class: "spacer" }),
-        el("span", { class: "updated" }, `${source === "live" ? "Live" : "Sample"} · loaded ${new Date().toLocaleTimeString("en-GB")}`),
+        el("span", { class: "updated" }, `${source === "live" ? "Live" : "Snapshot"} · loaded ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
       const frag = el("div", {}, [
         sourceNotice(source),
         tools,
         summaryTiles(supplierSteps),
+        phaseOverview(supplierSteps),
         phaseSections(supplierSteps),
       ]);
       mount.replaceChildren(...frag.childNodes);

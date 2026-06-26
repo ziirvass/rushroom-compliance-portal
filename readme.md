@@ -13,12 +13,16 @@ Built as plain HTML/CSS/JavaScript (no build step, no framework), so it deploys 
 
 - **Access gate** — a single shared password (light gate; see Security).
 - **Readiness view** — reads the 30-step action-plan Google Sheet live and shows overall
-  progress, the pre-sale blockers, and every step grouped by phase.
-- **Document library** — tidy links to the source files in Google Drive.
-- **Supplier view** (`supplier.html`) — a slimmed page for suppliers: only their documents
-  and the status of the supplier steps; nothing internal.
+  progress, a **progress-by-phase** overview, the **pre-sale blockers** (priority =
+  `BLOCKER`/gate), and every step grouped by phase with owner, evidence and priority.
+- **Print / Save as PDF** — one click produces a clean, light-themed readiness report.
+- **Document library** — tidy links to the real source files in Google Drive.
+- **Supplier view** (`supplier.html`) — a slimmed page for suppliers: only their documents,
+  the status of the supplier steps, and an optional **upload declaration** panel; nothing
+  internal.
 - **Accessible** — built to WCAG 2.1 AA (semantic landmarks, keyboard-operable tabs, skip
-  link, visible focus, AA contrast, reduced-motion, responsive).
+  link, visible focus, AA contrast, 44px targets, reduced-motion, responsive). See the
+  Accessibility Audit in Drive.
 
 ---
 
@@ -116,7 +120,9 @@ published Google Sheet (CSV) at runtime; documents are hosted in Google Drive.
 - Per-role logins (suppliers vs authorities vs internal) — requires a small backend or an
   auth service; GitHub Pages alone cannot do real logins.
 - Search/filtering across documents and steps.
-- A supplier declaration upload form.
+- Supplier declaration **uploads**: the supplier page already links out to an upload
+  endpoint when `supplierUploadUrl` is set in `config.js` (a Google Form, Formspree, or
+  Drive upload-request link). An in-page upload widget would still need a backend.
 
 ---
 

@@ -81,6 +81,9 @@ main { padding-top: 1.75rem; }
 .btn {
   font: inherit; cursor: pointer; border-radius: 8px; padding: 0.55rem 1rem;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  /* WCAG 2.5.8 target size: keep interactive controls ≥ 44px tall */
+  min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  text-decoration: none;
 }
 .btn:hover { background: var(--panel); }
 .btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
@@ -109,6 +112,7 @@ main { padding-top: 1.75rem; }
 .tab {
   font: inherit; cursor: pointer; background: none; border: none; color: var(--muted);
   padding: 0.6rem 0.9rem; border-bottom: 3px solid transparent; margin-bottom: -1px; border-radius: 6px 6px 0 0;
+  min-height: 44px; /* WCAG 2.5.8 target size */
 }
 .tab:hover { color: var(--text); }
 .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
@@ -185,8 +189,37 @@ tbody tr:hover { background: var(--panel-2); }
   .site-header h1 { font-size: 1.25rem; }
 }
 
+/* priority pill + per-step evidence */
+.pill-priority {
+  display: inline-block; color: var(--blue); border: 1px solid var(--blue-bd); background: var(--blue-bg);
+  border-radius: 999px; padding: 0.05rem 0.5rem; font-size: 0.7rem; white-space: nowrap;
+}
+.evidence { color: var(--muted); font-size: 0.78rem; margin-top: 0.25rem; }
+
+/* progress-by-phase overview */
+.phase-overview { margin-bottom: 1.5rem; }
+.phase-bars { display: grid; gap: 0.8rem; }
+.phase-bar-head { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.85rem; margin-bottom: 0.3rem; }
+
+/* supplier declaration upload */
+.upload-card { margin-bottom: 1.5rem; border-color: var(--accent); }
+
 /* Respect reduced motion (AA 2.3.3 / motion) */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   * { animation: none !important; transition: none !important; }
+}
+
+/* Print / Save-as-PDF: light theme, expand both tab panels, avoid breaks */
+@media print {
+  :root { --bg:#fff; --panel:#fff; --panel-2:#fff; --text:#000; --muted:#333; --border:#bbb; }
+  body { background:#fff; color:#000; }
+  .skip-link, .site-header nav, .tabs, .row-tools, .gate, .notice { display:none !important; }
+  #portal-app { display:block !important; }
+  [role="tabpanel"], [role="tabpanel"][hidden] { display:block !important; margin-bottom: 1.5rem; }
+  .card, .table-wrap, .phase, .blockers li { break-inside: avoid; border-color:#ccc; }
+  a { color:#000; text-decoration: underline; }
+  .progress { border:1px solid #999; }
+  .progress > span { background:#555; }
+  .badge-status, .pill-priority, .pill-presale { border-color:#999 !important; }
 }
