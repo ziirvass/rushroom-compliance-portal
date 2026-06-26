@@ -1,0 +1,8 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+
+# Local-only Claude settings (keep out of the public repo)
+.claude/settings.local.json

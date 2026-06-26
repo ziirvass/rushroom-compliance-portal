@@ -3,32 +3,31 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rushroom Compliance Portal</title>
-  <meta name="description" content="Live compliance readiness and document library for Rushroom AB's LED system-furniture product." />
+  <title>Supplier View · Rushroom Compliance Portal</title>
+  <meta name="description" content="Supplier view: supplier documents and the status of supplier compliance steps for Rushroom AB." />
   <link rel="stylesheet" href="./assets/styles.css" />
 </head>
-<body data-page="full">
+<body data-page="supplier">
   <a class="skip-link" href="#main">Skip to main content</a>
 
   <header class="site-header">
     <div class="wrap header-row">
       <div>
-        <span class="badge">VALCYRA · Rushroom AB</span>
-        <h1>Compliance Portal</h1>
-        <p class="tagline">LED system-furniture — readiness &amp; document library</p>
+        <span class="badge">Rushroom AB · Suppliers</span>
+        <h1>Supplier View</h1>
+        <p class="tagline">Your documents and the status of supplier compliance steps</p>
       </div>
       <nav aria-label="Views">
-        <a class="btn btn-sm" href="./supplier.html">Supplier view →</a>
+        <a class="btn btn-sm" href="./index.html">Full portal →</a>
       </nav>
     </div>
   </header>
 
   <main id="main" class="wrap">
-    <!-- Access gate -->
     <section id="gate" class="gate" aria-labelledby="gate-title">
       <div class="gate-card">
         <h2 id="gate-title">Restricted access</h2>
-        <p>Enter the shared password to view compliance status and documents.</p>
+        <p>Enter the shared password provided by Rushroom to continue.</p>
         <form id="gate-form" novalidate>
           <div class="field">
             <label for="portal-password">Password</label>
@@ -42,16 +41,15 @@
       </div>
     </section>
 
-    <!-- Portal (revealed after unlock) -->
     <div id="portal-app" hidden>
-      <div class="tabs" id="tablist" role="tablist" aria-label="Portal sections">
-        <button class="tab" id="tab-readiness" role="tab" aria-selected="true"
-                aria-controls="readiness-panel" tabindex="0">Readiness</button>
+      <div class="tabs" id="tablist" role="tablist" aria-label="Supplier sections">
+        <button class="tab" id="tab-steps" role="tab" aria-selected="true"
+                aria-controls="steps-panel" tabindex="0">Supplier steps</button>
         <button class="tab" id="tab-documents" role="tab" aria-selected="false"
-                aria-controls="documents-panel" tabindex="-1">Document library</button>
+                aria-controls="documents-panel" tabindex="-1">Supplier documents</button>
       </div>
 
-      <section id="readiness-panel" role="tabpanel" aria-labelledby="tab-readiness" tabindex="0">
+      <section id="steps-panel" role="tabpanel" aria-labelledby="tab-steps" tabindex="0">
         <div class="loading">Loading status…</div>
       </section>
 
@@ -63,12 +61,13 @@
 
   <footer class="site-footer">
     <div class="wrap">
-      Internal compliance tool for Rushroom AB · Not legal advice.
+      Rushroom AB supplier portal · Not legal advice.
       Document access is governed by Google Drive sharing.
     </div>
   </footer>
 
   <script src="./assets/config.js"></script>
   <script src="./assets/app.js"></script>
+  <script src="./assets/supplier.js"></script>
 </body>
 </html>
