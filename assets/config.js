@@ -33,8 +33,16 @@ window.PORTAL_CONFIG = {
    *   - Priority: a "BLOCKER" or "gate" priority marks a pre-sale blocker.
    *   - Audience (optional column): comma-separated, e.g. "internal, supplier".
    *               If absent, supplier relevance is inferred from the step text.
+   *
+   * The URL below is the action-plan sheet's CSV endpoint. It activates as soon
+   * as the Sheet is shared "Anyone with the link → Viewer" (Share button, top
+   * right of the Sheet). Until then the portal shows the bundled snapshot and
+   * explains how to enable live status — nothing breaks.
+   * Most reliable alternative if the gviz endpoint is ever blocked:
+   *   File → Share → Publish to web → (whole sheet) → CSV → Publish,
+   * then paste that ".../pub?output=csv" link here instead.
    */
-  statusSheetCsvUrl: "",
+  statusSheetCsvUrl: "https://docs.google.com/spreadsheets/d/1xR6h5x-fV0R91cFiNB9UqHhGtVvg2VnW28brz8zrF4A/gviz/tq?tqx=out:csv",
 
   /* Direct link to the action-plan sheet (shown as "open the plan" in the UI). */
   statusSheetViewUrl: "https://docs.google.com/spreadsheets/d/1xR6h5x-fV0R91cFiNB9UqHhGtVvg2VnW28brz8zrF4A/edit",

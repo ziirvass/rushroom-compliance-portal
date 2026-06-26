@@ -148,12 +148,23 @@
   }
 
   async function loadSteps() {
+    const snapshot = () => (CFG.sampleSteps || []).map(normalizeStep);
     if (CFG.statusSheetCsvUrl) {
-      const res = await fetch(CFG.statusSheetCsvUrl, { cache: "no-cache" });
-      if (!res.ok) throw new Error(`Sheet returned HTTP ${res.status}`);
-      return { steps: parseCSV(await res.text()).map(normalizeStep), source: "live" };
+      try {
+        const res = await fetch(CFG.statusSheetCsvUrl, { cache: "no-cache" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const steps = parseCSV(await res.text()).map(normalizeStep).filter((s) => s.step || s.action);
+        if (!steps.length) throw new Error("no rows parsed from CSV");
+        return { steps, source: "live" };
+      } catch (err) {
+        // Sheet not shared/published yet, offline, or CORS-blocked → don't break
+        // the page; show the bundled snapshot and explain. Switches to live as
+        // soon as the Sheet becomes reachable.
+        console.warn("Live status fetch failed; using bundled snapshot.", err);
+        return { steps: snapshot(), source: "fallback", error: err.message };
+      }
     }
-    return { steps: (CFG.sampleSteps || []).map(normalizeStep), source: "sample" };
+    return { steps: snapshot(), source: "sample" };
   }
 
   /* ---------------- shared renderers ---------------- */
@@ -303,6 +314,13 @@
 
   function sourceNotice(source) {
     if (source === "live") return null;
+    if (source === "fallback") {
+      return el("div", { class: "notice" }, [
+        "Couldn't reach the live action-plan Sheet yet, so this shows the bundled snapshot. ",
+        "Set the Sheet to ", el("strong", {}, "Anyone with the link → Viewer"),
+        " (or File → Share → Publish to web → CSV); the dashboard then switches to live automatically.",
+      ]);
+    }
     return el("div", { class: "notice" },
       "Showing the bundled snapshot of the action plan. Publish the action-plan Google Sheet to CSV and set statusSheetCsvUrl in assets/config.js to read live status.");
   }
