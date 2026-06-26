@@ -34,14 +34,27 @@ Built as plain HTML/CSS/JavaScript (no build step, no framework), so it deploys 
 ├── supplier.html         # supplier-only view
 ├── assets/
 │   ├── styles.css        # styling (WCAG 2.1 AA)
-│   ├── app.js            # full-portal logic
+│   ├── app.js            # full-portal logic + API (editing) mode
 │   ├── supplier.js       # supplier-view logic
-│   └── config.js         # ← edit: password, sheet URL, document links
+│   ├── api.js            # Supabase Edge Function client (login/edit/upload)
+│   └── config.js         # ← edit: password, sheet URL, document links, api.functionUrl
+├── supabase/
+│   ├── schema.sql        # database tables + RLS + seed (run once)
+│   └── functions/portal-api/index.ts   # auth + edit/upload API gateway
+├── SUPABASE_SETUP.md     # how to turn on login/editing/uploads
 ├── .gitignore
 ├── CNAME.example         # rename to CNAME for a custom domain
 ├── .nojekyll             # serve files as-is on GitHub Pages
 └── README.md
 ```
+
+### Two modes
+- **Read-only (default).** No backend. Shared-password gate + live status read
+  from the published Google Sheet. Zero setup beyond the steps below.
+- **Live editing (optional).** Set `api.functionUrl` in `config.js` to a deployed
+  Supabase `portal-api` function and the portal gains **two-role login**, **in-portal
+  status editing**, and **supplier uploads** — Rushroom edits everything, suppliers
+  edit only their steps and submit files. See **[SUPABASE_SETUP.md](SUPABASE_SETUP.md)**.
 
 Everything you normally change lives in **`assets/config.js`**.
 
@@ -117,12 +130,12 @@ published Google Sheet (CSV) at runtime; documents are hosted in Google Drive.
 
 ## Roadmap (optional, for later)
 
-- Per-role logins (suppliers vs authorities vs internal) — requires a small backend or an
-  auth service; GitHub Pages alone cannot do real logins.
+- **Per-role login + editing + uploads** — available now via the optional Supabase
+  backend (`SUPABASE_SETUP.md`): Rushroom and supplier passwords, server-side rules,
+  in-portal status editing, and native file uploads. Currently shared-password-per-role;
+  a future step is per-supplier accounts with a full `who-changed-what` audit trail
+  (the data model already records `updated_by`).
 - Search/filtering across documents and steps.
-- Supplier declaration **uploads**: the supplier page already links out to an upload
-  endpoint when `supplierUploadUrl` is set in `config.js` (a Google Form, Formspree, or
-  Drive upload-request link). An in-page upload widget would still need a backend.
 
 ---
 

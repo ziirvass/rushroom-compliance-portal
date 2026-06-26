@@ -18,6 +18,19 @@ window.PORTAL_CONFIG = {
    */
   passwordHash: "b0eb72b1c6231cbc7bc759a84148de428650f650878f2fdd7c6ecbacdaf1dd4f",
 
+  /* ---- Live editing backend (Supabase) ----------------------------------
+   * Set api.functionUrl to your deployed `portal-api` Edge Function URL to turn
+   * on in-portal LOGIN + EDITING + UPLOADS. See SUPABASE_SETUP.md.
+   *   • When set: Rushroom logs in (full edit) and suppliers log in (edit the
+   *     status of their steps + upload files). Role passwords live as Supabase
+   *     secrets, NOT in this file.
+   *   • When empty (""): the portal runs in read-only mode — the shared-password
+   *     gate above + live Google-Sheet status below. Nothing breaks.
+   */
+  api: {
+    functionUrl: "", // e.g. https://<project-ref>.functions.supabase.co/portal-api
+  },
+
   /* ---- Live status source ------------------------------------------------
    * Published CSV URL of the action-plan Google Sheet
    * ("00_ACTION_PLAN_Rushroom_Compliance_Step_by_Step").

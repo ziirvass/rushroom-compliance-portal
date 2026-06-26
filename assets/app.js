@@ -242,7 +242,17 @@
     return el("span", { class: "pill-priority" }, s.priority);
   }
 
-  function stepsTable(steps, { showAudience = false } = {}) {
+  const STATUS_OPTIONS = ["Open", "In progress", "Active", "Done", "Blocked"];
+  function statusSelect(s, onStatus) {
+    const opts = STATUS_OPTIONS.slice();
+    if (s.status && !opts.some((o) => o.toLowerCase() === norm(s.status))) opts.unshift(s.status);
+    const sel = el("select", { class: `status-select ${s.cls}`, "aria-label": `Status for step ${s.step}` },
+      opts.map((o) => el("option", { value: o, selected: norm(o) === norm(s.status) ? "selected" : null }, o)));
+    sel.addEventListener("change", () => onStatus(s.step, sel.value, sel));
+    return sel;
+  }
+
+  function stepsTable(steps, { showAudience = false, editable = false, onStatus = null } = {}) {
     const head = ["#", "Action", "Owner", "Status", "Priority"];
     if (showAudience) head.splice(3, 0, "Audience");
     const tbody = el("tbody");
@@ -257,7 +267,7 @@
         el("td", {}, s.owner || "—"),
       ];
       if (showAudience) cells.push(el("td", { class: "muted" }, s.audience.join(", ") || "—"));
-      cells.push(el("td", {}, statusBadge(s)));
+      cells.push(el("td", {}, editable && onStatus ? statusSelect(s, onStatus) : statusBadge(s)));
       cells.push(el("td", {}, priorityPill(s)));
       tbody.appendChild(el("tr", {}, cells));
     }
@@ -286,8 +296,9 @@
     return frag;
   }
 
-  function documentLibrary(audienceFilter) {
-    const docs = (CFG.documents || []).filter((d) => !audienceFilter || (d.audience || []).includes(audienceFilter));
+  function documentLibrary(audienceFilter, docsInput) {
+    const source = docsInput || CFG.documents || [];
+    const docs = source.filter((d) => !audienceFilter || (d.audience || []).includes(audienceFilter));
     const wrap = el("div");
     if (!docs.length) { wrap.appendChild(el("div", { class: "empty" }, "No documents listed yet.")); return wrap; }
     const cats = new Map();
@@ -350,16 +361,166 @@
     });
   }
 
+  /* ---------------- API (Supabase) mode ---------------- */
+  const API = window.PortalAPI;
+  const apiEnabled = () => !!(API && API.configured());
+
+  // Map a DB row from the Edge Function into the same shape the renderers use.
+  function stepsFromApi(rows) {
+    return (rows || []).map((r) => {
+      const n = normalizeStep({
+        step: r.step, phase: r.phase, action: r.action, owner: r.owner,
+        "where / how": r.where_how, "output / evidence": r.evidence,
+        folder: r.folder, priority: r.priority, status: r.status,
+        audience: Array.isArray(r.audience) ? r.audience.join(", ") : (r.audience || ""),
+      });
+      n.updatedBy = r.updated_by || "";
+      return n;
+    });
+  }
+
+  // Login gate backed by the Edge Function (replaces the client-side hash gate).
+  function setupApiGate(role, onUnlock) {
+    const gate = $("#gate"), appEl = $("#portal-app");
+    const reveal = () => {
+      gate.hidden = true; appEl.hidden = false; onUnlock();
+      const h = appEl.querySelector("h2, h3"); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); }
+    };
+    if (API.getToken(role)) { reveal(); return; }
+    const form = $("#gate-form"), input = $("#portal-password"), err = $("#gate-error");
+    input.focus();
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      err.textContent = ""; input.setAttribute("aria-invalid", "false");
+      const btn = form.querySelector("button"); btn.disabled = true;
+      try {
+        await API.login(role, input.value);
+        reveal();
+      } catch (ex) {
+        input.setAttribute("aria-invalid", "true");
+        err.textContent = ex.message || "Login failed."; input.select();
+      } finally { btn.disabled = false; }
+    });
+  }
+
+  // File-upload card (suppliers submit declarations; Rushroom can attach files).
+  function uploadCard(role, steps) {
+    const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose a file to upload" });
+    const stepSel = el("select", { class: "up-step", "aria-label": "Related step (optional)" }, [
+      el("option", { value: "" }, "— related step (optional) —"),
+      ...steps.map((s) => el("option", { value: String(s.step) }, `#${s.step} · ${s.action.slice(0, 60)}`)),
+    ]);
+    const who = role === "supplier"
+      ? el("input", { type: "text", class: "up-who", placeholder: "Your company (optional)", "aria-label": "Your company" })
+      : null;
+    const note = el("input", { type: "text", class: "up-note", placeholder: "Note (optional)", "aria-label": "Note" });
+    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const btn = el("button", { class: "btn btn-primary", type: "button" }, "Upload");
+    btn.addEventListener("click", async () => {
+      const f = file.files && file.files[0];
+      if (!f) { status.className = "up-status warn"; status.textContent = "Choose a file first."; return; }
+      btn.disabled = true; status.className = "up-status"; status.textContent = "Uploading…";
+      try {
+        await API.uploadFile(API.getToken(role), f, { step: stepSel.value || null, note: note.value, supplierLabel: who ? who.value : "" });
+        status.className = "up-status ok"; status.textContent = `Uploaded “${f.name}”. Thank you.`;
+        file.value = ""; note.value = "";
+      } catch (ex) {
+        status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
+      } finally { btn.disabled = false; }
+    });
+    return el("div", { class: "card upload-card" }, [
+      el("h3", {}, "Upload a document"),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, role === "supplier"
+        ? "Submit your signed declaration, test reports, datasheets, or RoHS/REACH declarations."
+        : "Attach a file to the technical file or a specific step."),
+      el("div", { class: "upload-fields" }, [file, stepSel, who, note, btn].filter(Boolean)),
+      status,
+    ]);
+  }
+
+  // Rushroom-only: list of supplier uploads with signed download links.
+  async function uploadsReview(role) {
+    if (role !== "rushroom") return null;
+    const wrap = el("div", { class: "card" }, el("h3", {}, "Supplier uploads"));
+    try {
+      const { uploads } = await API.listUploads(API.getToken(role));
+      if (!uploads || !uploads.length) { wrap.appendChild(el("p", { class: "muted", style: "margin:0" }, "No uploads yet.")); return wrap; }
+      const list = el("ul", { class: "uploads" });
+      for (const u of uploads) {
+        list.appendChild(el("li", {}, [
+          u.download_url ? el("a", { href: u.download_url, target: "_blank", rel: "noopener" }, u.file_name) : el("span", {}, u.file_name),
+          el("span", { class: "muted" }, ` — ${u.supplier_label || u.uploaded_role}${u.step ? ` · step #${u.step}` : ""}${u.note ? ` · ${u.note}` : ""}`),
+        ]));
+      }
+      wrap.appendChild(list);
+    } catch (ex) {
+      wrap.appendChild(el("p", { class: "error", style: "margin:0" }, `Couldn't load uploads: ${ex.message}`));
+    }
+    return wrap;
+  }
+
+  // Full API render for a page: editable readiness + documents + uploads.
+  async function renderApi(role, readinessMountId) {
+    wireTabs($("#tablist"));
+    const mount = $(readinessMountId);
+    const load = async () => {
+      mount.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+      let payload;
+      try { payload = await API.data(API.getToken(role)); }
+      catch (ex) {
+        if (/auth/i.test(ex.message)) { API.clearToken(role); location.reload(); return; }
+        mount.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
+        return;
+      }
+      const steps = stepsFromApi(payload.steps);
+      const onStatus = async (step, status, sel) => {
+        sel.disabled = true;
+        try { await API.setStatus(API.getToken(role), step, status); await load(); }
+        catch (ex) { sel.disabled = false; alert(`Couldn't save: ${ex.message}`); }
+      };
+      const tools = el("div", { class: "row-tools" }, [
+        el("button", { class: "btn btn-sm", type: "button", onclick: load }, "↻ Refresh"),
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => window.print() }, "🖨 Print / Save PDF"),
+        CFG.statusSheetViewUrl ? el("a", { class: "btn btn-sm", href: CFG.statusSheetViewUrl, target: "_blank", rel: "noopener" }, "Open the plan ↗") : null,
+        el("span", { class: "spacer" }),
+        el("span", { class: "updated" }, `Live · signed in as ${role} · ${new Date().toLocaleTimeString("en-GB")}`),
+      ]);
+      const frag = el("div", {}, [
+        el("div", { class: "notice ok" }, role === "rushroom"
+          ? "Signed in as Rushroom — edit any step's status from the dropdowns; changes save instantly."
+          : "Signed in as a supplier — update the status of your steps and upload documents; changes save instantly."),
+        tools,
+        summaryTiles(steps),
+        phaseOverview(steps),
+        blockersPanel(steps),
+        el("h2", { class: "visually-hidden" }, "Steps by phase"),
+        phaseSections(steps, { editable: true, onStatus }),
+      ]);
+      mount.replaceChildren(...frag.childNodes);
+
+      const docsPanel = $("#documents-panel");
+      docsPanel.replaceChildren(el("div", {}, [
+        uploadCard(role, steps),
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents),
+      ]));
+      const review = await uploadsReview(role);
+      if (review) docsPanel.appendChild(review);
+    };
+    await load();
+  }
+
   /* ---------------- expose shared API ---------------- */
   window.Portal = {
     CFG, $, $$, el, portalHash, setupGate, loadSteps, norm,
     summaryTiles, phaseOverview, blockersPanel, phaseSections, stepsTable, documentLibrary,
     sourceNotice, wireTabs, statusBadge,
+    apiEnabled, setupApiGate, renderApi,
   };
 
   /* ---------------- full-portal page init ---------------- */
   function initFullPortal() {
-    setupGate(renderPortal);
+    if (apiEnabled()) setupApiGate("rushroom", () => renderApi("rushroom", "#readiness-panel"));
+    else setupGate(renderPortal); // read-only fallback
   }
 
   async function renderPortal() {

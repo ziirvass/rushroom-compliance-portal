@@ -11,7 +11,10 @@
   if (!P) { console.error("supplier.js requires app.js (window.Portal) to load first"); return; }
   const { el, CFG, setupGate, loadSteps, summaryTiles, phaseOverview, phaseSections, documentLibrary, sourceNotice } = P;
 
-  const init = () => setupGate(render);
+  const init = () => {
+    if (P.apiEnabled && P.apiEnabled()) P.setupApiGate("supplier", () => P.renderApi("supplier", "#steps-panel"));
+    else setupGate(render); // read-only fallback
+  };
 
   async function render() {
     P.wireTabs(P.$("#tablist"));

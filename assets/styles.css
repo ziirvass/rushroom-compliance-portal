@@ -201,8 +201,36 @@ tbody tr:hover { background: var(--panel-2); }
 .phase-bars { display: grid; gap: 0.8rem; }
 .phase-bar-head { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.85rem; margin-bottom: 0.3rem; }
 
+/* editable status dropdown */
+.status-select {
+  font: inherit; font-size: 0.78rem; padding: 0.2rem 0.4rem; border-radius: 8px;
+  border: 1px solid; background: var(--panel-2); color: var(--text); min-height: 36px;
+}
+.status-select.s-done { color: var(--green); border-color: var(--green-bd); }
+.status-select.s-progress { color: var(--amber); border-color: var(--amber-bd); }
+.status-select.s-blocked { color: var(--red); border-color: var(--red-bd); }
+.status-select.s-todo { color: var(--gray); border-color: var(--gray-bd); }
+.status-select option { color: #000; }
+
+/* success / ok notice variant */
+.notice.ok { background: var(--green-bg); border-color: var(--green-bd); color: var(--green); }
+
 /* supplier declaration upload */
 .upload-card { margin-bottom: 1.5rem; border-color: var(--accent); }
+.upload-fields { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+.upload-fields input[type="text"], .upload-fields select, .upload-fields input[type="file"] {
+  font: inherit; padding: 0.5rem 0.6rem; border-radius: 8px; min-height: 44px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+}
+.upload-fields input[type="text"], .upload-fields select { min-width: 180px; flex: 1; }
+.up-status { font-size: 0.85rem; margin: 0.75rem 0 0; min-height: 1.2em; color: var(--muted); }
+.up-status.ok { color: var(--green); }
+.up-status.err { color: var(--red); }
+.up-status.warn { color: var(--amber); }
+
+/* uploads review list */
+.uploads { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.uploads li { font-size: 0.88rem; }
 
 /* Respect reduced motion (AA 2.3.3 / motion) */
 @media (prefers-reduced-motion: reduce) {
