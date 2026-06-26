@@ -41,6 +41,8 @@ Built as plain HTML/CSS/JavaScript (no build step, no framework), so it deploys 
 ├── supabase/
 │   ├── schema.sql        # database tables + RLS + seed (run once)
 │   └── functions/portal-api/index.ts   # auth + edit/upload API gateway
+├── google-apps-script/
+│   └── setup-action-plan.gs   # one-time: adds Status/Priority dropdowns + colours to the Sheet
 ├── SUPABASE_SETUP.md     # how to turn on login/editing/uploads
 ├── .gitignore
 ├── CNAME.example         # rename to CNAME for a custom domain
@@ -94,7 +96,10 @@ add the same domain under Settings → Pages, and create a CNAME DNS record at y
 ## Updating
 
 - **Status** — edit the action-plan Google Sheet; the dashboard reads it live (press
-  *Reload status*). No redeploy needed.
+  *Reload status*). No redeploy needed. To make the Sheet easy and consistent to edit,
+  run [`google-apps-script/setup-action-plan.gs`](google-apps-script/setup-action-plan.gs)
+  once (Extensions → Apps Script) — it adds Status/Priority **dropdowns** and colour-codes
+  the cells to match the portal.
 - **Documents / password** — edit `assets/config.js` and commit the change.
 
 ---
