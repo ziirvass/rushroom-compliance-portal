@@ -240,6 +240,8 @@ tbody tr:hover { background: var(--panel-2); }
 /* uploads review list */
 .uploads { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
 .uploads li { font-size: 0.88rem; }
+.linklike { font: inherit; background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
+.linklike:hover { filter: brightness(1.1); }
 
 /* ---- in-portal document viewer (modal) ---- */
 .viewer-overlay {
