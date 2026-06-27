@@ -13,3 +13,7 @@ node_modules/
 # Never commit secrets / service keys
 .env
 .env.*
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
