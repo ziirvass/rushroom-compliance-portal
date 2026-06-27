@@ -241,6 +241,43 @@ tbody tr:hover { background: var(--panel-2); }
 .uploads { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
 .uploads li { font-size: 0.88rem; }
 
+/* ---- in-portal document viewer (modal) ---- */
+.viewer-overlay {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center; padding: 2vh 2vw;
+}
+.viewer-dialog {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  width: min(960px, 96vw); max-height: 94vh; display: flex; flex-direction: column; overflow: hidden;
+}
+.viewer-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+.viewer-title { margin: 0; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-head .spacer { flex: 1; }
+.viewer-body { overflow: auto; padding: 0; background: var(--panel-2); flex: 1; min-height: 50vh; }
+.viewer-frame { width: 100%; height: 82vh; border: 0; background: #fff; }
+.viewer-msg { padding: 2rem; text-align: center; display: grid; gap: 1rem; place-items: center; }
+
+/* Rendered Word document — light "paper" for readability */
+.doc-render {
+  background: #fff; color: #111; max-width: 820px; margin: 1.25rem auto; padding: 2.5rem 3rem;
+  border-radius: 6px; line-height: 1.6;
+}
+.doc-render h1, .doc-render h2, .doc-render h3 { color: #111; line-height: 1.25; }
+.doc-render table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+.doc-render td, .doc-render th { border: 1px solid #ccc; padding: 0.4rem 0.6rem; }
+.doc-render img { max-width: 100%; height: auto; }
+.doc-render a { color: #0b57d0; }
+
+/* Rendered Excel workbook */
+.sheet-tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; padding: 0.6rem 0.8rem 0; background: var(--panel); position: sticky; top: 0; }
+.sheet-tab { font: inherit; font-size: 0.82rem; cursor: pointer; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); border-radius: 6px 6px 0 0; padding: 0.35rem 0.7rem; min-height: 34px; }
+.sheet-tab.active { color: var(--accent); border-bottom-color: transparent; background: #fff; color: #111; }
+.sheet-render { background: #fff; padding: 1rem; overflow: auto; }
+.sheet-table table { border-collapse: collapse; font-size: 0.82rem; color: #111; }
+.sheet-table td, .sheet-table th { border: 1px solid #d0d0d0; padding: 0.25rem 0.5rem; white-space: nowrap; }
+
+@media print { .viewer-overlay { display: none !important; } }
+
 /* Respect reduced motion (AA 2.3.3 / motion) */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

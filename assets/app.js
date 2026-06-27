@@ -308,15 +308,19 @@
       const grid = el("div", { class: "docs" });
       for (const d of items) {
         const link = d.open_url || d.url;
+        const ext = (d.storage_path || "").split(".").pop().toLowerCase();
+        const canView = !!d.storage_path && !!window.PortalViewer && ["pdf", "docx", "xlsx", "xls", "csv"].includes(ext);
         grid.appendChild(el("div", { class: "doc" }, [
           el("div", {}, [
             el("div", { class: "name" }, d.name),
             el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`),
           ]),
           el("div", { class: "doc-actions" }, [
-            link
-              ? el("a", { class: "open", href: link, target: "_blank", rel: "noopener" }, "Open ↗")
-              : el("span", { class: "pending" }, "link pending"),
+            canView
+              ? el("button", { class: "open", type: "button", onclick: () => window.PortalViewer.open(d) }, "View")
+              : (link
+                  ? el("a", { class: "open", href: link, target: "_blank", rel: "noopener" }, "Open ↗")
+                  : el("span", { class: "pending" }, "link pending")),
             opts.manage && opts.onDelete && d.id
               ? el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => opts.onDelete(d) }, "Delete")
               : null,
