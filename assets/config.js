@@ -28,7 +28,7 @@ window.PORTAL_CONFIG = {
    *     gate above + live Google-Sheet status below. Nothing breaks.
    */
   api: {
-    functionUrl: "", // e.g. https://<project-ref>.functions.supabase.co/portal-api
+    functionUrl: "https://iwoqujpwhsoywudjtsnj.supabase.co/functions/v1/portal-api",
   },
 
   /* ---- Live status source ------------------------------------------------
