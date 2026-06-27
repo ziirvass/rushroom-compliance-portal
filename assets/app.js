@@ -296,7 +296,7 @@
     return frag;
   }
 
-  function documentLibrary(audienceFilter, docsInput) {
+  function documentLibrary(audienceFilter, docsInput, opts = {}) {
     const source = docsInput || CFG.documents || [];
     const docs = source.filter((d) => !audienceFilter || (d.audience || []).includes(audienceFilter));
     const wrap = el("div");
@@ -307,14 +307,20 @@
       const group = el("div", { class: "doc-group" }, el("h3", {}, cat));
       const grid = el("div", { class: "docs" });
       for (const d of items) {
+        const link = d.open_url || d.url;
         grid.appendChild(el("div", { class: "doc" }, [
           el("div", {}, [
             el("div", { class: "name" }, d.name),
             el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`),
           ]),
-          d.url
-            ? el("a", { class: "open", href: d.url, target: "_blank", rel: "noopener" }, "Open ↗")
-            : el("span", { class: "pending" }, "link pending"),
+          el("div", { class: "doc-actions" }, [
+            link
+              ? el("a", { class: "open", href: link, target: "_blank", rel: "noopener" }, "Open ↗")
+              : el("span", { class: "pending" }, "link pending"),
+            opts.manage && opts.onDelete && d.id
+              ? el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => opts.onDelete(d) }, "Delete")
+              : null,
+          ]),
         ]));
       }
       group.appendChild(grid);
@@ -438,6 +444,43 @@
     ]);
   }
 
+  // Rushroom-only: add a file to the document library (stored in Supabase).
+  function manageDocumentsCard(role, reload) {
+    if (role !== "rushroom") return null;
+    const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose a document to add" });
+    const name = el("input", { type: "text", class: "up-text", placeholder: "Display name (defaults to file name)", "aria-label": "Document name" });
+    const category = el("input", { type: "text", class: "up-text", placeholder: "Category (e.g. Test reports)", "aria-label": "Category" });
+    const auds = ["internal", "supplier", "reviewer", "installer"].map((a) => {
+      const cb = el("input", { type: "checkbox", value: a, checked: a === "internal" ? "checked" : null });
+      return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
+    });
+    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const btn = el("button", { class: "btn btn-primary", type: "button" }, "Add document");
+    btn.addEventListener("click", async () => {
+      const f = file.files && file.files[0];
+      if (!f) { status.className = "up-status warn"; status.textContent = "Choose a file first."; return; }
+      const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
+      if (!audience.length) audience.push("internal");
+      btn.disabled = true; status.className = "up-status"; status.textContent = "Uploading…";
+      try {
+        await API.uploadDocument(API.getToken(role), f, { category: category.value, name: name.value, audience });
+        status.className = "up-status ok"; status.textContent = `Added “${name.value || f.name}”.`;
+        file.value = ""; name.value = ""; category.value = "";
+        await reload();
+      } catch (ex) {
+        status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
+      } finally { btn.disabled = false; }
+    });
+    return el("div", { class: "card upload-card" }, [
+      el("h3", {}, "Manage documents"),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file into the library — stored in Supabase, no Google Drive needed. Tick who should see it."),
+      el("div", { class: "upload-fields" }, [file, name, category]),
+      el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
+      el("div", { style: "margin-top:0.75rem" }, btn),
+      status,
+    ]);
+  }
+
   // Rushroom-only: list of supplier uploads with signed download links.
   async function uploadsReview(role) {
     if (role !== "rushroom") return null;
@@ -498,11 +541,16 @@
       ]);
       mount.replaceChildren(...frag.childNodes);
 
+      const onDelete = async (d) => {
+        if (!confirm(`Delete “${d.name}” from the library?`)) return;
+        try { await API.deleteDocument(API.getToken(role), d.id); await load(); }
+        catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
+      };
       const docsPanel = $("#documents-panel");
       docsPanel.replaceChildren(el("div", {}, [
-        uploadCard(role, steps),
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents),
-      ]));
+        role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load),
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onDelete }),
+      ].filter(Boolean)));
       const review = await uploadsReview(role);
       if (review) docsPanel.appendChild(review);
     };

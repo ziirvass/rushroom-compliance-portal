@@ -53,6 +53,22 @@
       await call({ action: "recordUpload", token, step, note, supplierLabel, path, fileName: file.name });
       return path;
     },
+
+    deleteDocument: (token, id) => call({ action: "deleteDocument", token, id }),
+
+    /* Add a library document: upload the file to the documents bucket, then
+     * register it in the documents table. Rushroom only (enforced server-side). */
+    async uploadDocument(token, file, { category, name, audience } = {}) {
+      const { signedUrl, path } = await call({ action: "docUploadUrl", token, fileName: file.name });
+      const put = await fetch(signedUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+      await call({ action: "addDocument", token, category, name: name || file.name, audience, storagePath: path });
+      return path;
+    },
   };
 
   window.PortalAPI = API;

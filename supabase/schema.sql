@@ -26,13 +26,16 @@ create table if not exists public.steps (
 );
 
 create table if not exists public.documents (
-  id        uuid primary key default gen_random_uuid(),
-  category  text not null default '',
-  name      text not null default '',
-  url       text default '',
-  audience  text[] not null default array['internal']::text[],
-  sort      integer default 0
+  id            uuid primary key default gen_random_uuid(),
+  category      text not null default '',
+  name          text not null default '',
+  url           text default '',          -- external link (e.g. legacy Google Drive)
+  storage_path  text default '',          -- path in the 'documents' bucket when the file is hosted here
+  audience      text[] not null default array['internal']::text[],
+  sort          integer default 0
 );
+-- For projects created before storage_path existed:
+alter table public.documents add column if not exists storage_path text default '';
 
 create table if not exists public.uploads (
   id             uuid primary key default gen_random_uuid(),
@@ -53,9 +56,12 @@ alter table public.steps     enable row level security;
 alter table public.documents enable row level security;
 alter table public.uploads   enable row level security;
 
--- ---- Private storage bucket for supplier uploads ---------------------------
+-- ---- Private storage buckets ----------------------------------------------
+--   supplier-uploads : files suppliers submit
+--   documents        : the compliance document library files (Google-free mode)
 insert into storage.buckets (id, name, public)
-values ('supplier-uploads', 'supplier-uploads', false)
+values ('supplier-uploads', 'supplier-uploads', false),
+       ('documents', 'documents', false)
 on conflict (id) do nothing;
 
 -- Storage objects are likewise reached only via the Edge Function (signed URLs),

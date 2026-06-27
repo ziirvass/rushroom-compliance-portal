@@ -55,8 +55,10 @@ Built as plain HTML/CSS/JavaScript (no build step, no framework), so it deploys 
   from the published Google Sheet. Zero setup beyond the steps below.
 - **Live editing (optional).** Set `api.functionUrl` in `config.js` to a deployed
   Supabase `portal-api` function and the portal gains **two-role login**, **in-portal
-  status editing**, and **supplier uploads** — Rushroom edits everything, suppliers
-  edit only their steps and submit files. See **[SUPABASE_SETUP.md](SUPABASE_SETUP.md)**.
+  status editing**, **supplier uploads**, and **document management** — Rushroom edits
+  every step and uploads/deletes library files (stored in Supabase, no Google Drive
+  needed); suppliers edit only their steps and submit files. This can fully replace
+  Google. See **[SUPABASE_SETUP.md](SUPABASE_SETUP.md)**.
 
 Everything you normally change lives in **`assets/config.js`**.
 

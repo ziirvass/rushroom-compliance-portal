@@ -20,6 +20,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const BUCKET = "supplier-uploads";
+const DOC_BUCKET = "documents";
 const TOKEN_TTL_SECONDS = 60 * 60 * 8; // 8 hours
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -134,7 +135,16 @@ Deno.serve(async (req) => {
     ]);
     const s = role === "supplier" ? (steps ?? []).filter((r) => isSupplierStep(r.audience)) : (steps ?? []);
     const d = role === "supplier" ? (documents ?? []).filter((r) => isSupplierStep(r.audience)) : (documents ?? []);
-    return json({ role, steps: s, documents: d });
+    // Attach an "open" link: a short-lived signed URL for files stored here, or
+    // the external URL for legacy/Drive-linked documents.
+    const docs = await Promise.all(d.map(async (doc) => {
+      if (doc.storage_path) {
+        const { data: signed } = await db.storage.from(DOC_BUCKET).createSignedUrl(doc.storage_path, 60 * 60);
+        return { ...doc, open_url: signed?.signedUrl ?? "" };
+      }
+      return { ...doc, open_url: doc.url || "" };
+    }));
+    return json({ role, steps: s, documents: docs });
   }
 
   if (action === "setStatus") {
@@ -169,6 +179,43 @@ Deno.serve(async (req) => {
       file_name: fileName.slice(0, 200),
       note: String(body.note ?? "").slice(0, 500),
     });
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  // --- document library management (Rushroom only) ------------------------
+  if (action === "docUploadUrl") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const path = `${Date.now()}-${safeName(String(body.fileName ?? "file"))}`;
+    const { data, error } = await db.storage.from(DOC_BUCKET).createSignedUploadUrl(path);
+    if (error) return json({ error: error.message }, 500);
+    return json({ signedUrl: data.signedUrl, token: data.token, path });
+  }
+
+  if (action === "addDocument") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const name = String(body.name ?? "").trim();
+    if (!name) return json({ error: "name required" }, 400);
+    const audience = Array.isArray(body.audience) && body.audience.length
+      ? body.audience.map((a: unknown) => String(a)) : ["internal"];
+    const { error } = await db.from("documents").insert({
+      category: (String(body.category ?? "").trim() || "Uncategorised").slice(0, 80),
+      name: name.slice(0, 200),
+      url: String(body.url ?? "").slice(0, 1000),
+      storage_path: String(body.storagePath ?? "").slice(0, 400),
+      audience,
+    });
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  if (action === "deleteDocument") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const id = String(body.id ?? "");
+    if (!id) return json({ error: "id required" }, 400);
+    const { data: doc } = await db.from("documents").select("storage_path").eq("id", id).maybeSingle();
+    if (doc?.storage_path) await db.storage.from(DOC_BUCKET).remove([doc.storage_path]);
+    const { error } = await db.from("documents").delete().eq("id", id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }

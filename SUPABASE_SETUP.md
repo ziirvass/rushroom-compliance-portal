@@ -21,7 +21,8 @@ upload files. The portal keeps working in read-only mode until you finish.
    whole file, paste it in, and click **Run**.
    - This creates the `steps`, `documents`, and `uploads` tables (seeded with the
      current 30-step plan and the document links), locks them with Row-Level
-     Security, and creates a private `supplier-uploads` storage bucket.
+     Security, and creates two private storage buckets: `supplier-uploads` (files
+     suppliers submit) and `documents` (the library files, for Google-free mode).
 
 ## 3. Choose the two passwords and hash them
 The function stores only the **SHA-256 hash** of each password, never the password.
@@ -87,6 +88,24 @@ automatically — you do **not** set those.
   to suppliers — internal rows never reach a supplier's browser.
 - Uploads go straight to the private bucket via a short-lived signed URL; only
   Rushroom can list them (with signed download links).
+- Adding/deleting library documents is Rushroom-only; suppliers only ever receive
+  signed links to the documents tagged for them.
+
+## Going fully Google-free (documents in Supabase)
+Once logged in as Rushroom, open the **Documents** tab → **Manage documents**:
+upload a file, give it a name + category, tick who should see it (internal /
+supplier / reviewer / installer), and **Add document**. It's stored in the private
+`documents` bucket and listed for the right roles, who open it via a short-lived
+signed link. Use **Delete** on any card to remove a document (and its file).
+
+Migrating the existing library off Google Drive (one-time):
+- The seed ships the 13 documents as **Google Drive links** so nothing is lost on
+  day one. To move a file in-house, upload it via **Manage documents**, then
+  **Delete** the old Drive-linked entry.
+- Caveat: Google-native files (Docs/Sheets templates) aren't plain files — export
+  them first (File → Download → PDF or .docx/.xlsx) and upload that. They lose live
+  Google editing once they're static files in Supabase, which is the trade-off of
+  leaving Google entirely.
 
 ## Changing a password later
 Recompute the hash (step 3) and re-set the secret:
