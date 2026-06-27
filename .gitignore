@@ -6,3 +6,10 @@ Thumbs.db
 
 # Local-only Claude settings (keep out of the public repo)
 .claude/settings.local.json
+
+# Node deps (migration tooling installs these locally)
+node_modules/
+
+# Never commit secrets / service keys
+.env
+.env.*

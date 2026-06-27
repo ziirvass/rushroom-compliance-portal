@@ -99,9 +99,13 @@ supplier / reviewer / installer), and **Add document**. It's stored in the priva
 signed link. Use **Delete** on any card to remove a document (and its file).
 
 Migrating the existing library off Google Drive (one-time):
-- The seed ships the 13 documents as **Google Drive links** so nothing is lost on
-  day one. To move a file in-house, upload it via **Manage documents**, then
-  **Delete** the old Drive-linked entry.
+- **Automated (recommended):** run the migrator in [`migration/`](migration/) — it
+  pulls all 13 library files from Drive into Supabase and repoints the library in
+  one command. See [`migration/README.md`](migration/README.md). Requires the source
+  files to be link-shared and your Supabase service key.
+- **Manual:** the seed ships the 13 documents as **Google Drive links** so nothing is
+  lost on day one. To move a file in-house by hand, upload it via **Manage
+  documents**, then **Delete** the old Drive-linked entry.
 - Caveat: Google-native files (Docs/Sheets templates) aren't plain files — export
   them first (File → Download → PDF or .docx/.xlsx) and upload that. They lose live
   Google editing once they're static files in Supabase, which is the trade-off of
