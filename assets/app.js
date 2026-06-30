@@ -199,7 +199,6 @@
   }
 
   function phaseOverview(steps) {
-    const card = el("div", { class: "card phase-overview" }, el("h3", {}, "Progress by phase"));
     const list = el("div", { class: "phase-bars" });
     for (const [phase, items] of byPhase(steps)) {
       const done = items.filter((s) => s.done).length;
@@ -213,16 +212,14 @@
           el("span", { style: `width:${pct}%` })),
       ]));
     }
-    card.appendChild(list);
-    return card;
+    return collapsibleSection("__overview__", "Progress by phase", null, list);
   }
 
   function blockersPanel(steps) {
     const open = steps.filter((s) => s.presale && !s.done).sort((a, b) => a.step - b.step);
-    const card = el("div", { class: "card" }, el("h3", {}, "Pre-sale blockers"));
     if (!open.length) {
-      card.appendChild(el("p", { class: "muted", style: "margin:0" }, "None — every pre-sale step is complete."));
-      return card;
+      return collapsibleSection("__blockers__", "Pre-sale blockers", "all clear",
+        el("p", { class: "muted", style: "margin:0" }, "None — every pre-sale step is complete."));
     }
     const ul = el("ul", { class: "blockers" });
     for (const s of open) {
@@ -232,8 +229,7 @@
         statusBadge(s),
       ]));
     }
-    card.appendChild(ul);
-    return card;
+    return collapsibleSection("__blockers__", "Pre-sale blockers", `${open.length} open`, ul);
   }
 
   function priorityPill(s) {
@@ -301,6 +297,24 @@
       if (!open) { const n = d.dataset.phase; if (n) names.add(n); }
     }
     setCollapsed(open ? new Set() : names);
+  }
+
+  // Reusable collapsible block (same look/behaviour/persistence as phases).
+  function collapsibleSection(key, title, meta, contentEl) {
+    const details = el("details", { class: "phase", "data-phase": key }, [
+      el("summary", { class: "phase-summary" }, [
+        el("span", { class: "phase-name" }, title),
+        meta ? el("span", { class: "phase-meta" }, meta) : null,
+      ]),
+      el("div", { class: "phase-content" }, contentEl),
+    ]);
+    if (!getCollapsed().has(key)) details.open = true; // set before listener to avoid a spurious save
+    details.addEventListener("toggle", () => {
+      const c = getCollapsed();
+      if (details.open) c.delete(key); else c.add(key);
+      setCollapsed(c);
+    });
+    return details;
   }
 
   function phaseSections(steps, opts = {}) {
