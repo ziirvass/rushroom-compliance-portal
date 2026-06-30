@@ -252,9 +252,11 @@
     return sel;
   }
 
-  function stepsTable(steps, { showAudience = false, editable = false, onStatus = null } = {}) {
+  function stepsTable(steps, { showAudience = false, editable = false, onStatus = null, onEditStep = null, onDeleteStep = null } = {}) {
+    const manage = !!(onEditStep || onDeleteStep);
     const head = ["#", "Action", "Owner", "Status", "Priority"];
     if (showAudience) head.splice(3, 0, "Audience");
+    if (manage) head.push("");
     const tbody = el("tbody");
     for (const s of steps) {
       const cells = [
@@ -269,6 +271,10 @@
       if (showAudience) cells.push(el("td", { class: "muted" }, s.audience.join(", ") || "—"));
       cells.push(el("td", {}, editable && onStatus ? statusSelect(s, onStatus) : statusBadge(s)));
       cells.push(el("td", {}, priorityPill(s)));
+      if (manage) cells.push(el("td", { class: "step-actions" }, [
+        onEditStep ? el("button", { class: "btn btn-sm", type: "button", onclick: () => onEditStep(s) }, "Edit") : null,
+        onDeleteStep ? el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => onDeleteStep(s) }, "Delete") : null,
+      ]));
       tbody.appendChild(el("tr", {}, cells));
     }
     return el("div", { class: "table-wrap" },
@@ -485,6 +491,65 @@
     ]);
   }
 
+  // Generic accessible modal (reuses the viewer's overlay/dialog styling).
+  function openModal(title, contentEl) {
+    const lastFocus = document.activeElement;
+    const closeModal = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+    };
+    const onKey = (e) => { if (e.key === "Escape") closeModal(); };
+    const closeBtn = el("button", { class: "btn btn-sm", type: "button", onclick: closeModal }, "✕ Close");
+    const dialog = el("div", { class: "viewer-dialog", role: "dialog", "aria-modal": "true", "aria-label": title }, [
+      el("div", { class: "viewer-head" }, [el("h3", { class: "viewer-title" }, title), el("span", { class: "spacer" }), closeBtn]),
+      el("div", { class: "modal-body" }, contentEl),
+    ]);
+    const overlay = el("div", { class: "viewer-overlay", onclick: (e) => { if (e.target === overlay) closeModal(); } }, dialog);
+    document.body.appendChild(overlay);
+    document.addEventListener("keydown", onKey);
+    return closeModal;
+  }
+
+  // Add / edit a plan step (Rushroom). `existing` null = add a new step.
+  function stepEditor(existing, phases, onSave) {
+    const v = existing || {};
+    const row = (labelText, input) => el("label", { class: "form-row" }, [el("span", { class: "form-label" }, labelText), input]);
+    const phaseList = el("datalist", { id: "phase-list" }, (phases || []).map((p) => el("option", { value: p })));
+    const prioList = el("datalist", { id: "prio-list" }, ["Foundation", "High", "High — gate", "BLOCKER", "Medium", "Conditional", "Ongoing", "Annual"].map((p) => el("option", { value: p })));
+    const phase = el("input", { type: "text", value: v.phase || "", list: "phase-list", placeholder: "e.g. 11. New regulations" });
+    const action = el("textarea", { rows: "3", placeholder: "What must Rushroom do…" }, v.action || "");
+    const owner = el("input", { type: "text", value: v.owner || "", placeholder: "Who does it" });
+    const priority = el("input", { type: "text", value: v.priority || "", list: "prio-list", placeholder: "e.g. High, BLOCKER" });
+    const status = el("select", {}, STATUS_OPTIONS.map((o) => el("option", { value: o, selected: norm(o) === norm(v.status || "Open") ? "selected" : null }, o)));
+    const evidence = el("input", { type: "text", value: v.evidence || "", placeholder: "Output / evidence" });
+    const where = el("input", { type: "text", value: v.where || "", placeholder: "Where / how" });
+    const auds = ["internal", "supplier", "reviewer", "installer"].map((a) => {
+      const cb = el("input", { type: "checkbox", value: a, checked: (v.audience || ["internal"]).includes(a) ? "checked" : null });
+      return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
+    });
+    const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const save = el("button", { class: "btn btn-primary", type: "button" }, existing ? "Save changes" : "Add step");
+    const form = el("div", { class: "step-form" }, [
+      phaseList, prioList,
+      row("Phase", phase), row("Action", action), row("Owner", owner),
+      row("Priority", priority), row("Status", status), row("Evidence", evidence), row("Where / how", where),
+      el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Audience"), el("div", { class: "aud-checks" }, auds.map((c) => c.label))]),
+      note, el("div", { style: "margin-top:0.5rem" }, save),
+    ]);
+    const close = openModal(existing ? `Edit step #${existing.step}` : "Add a step", form);
+    phase.focus();
+    save.addEventListener("click", async () => {
+      const actionText = action.value.trim();
+      if (!actionText) { note.className = "up-status warn"; note.textContent = "Action text is required."; return; }
+      const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
+      const fields = { phase: phase.value.trim(), actionText, owner: owner.value.trim(), priority: priority.value.trim(), status: status.value, evidence: evidence.value.trim(), where: where.value.trim(), audience: audience.length ? audience : ["internal"] };
+      save.disabled = true; note.className = "up-status"; note.textContent = "Saving…";
+      try { await onSave(fields); close(); }
+      catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
+    });
+  }
+
   // Rushroom-only: list of supplier uploads with signed download links.
   async function uploadsReview(role) {
     if (role !== "rushroom") return null;
@@ -530,10 +595,21 @@
         try { await API.setStatus(API.getToken(role), step, status); await load(); }
         catch (ex) { sel.disabled = false; alert(`Couldn't save: ${ex.message}`); }
       };
+      const phases = [...new Set(steps.map((s) => s.phase))];
+      const saveStep = (existing) => stepEditor(existing, phases, async (fields) => {
+        if (existing) await API.updateStep(API.getToken(role), existing.step, fields);
+        else await API.addStep(API.getToken(role), fields);
+        await load();
+      });
+      const onDeleteStep = async (s) => {
+        if (!confirm(`Delete step #${s.step}: “${(s.action || "").slice(0, 60)}”?`)) return;
+        try { await API.deleteStep(API.getToken(role), s.step); await load(); }
+        catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
+      };
       const tools = el("div", { class: "row-tools" }, [
         el("button", { class: "btn btn-sm", type: "button", onclick: load }, "↻ Refresh"),
+        role === "rushroom" ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => saveStep(null) }, "+ Add step") : null,
         el("button", { class: "btn btn-sm", type: "button", onclick: () => window.print() }, "🖨 Print / Save PDF"),
-        CFG.statusSheetViewUrl ? el("a", { class: "btn btn-sm", href: CFG.statusSheetViewUrl, target: "_blank", rel: "noopener" }, "Open the plan ↗") : null,
         el("span", { class: "spacer" }),
         el("span", { class: "updated" }, `Live · signed in as ${role} · ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
@@ -546,7 +622,9 @@
         phaseOverview(steps),
         blockersPanel(steps),
         el("h2", { class: "visually-hidden" }, "Steps by phase"),
-        phaseSections(steps, { editable: true, onStatus }),
+        phaseSections(steps, role === "rushroom"
+          ? { editable: true, onStatus, onEditStep: saveStep, onDeleteStep }
+          : { editable: true, onStatus }),
       ]);
       mount.replaceChildren(...frag.childNodes);
 

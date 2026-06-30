@@ -160,6 +160,57 @@ Deno.serve(async (req) => {
     return json({ ok: true, step, status });
   }
 
+  // --- action-plan management (Rushroom only) -----------------------------
+  if (action === "addStep") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    // NB: the step's action text travels as `actionText` to avoid colliding with
+    // the request router field `action`.
+    const action_ = String(body.actionText ?? "").trim();
+    if (!action_) return json({ error: "action text required" }, 400);
+    const { data: maxRow } = await db.from("steps").select("step").order("step", { ascending: false }).limit(1).maybeSingle();
+    const step = (maxRow?.step ?? 0) + 1;
+    const audience = Array.isArray(body.audience) && body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
+    const { error } = await db.from("steps").insert({
+      step,
+      phase: String(body.phase ?? "Unphased").slice(0, 120) || "Unphased",
+      action: action_.slice(0, 1000),
+      owner: String(body.owner ?? "").slice(0, 200),
+      where_how: String(body.where ?? "").slice(0, 300),
+      evidence: String(body.evidence ?? "").slice(0, 400),
+      folder: String(body.folder ?? "").slice(0, 80),
+      priority: String(body.priority ?? "").slice(0, 80),
+      status: String(body.status ?? "Open").slice(0, 80) || "Open",
+      audience,
+      updated_by: "rushroom",
+    });
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true, step });
+  }
+
+  if (action === "updateStep") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const step = Number(body.step);
+    if (!step) return json({ error: "step required" }, 400);
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString(), updated_by: "rushroom" };
+    const limits: Record<string, number> = { phase: 120, owner: 200, priority: 80, status: 80, evidence: 400, folder: 80 };
+    for (const k of Object.keys(limits)) if (body[k] !== undefined) patch[k] = String(body[k]).slice(0, limits[k]);
+    if (body.actionText !== undefined) patch.action = String(body.actionText).slice(0, 1000);
+    if (body.where !== undefined) patch.where_how = String(body.where).slice(0, 300);
+    if (Array.isArray(body.audience)) patch.audience = body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
+    const { error } = await db.from("steps").update(patch).eq("step", step);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true, step });
+  }
+
+  if (action === "deleteStep") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const step = Number(body.step);
+    if (!step) return json({ error: "step required" }, 400);
+    const { error } = await db.from("steps").delete().eq("step", step);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
   if (action === "uploadUrl") {
     const path = `${role}/${Date.now()}-${safeName(String(body.fileName ?? "file"))}`;
     const { data, error } = await db.storage.from(BUCKET).createSignedUploadUrl(path);

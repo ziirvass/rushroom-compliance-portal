@@ -38,6 +38,12 @@
     setStatus: (token, step, status, supplierLabel) =>
       call({ action: "setStatus", token, step, status, supplierLabel }),
 
+    // Rushroom-only action-plan management. `fields` carries the step's action
+    // text as `actionText` (not `action`, which is the request router field).
+    addStep: (token, fields) => call({ action: "addStep", token, ...fields }),
+    updateStep: (token, step, fields) => call({ action: "updateStep", token, step, ...fields }),
+    deleteStep: (token, step) => call({ action: "deleteStep", token, step }),
+
     listUploads: (token) => call({ action: "uploads", token }),
 
     /* Upload a File: ask the function for a signed URL, PUT the bytes straight
