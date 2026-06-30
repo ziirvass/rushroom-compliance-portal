@@ -147,7 +147,7 @@ main { padding-top: 1.75rem; }
 .s-progress{ color: var(--amber); background: var(--amber-bg); border-color: var(--amber-bd); }
 .s-blocked { color: var(--red);   background: var(--red-bg);   border-color: var(--red-bd); }
 .s-todo    { color: var(--gray);  background: var(--gray-bg);  border-color: var(--gray-bd); }
-.pill-presale { color: var(--amber); border: 1px solid var(--amber-bd); border-radius: 999px; padding: 0 0.45rem; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; }
+.pill-presale { display: inline-block; white-space: nowrap; color: var(--amber); border: 1px solid var(--amber-bd); border-radius: 999px; padding: 0 0.45rem; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; }
 
 /* tables */
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
