@@ -317,12 +317,16 @@
     return details;
   }
 
-  function phaseSections(steps, opts = {}) {
-    const collapsed = getCollapsed();
-    const frag = el("div", {}, el("div", { class: "phase-tools" }, [
+  function phaseToolbar() {
+    return el("div", { class: "phase-tools" }, [
       el("button", { class: "btn btn-sm", type: "button", onclick: () => setAllPhases(true) }, "⊞ Expand all"),
       el("button", { class: "btn btn-sm", type: "button", onclick: () => setAllPhases(false) }, "⊟ Collapse all"),
-    ]));
+    ]);
+  }
+
+  function phaseSections(steps, opts = {}) {
+    const collapsed = getCollapsed();
+    const frag = el("div");
     for (const [phase, items] of byPhase(steps)) {
       const done = items.filter((s) => s.done).length;
       const pct = items.length ? Math.round((done / items.length) * 100) : 0;
@@ -661,6 +665,7 @@
           : "Signed in as a supplier — update the status of your steps and upload documents; changes save instantly."),
         tools,
         summaryTiles(steps),
+        phaseToolbar(),
         phaseOverview(steps),
         blockersPanel(steps),
         el("h2", { class: "visually-hidden" }, "Steps by phase"),
@@ -689,7 +694,7 @@
   /* ---------------- expose shared API ---------------- */
   window.Portal = {
     CFG, $, $$, el, portalHash, setupGate, loadSteps, norm,
-    summaryTiles, phaseOverview, blockersPanel, phaseSections, stepsTable, documentLibrary,
+    summaryTiles, phaseOverview, phaseToolbar, blockersPanel, phaseSections, stepsTable, documentLibrary,
     sourceNotice, wireTabs, statusBadge,
     apiEnabled, setupApiGate, renderApi,
   };
@@ -722,6 +727,7 @@
         sourceNotice(source),
         tools,
         summaryTiles(steps),
+        phaseToolbar(),
         phaseOverview(steps),
         blockersPanel(steps),
         el("h2", { class: "visually-hidden" }, "Steps by phase"),
