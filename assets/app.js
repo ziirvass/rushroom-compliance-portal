@@ -290,14 +290,42 @@
     return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
   }
 
+  /* Collapsed-phase memory (persists which phases are folded, across reloads). */
+  const COLLAPSE_KEY = "rushroom_portal_collapsed_phases";
+  function getCollapsed() { try { return new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]")); } catch { return new Set(); } }
+  function setCollapsed(set) { try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...set])); } catch { /* ignore */ } }
+  function setAllPhases(open) {
+    const names = new Set();
+    for (const d of $$("details.phase")) {
+      d.open = open;
+      if (!open) { const n = d.dataset.phase; if (n) names.add(n); }
+    }
+    setCollapsed(open ? new Set() : names);
+  }
+
   function phaseSections(steps, opts = {}) {
-    const frag = el("div");
+    const collapsed = getCollapsed();
+    const frag = el("div", {}, el("div", { class: "phase-tools" }, [
+      el("button", { class: "btn btn-sm", type: "button", onclick: () => setAllPhases(true) }, "⊞ Expand all"),
+      el("button", { class: "btn btn-sm", type: "button", onclick: () => setAllPhases(false) }, "⊟ Collapse all"),
+    ]));
     for (const [phase, items] of byPhase(steps)) {
       const done = items.filter((s) => s.done).length;
-      frag.appendChild(el("section", { class: "phase" }, [
-        el("h3", {}, [phase, " ", el("span", { class: "phase-meta" }, `(${done}/${items.length} done)`)]),
+      const pct = items.length ? Math.round((done / items.length) * 100) : 0;
+      const details = el("details", { class: "phase", "data-phase": phase }, [
+        el("summary", { class: "phase-summary" }, [
+          el("span", { class: "phase-name" }, phase),
+          el("span", { class: "phase-meta" }, `${done}/${items.length} done · ${pct}%`),
+        ]),
         stepsTable(items.sort((a, b) => a.step - b.step), opts),
-      ]));
+      ]);
+      if (!collapsed.has(phase)) details.open = true; // set before listener to avoid a spurious save
+      details.addEventListener("toggle", () => {
+        const c = getCollapsed();
+        if (details.open) c.delete(phase); else c.add(phase);
+        setCollapsed(c);
+      });
+      frag.appendChild(details);
     }
     return frag;
   }
