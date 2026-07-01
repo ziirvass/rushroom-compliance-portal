@@ -96,7 +96,7 @@
       return path;
     },
 
-    // Upload a new version of an existing operational document (previous versions kept).
+    // Upload a new version of an existing document (previous versions kept).
     async uploadDocumentVersion(token, file, { documentId, version, notes } = {}) {
       const { signedUrl, path } = await call({ action: "docUploadUrl", token, fileName: file.name });
       const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
@@ -105,16 +105,20 @@
       return path;
     },
 
-    suggestDocumentVersion(token, { documentId, notes, preferredVersion } = {}) {
-      return call({ action: "suggestDocumentVersion", token, documentId, notes, preferredVersion });
+    createOperationalDocumentFromTemplate(token, { templateDocumentId, name, version, notes } = {}) {
+      return call({ action: "createOperationalDocumentFromTemplate", token, templateDocumentId, name, version, notes });
     },
 
-    async publishDocumentDraft(token, { documentId, version, notes, draftText, fileName, approvedChanges } = {}) {
+    suggestDocumentVersion(token, { documentId, templateDocumentId, notes, preferredVersion, sourceStandardIds = [] } = {}) {
+      return call({ action: "suggestDocumentVersion", token, documentId, templateDocumentId, notes, preferredVersion, sourceStandardIds });
+    },
+
+    async publishDocumentDraft(token, { documentId, newDocumentName, templateDocumentId, category, audience, version, notes, draftText, fileName, approvedChanges } = {}) {
       const { signedUrl, path } = await call({ action: "docUploadUrl", token, fileName: fileName || "draft.md" });
       const body = new Blob([draftText || ""], { type: "text/markdown;charset=utf-8" });
       const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": "text/markdown;charset=utf-8" }, body });
       if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
-      await call({ action: "publishDocumentDraft", token, documentId, version, notes, draftText, fileName, approvedChanges, path });
+      await call({ action: "publishDocumentDraft", token, documentId, newDocumentName, templateDocumentId, category, audience, version, notes, draftText, fileName, approvedChanges, path });
       return path;
     },
   };

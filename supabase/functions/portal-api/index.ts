@@ -234,16 +234,14 @@ Deno.serve(async (req) => {
     // Attach an "open" link: a short-lived signed URL for files stored here, or
     // the external URL for legacy/Drive-linked documents.
     const docs = await Promise.all(d.map(async (doc) => {
-      // Operational documents are version-managed: attach the version history
-      // (newest first) with signed links, and use the latest as the current file.
+      // Documents are version-managed: attach the version history (newest first)
+      // with signed links, and use the latest as the current file.
       let versions: any[] = [];
-      if (doc.kind === "operational") {
-        const { data: vs } = await db.from("document_versions").select("*").eq("document_id", doc.id).order("created_at", { ascending: false });
-        versions = await Promise.all((vs ?? []).map(async (v) => {
-          const { data: s } = await db.storage.from(DOC_BUCKET).createSignedUrl(v.storage_path, 60 * 60);
-          return { ...v, open_url: s?.signedUrl ?? "" };
-        }));
-      }
+      const { data: vs } = await db.from("document_versions").select("*").eq("document_id", doc.id).order("created_at", { ascending: false });
+      versions = await Promise.all((vs ?? []).map(async (v) => {
+        const { data: s } = await db.storage.from(DOC_BUCKET).createSignedUrl(v.storage_path, 60 * 60);
+        return { ...v, open_url: s?.signedUrl ?? "" };
+      }));
       let open_url = "";
       if (versions.length) open_url = versions[0].open_url;
       else if (doc.storage_path) { const { data: s } = await db.storage.from(DOC_BUCKET).createSignedUrl(doc.storage_path, 60 * 60); open_url = s?.signedUrl ?? ""; }
@@ -366,12 +364,51 @@ Deno.serve(async (req) => {
       audience,
     }).select("id").maybeSingle();
     if (error) return json({ error: error.message }, 500);
-    // Operational docs are version-managed — record the first version.
-    if (kind === "operational" && storagePath && doc) {
+    // All documents are version-managed from the first upload onward.
+    if (doc?.id) {
+      const versionLabel = String(body.version ?? "").slice(0, 80);
+      const fileName = String(body.fileName ?? "file").slice(0, 200);
+      if (storagePath || versionLabel || fileName) {
+        await db.from("document_versions").insert({
+          document_id: doc.id, version: versionLabel,
+          file_name: fileName, storage_path: storagePath,
+          notes: String(body.notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
+        });
+      }
+    }
+    return json({ ok: true, id: doc?.id });
+  }
+
+  if (action === "createOperationalDocumentFromTemplate") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const templateDocumentId = String(body.templateDocumentId ?? "");
+    if (!templateDocumentId) return json({ error: "templateDocumentId required" }, 400);
+
+    const { data: templateDoc, error: templateErr } = await db.from("documents").select("id,name,category,url,storage_path,audience").eq("id", templateDocumentId).maybeSingle();
+    if (templateErr || !templateDoc) return json({ error: "Template not found" }, 404);
+
+    const name = String(body.name ?? "").trim() || `${templateDoc.name || "Template"} — As Operates`;
+    const audience = Array.isArray(templateDoc.audience) && templateDoc.audience.length ? templateDoc.audience : ["internal"];
+    const { data: doc, error } = await db.from("documents").insert({
+      category: String(templateDoc.category ?? "Uncategorised").slice(0, 80),
+      name: name.slice(0, 200),
+      url: String(templateDoc.url ?? "").slice(0, 1000),
+      storage_path: String(templateDoc.storage_path ?? "").slice(0, 400),
+      kind: "operational",
+      audience,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 500);
+
+    const version = String(body.version ?? "v1").trim() || "v1";
+    const notes = String(body.notes ?? "").slice(0, 1000);
+    if (doc?.id && templateDoc.storage_path) {
       await db.from("document_versions").insert({
-        document_id: doc.id, version: String(body.version ?? "").slice(0, 80),
-        file_name: String(body.fileName ?? "file").slice(0, 200), storage_path: storagePath,
-        notes: String(body.notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
+        document_id: doc.id,
+        version: version.slice(0, 80),
+        file_name: String(templateDoc.name || "template").slice(0, 200),
+        storage_path: templateDoc.storage_path,
+        notes,
+        uploaded_by: "rushroom",
       });
     }
     return json({ ok: true, id: doc?.id });
@@ -379,25 +416,53 @@ Deno.serve(async (req) => {
 
   if (action === "suggestDocumentVersion") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const document_id = String(body.documentId ?? "");
-    if (!document_id) return json({ error: "documentId required" }, 400);
+    const document_id = String(body.documentId ?? "").trim();
+    const templateDocumentId = String(body.templateDocumentId ?? "").trim();
     const context = String(body.notes ?? "").trim();
     const preferredVersion = String(body.preferredVersion ?? "").trim();
+    const sourceStandardIds = Array.isArray(body.sourceStandardIds) ? body.sourceStandardIds.filter((v: unknown) => String(v ?? "").trim()) : [];
 
-    const { data: doc, error: docErr } = await db.from("documents").select("id,name,kind").eq("id", document_id).maybeSingle();
-    if (docErr || !doc) return json({ error: "Document not found" }, 404);
-    const { data: latest } = await db.from("document_versions").select("*", { count: "exact" }).eq("document_id", document_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-    const storagePath = latest?.storage_path || "";
-    const fileName = latest?.file_name || doc.name || "document";
-    if (!storagePath) return json({ error: "No uploaded file found for this document yet" }, 400);
+    let doc: any = null;
+    let storagePath = "";
+    let fileName = "document";
+    if (document_id) {
+      const { data: foundDoc, error: docErr } = await db.from("documents").select("id,name,kind").eq("id", document_id).maybeSingle();
+      if (docErr || !foundDoc) return json({ error: "Document not found" }, 404);
+      doc = foundDoc;
+      const { data: latest } = await db.from("document_versions").select("*").eq("document_id", document_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      storagePath = latest?.storage_path || "";
+      fileName = latest?.file_name || doc.name || "document";
+    } else if (templateDocumentId) {
+      const { data: foundDoc } = await db.from("documents").select("id,name,kind").eq("id", templateDocumentId).maybeSingle();
+      if (foundDoc) {
+        doc = foundDoc;
+        const { data: latest } = await db.from("document_versions").select("*").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        storagePath = latest?.storage_path || "";
+        fileName = latest?.file_name || doc.name || "document";
+      }
+    }
 
-    const content: any[] = [{ type: "text", text: "You are helping Rushroom update a compliance-operational document. Draft the next version using the supplied document and the user's change request. Return strict JSON matching the requested schema." }];
+    const content: any[] = [{ type: "text", text: "You are helping Rushroom create or update a compliance-operational document. Draft the next version using the supplied source material and the user's change request. Return strict JSON matching the requested schema." }];
     if (context) content.push({ type: "text", text: `\nChange request / context:\n${context}` });
     if (preferredVersion) content.push({ type: "text", text: `\nPreferred version label:\n${preferredVersion}` });
-    content.push({ type: "text", text: "\n=== CURRENT DOCUMENT ===" });
-    content.push(await fileBlock(DOC_BUCKET, storagePath, fileName));
+    if ((document_id || templateDocumentId) && storagePath) {
+      content.push({ type: "text", text: "\n=== CURRENT DOCUMENT ===" });
+      content.push(await fileBlock(DOC_BUCKET, storagePath, fileName));
+    }
+    if (sourceStandardIds.length) {
+      content.push({ type: "text", text: "\n=== REFERENCE STANDARDS & REGULATIONS ===" });
+      for (const standardId of sourceStandardIds) {
+        const { data: standard } = await db.from("standards").select("id,code,title,category").eq("id", standardId).maybeSingle();
+        if (!standard) continue;
+        const { data: latestVersion } = await db.from("standard_versions").select("*").eq("standard_id", standard.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        content.push({ type: "text", text: `\n--- STANDARD: ${standard.code || standard.title || "standard"}${standard.title ? ` — ${standard.title}` : ""}${standard.category ? ` [${standard.category}]` : ""} ---` });
+        if (latestVersion?.storage_path) content.push(await fileBlock(STD_BUCKET, latestVersion.storage_path, latestVersion.file_name || standard.code || "standard"));
+        else content.push({ type: "text", text: "(no uploaded file for this standard yet)" });
+      }
+    }
+    if (!document_id && !templateDocumentId && !sourceStandardIds.length) return json({ error: "Provide either a current document, a template, or at least one source standard/regulation." }, 400);
 
-    const system = `You are an expert compliance-document editor for Rushroom AB. Review the supplied operational document and produce a practical next version draft. Keep it concise, professional, and suitable for compliance use. If the document contains outdated wording, add clear improvement suggestions. Return a JSON object with:
+    const system = `You are an expert compliance-document editor for Rushroom AB. Review the supplied source material and produce a practical next version draft. Keep it concise, professional, and suitable for compliance use. If the document contains outdated wording, add clear improvement suggestions. When reference standards/regulations are supplied, reflect their relevant requirements and terminology. Return a JSON object with:
 - summary: a short explanation of the proposed update
 - proposed_changes: an array of objects with title, description, rationale
 - draft_text: a full draft of the updated document in plain markdown
@@ -442,16 +507,41 @@ Deno.serve(async (req) => {
 
   if (action === "publishDocumentDraft") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const document_id = String(body.documentId ?? "");
+    const document_id = String(body.documentId ?? "").trim();
     const path = String(body.path ?? "");
     const draftText = String(body.draftText ?? "");
     const fileName = String(body.fileName ?? "draft.md");
-    if (!document_id || !path || !draftText.trim()) return json({ error: "documentId, path, draftText required" }, 400);
+    if (!path || !draftText.trim()) return json({ error: "path and draftText required" }, 400);
 
     const approvedChanges = Array.isArray(body.approvedChanges) ? body.approvedChanges : [];
     const noteText = [String(body.notes ?? "").slice(0, 1000), approvedChanges.length ? `Approved changes: ${approvedChanges.join(", ")}` : ""].filter(Boolean).join("\n");
+
+    let targetDocumentId = document_id;
+    if (!targetDocumentId) {
+      const name = String(body.newDocumentName ?? "").trim() || "New As Operates";
+      const templateDocumentId = String(body.templateDocumentId ?? "").trim();
+      const category = String(body.category ?? "").trim() || (templateDocumentId ? "Uncategorised" : "Uncategorised");
+      const audience = Array.isArray(body.audience) && body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
+      let templateDoc: any = null;
+      if (templateDocumentId) {
+        const { data: found } = await db.from("documents").select("id,category,audience,storage_path").eq("id", templateDocumentId).maybeSingle();
+        templateDoc = found;
+      }
+      const { data: doc, error: insertErr } = await db.from("documents").insert({
+        category: String(templateDoc?.category ?? category).slice(0, 80),
+        name: name.slice(0, 200),
+        url: "",
+        storage_path: path,
+        kind: "operational",
+        audience: Array.isArray(templateDoc?.audience) && templateDoc.audience.length ? templateDoc.audience : audience,
+      }).select("id").maybeSingle();
+      if (insertErr) return json({ error: insertErr.message }, 500);
+      targetDocumentId = doc?.id || "";
+    }
+    if (!targetDocumentId) return json({ error: "documentId or newDocumentName required" }, 400);
+
     const { error: insertErr } = await db.from("document_versions").insert({
-      document_id,
+      document_id: targetDocumentId,
       version: String(body.version ?? "AI draft").slice(0, 80),
       file_name: fileName.slice(0, 200),
       storage_path: path,
@@ -459,8 +549,8 @@ Deno.serve(async (req) => {
       uploaded_by: "rushroom",
     });
     if (insertErr) return json({ error: insertErr.message }, 500);
-    await db.from("documents").update({ storage_path: path }).eq("id", document_id);
-    return json({ ok: true });
+    await db.from("documents").update({ storage_path: path }).eq("id", targetDocumentId);
+    return json({ ok: true, id: targetDocumentId });
   }
 
   if (action === "addDocumentVersion") {
@@ -507,14 +597,7 @@ Deno.serve(async (req) => {
 
   if (action === "deleteDocument") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const id = String(body.id ?? "");
-    if (!id) return json({ error: "id required" }, 400);
-    const { data: doc } = await db.from("documents").select("kind,storage_path").eq("id", id).maybeSingle();
-    if (doc?.kind === "operational") return json({ error: "Operational documents are version-managed and cannot be deleted — upload a new version instead." }, 400);
-    if (doc?.storage_path) await db.storage.from(DOC_BUCKET).remove([doc.storage_path]);
-    const { error } = await db.from("documents").delete().eq("id", id);
-    if (error) return json({ error: error.message }, 500);
-    return json({ ok: true });
+    return json({ error: "Documents are version-controlled and cannot be deleted. Create a new version instead." }, 400);
   }
 
   // --- Standards & Regulations register -----------------------------------

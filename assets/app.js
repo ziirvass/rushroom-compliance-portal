@@ -364,7 +364,7 @@
 
   // Two top-level sections (the second dimension), each grouped by category.
   const DOC_KINDS = [
-    ["template", "Templates & Requirements", "Reference inputs to the work — not audited by the AI scan."],
+    ["template", "Templates & Requirements", "Reference inputs to the work — version-controlled and reusable as starting points."],
     ["operational", "Company as Operates", "The actual operational documentation the AI deviation scan checks against the standards."],
   ];
   function documentLibrary(audienceFilter, docsInput, opts = {}) {
@@ -373,23 +373,18 @@
     const wrap = el("div");
     if (!docs.length) { wrap.appendChild(el("div", { class: "empty" }, "No documents listed yet.")); return wrap; }
 
-    const kindSelect = (d) => {
-      const sel = el("select", { class: "doc-kind", "aria-label": `Section for ${d.name}` },
-        DOC_KINDS.map(([k]) => el("option", { value: k, selected: (d.kind || "template") === k ? "selected" : null },
-          k === "template" ? "Templates & req." : "Company as operates")));
-      sel.addEventListener("change", () => opts.onKind(d, sel.value));
-      return sel;
+    const openViewer = (d) => {
+      if (!window.PortalViewer) return;
+      window.PortalViewer.open({ name: d.name, open_url: d.open_url || d.url, storage_path: d.storage_path || d.name });
     };
-    const openViewer = (name, url) => window.PortalViewer && window.PortalViewer.open({ name, open_url: url, storage_path: name });
-    // Operational document — version-managed (current + history), never deleted.
-    const renderOpDoc = (d) => {
+    const renderDoc = (d) => {
       const versions = d.versions || [];
       const current = versions[0];
       const currentRow = current
         ? el("div", { class: "std-current" }, [
             el("span", { class: "std-vlabel" }, `Current${current.version ? `: ${current.version}` : ""}`),
             el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
-            current.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer(current.file_name, current.open_url) }, "View") : null,
+            current.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer({ ...d, open_url: current.open_url, storage_path: current.storage_path || d.storage_path }) }, "View") : null,
           ])
         : el("div", { class: "std-current muted" }, "No file uploaded yet.");
       const history = versions.length
@@ -399,41 +394,29 @@
               el("div", {}, [
                 el("span", { class: "std-vlabel" }, v.version || "—"),
                 el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
-                v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer(v.file_name, v.open_url) }, "View") : null,
+                v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer({ ...d, open_url: v.open_url, storage_path: v.storage_path || d.storage_path, name: v.file_name || d.name }) }, "View") : null,
               ]),
               v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
             ]))),
           ])
         : null;
+      const link = d.open_url || d.url;
+      const viewAction = link
+        ? (window.PortalViewer
+          ? el("button", { class: "open", type: "button", onclick: () => openViewer(d) }, "View")
+          : el("a", { class: "open", href: link, target: "_blank", rel: "noopener" }, "Open ↗"))
+        : el("span", { class: "pending" }, "link pending");
+      const actions = [
+        opts.manage && opts.onNewVersion && d.id ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => opts.onNewVersion(d) }, "+ New version") : null,
+        opts.manage && opts.onDraft && d.id && (d.kind || "template") === "operational" ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onDraft(d) }, "AI draft") : null,
+        opts.manage && opts.onCreateOperational && d.id && (d.kind || "template") === "template" ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onCreateOperational(d) }, "Create as-operates") : null,
+        viewAction,
+      ].filter(Boolean);
       return el("div", { class: "doc doc-op" }, [
         el("div", {}, [el("div", { class: "name" }, d.name), el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`)]),
         currentRow,
         history,
-        el("div", { class: "doc-actions" }, [
-          opts.manage && opts.onNewVersion && d.id ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => opts.onNewVersion(d) }, "+ New version") : null,
-          opts.manage && opts.onDraft && d.id ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onDraft(d) }, "AI draft") : null,
-          opts.manage && opts.onKind && d.id ? kindSelect(d) : null,
-        ]),
-      ]);
-    };
-    const renderDoc = (d) => {
-      if ((d.kind || "template") === "operational") return renderOpDoc(d);
-      const link = d.open_url || d.url;
-      const ext = (d.storage_path || "").split(".").pop().toLowerCase();
-      const canView = !!d.storage_path && !!window.PortalViewer && ["pdf", "docx", "xlsx", "xls", "csv"].includes(ext);
-      return el("div", { class: "doc" }, [
-        el("div", {}, [
-          el("div", { class: "name" }, d.name),
-          el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`),
-        ]),
-        el("div", { class: "doc-actions" }, [
-          opts.manage && opts.onDraft && d.id ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onDraft(d) }, "AI draft") : null,
-          canView
-            ? el("button", { class: "open", type: "button", onclick: () => window.PortalViewer.open(d) }, "View")
-            : (link ? el("a", { class: "open", href: link, target: "_blank", rel: "noopener" }, "Open ↗") : el("span", { class: "pending" }, "link pending")),
-          opts.manage && opts.onKind && d.id ? kindSelect(d) : null,
-          opts.manage && opts.onDelete && d.id ? el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => opts.onDelete(d) }, "Delete") : null,
-        ]),
+        el("div", { class: "doc-actions" }, actions),
       ]);
     };
 
@@ -610,7 +593,7 @@
     });
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Manage documents"),
-      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file into the library — stored in Supabase, no Google Drive needed. Tick who should see it."),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file as a versioned document. Templates can later become As Operates documents without deleting anything."),
       el("div", { class: "upload-fields" }, [file, name, category, kind]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
       el("div", { style: "margin-top:0.75rem" }, btn),
@@ -618,7 +601,16 @@
     ]);
   }
 
-  // Upload a new version of an operational document (previous versions kept).
+  function createOperationalFromTemplate(templateDoc, role, reload) {
+    documentDraftAssistant(null, role, reload, {
+      templateDoc,
+      title: `Create As Operates — ${templateDoc.name || "template"}`,
+      initialName: `${templateDoc.name || "Template"} — As Operates`,
+      mode: "create",
+    });
+  }
+
+  // Upload a new version of a document (previous versions kept).
   function documentVersionEditor(d, role, reload) {
     const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose the new version file" });
     const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. 2026-07 or Rev B)" });
@@ -644,7 +636,11 @@
     });
   }
 
-  function documentDraftAssistant(d, role, reload) {
+  function documentDraftAssistant(d, role, reload, options = {}) {
+    const templateDoc = options.templateDoc || null;
+    const isCreateMode = options.mode === "create" || !d;
+    const defaultName = options.initialName || (d ? d.name : "New As Operates");
+    const name = el("input", { type: "text", class: "up-text", value: defaultName, placeholder: "Name of the As Operates document", "aria-label": "As Operates document name" });
     const notes = el("textarea", { rows: "3", placeholder: "Describe the intended changes, new requirements, or process updates to reflect in the next version" });
     const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. Rev C or 2026-08)" });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
@@ -652,27 +648,71 @@
     const publish = el("button", { class: "btn btn-primary", type: "button" }, "Publish approved draft");
     const changeList = el("div", { style: "margin-top:0.75rem" });
     const draft = el("textarea", { rows: "12", style: "width:100%; margin-top:0.75rem", placeholder: "The AI-generated draft will appear here" });
+    const standardsWrap = el("div", { style: "margin-top:0.75rem" });
     publish.disabled = true;
     let draftResult = null;
 
     const form = el("div", { class: "step-form" }, [
+      isCreateMode ? el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document name"), name]) : null,
+      templateDoc ? el("div", { class: "muted", style: "margin-bottom:0.5rem" }, `Template source: ${templateDoc.name || "template"}`) : null,
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Context"), notes]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
+      el("div", { style: "margin-top:0.65rem" }, [
+        el("div", { class: "muted", style: "margin-bottom:0.35rem" }, "Reference one or more standards/regulations from the register. These must already exist in the Standards & Regulations section first."),
+        standardsWrap,
+      ]),
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem" }, [generate, publish]),
       status,
       el("div", { style: "margin-top:1rem" }, [el("strong", {}, "Suggested changes"), changeList]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Draft text"), draft]),
-    ]);
+    ].filter(Boolean));
 
-    const close = openModal(`AI draft — ${d.name}`, form);
-    notes.focus();
+    const close = openModal(options.title || (d ? `AI draft — ${d.name}` : "AI draft — New As Operates"), form);
+    (isCreateMode ? name : notes).focus();
+
+    const loadStandards = async () => {
+      standardsWrap.replaceChildren(el("div", { class: "muted" }, "Loading standards…"));
+      try {
+        const payload = await API.standards(API.getToken(role));
+        const standards = (payload.standards || []).filter((s) => Array.isArray(s.versions) && s.versions.length);
+        if (!standards.length) {
+          standardsWrap.replaceChildren(el("div", { class: "muted" }, "No uploaded standards or regulations are available yet. Add them in the Standards & Regulations section first."));
+          return;
+        }
+        const list = el("div", { style: "display:grid; gap:0.4rem; margin-top:0.2rem" });
+        for (const std of standards) {
+          const latest = std.versions && std.versions[0];
+          const label = el("label", { style: "display:flex; gap:0.5rem; align-items:flex-start; margin-bottom:0.2rem" }, [
+            el("input", { type: "checkbox", value: std.id }),
+            el("span", {}, [
+              el("strong", {}, std.code || std.title || "Standard"),
+              el("div", { class: "muted", style: "font-size:0.82rem; margin-top:0.1rem" }, `${std.title || ""}${latest?.version ? ` · ${latest.version}` : ""}`),
+            ]),
+          ]);
+          list.appendChild(label);
+        }
+        standardsWrap.replaceChildren(list);
+      } catch (ex) {
+        standardsWrap.replaceChildren(el("div", { class: "error" }, `Couldn't load standards: ${ex.message}`));
+      }
+    };
+    loadStandards();
 
     generate.addEventListener("click", async () => {
       const context = notes.value.trim();
-      if (!context) { status.className = "up-status warn"; status.textContent = "Add a bit of context first so the draft can be meaningful."; return; }
+      const selectedStandardIds = Array.from(standardsWrap.querySelectorAll("input[type='checkbox']:checked")).map((cb) => cb.value);
+      if (!context && !selectedStandardIds.length && !templateDoc && !d) {
+        status.className = "up-status warn"; status.textContent = "Add a bit of context or choose one or more standards/regulations first."; return;
+      }
       generate.disabled = true; publish.disabled = true; status.className = "up-status"; status.textContent = "Generating draft…";
       try {
-        draftResult = await API.suggestDocumentVersion(API.getToken(role), { documentId: d.id, notes: context, preferredVersion: version.value.trim() });
+        draftResult = await API.suggestDocumentVersion(API.getToken(role), {
+          documentId: d ? d.id : null,
+          templateDocumentId: templateDoc ? templateDoc.id : null,
+          notes: context,
+          preferredVersion: version.value.trim(),
+          sourceStandardIds: selectedStandardIds,
+        });
         const proposals = Array.isArray(draftResult.proposedChanges) ? draftResult.proposedChanges : [];
         changeList.replaceChildren();
         if (proposals.length) {
@@ -709,11 +749,13 @@
       publish.disabled = true; status.className = "up-status"; status.textContent = "Publishing draft…";
       try {
         await API.publishDocumentDraft(API.getToken(role), {
-          documentId: d.id,
+          documentId: d ? d.id : null,
+          newDocumentName: isCreateMode ? name.value.trim() : null,
+          templateDocumentId: templateDoc ? templateDoc.id : null,
           version: version.value.trim() || draftResult.versionHint || "AI draft",
           notes: `Approved changes: ${approved.join(", ") || "none"}\n${notes.value.trim()}`,
           draftText: finalText,
-          fileName: `${(d.name || "document").replace(/[^a-z0-9._-]+/gi, "_") || "document"}.md`,
+          fileName: `${((isCreateMode ? name.value.trim() : (d ? d.name : "document")) || "document").replace(/[^a-z0-9._-]+/gi, "_") || "document"}.md`,
           approvedChanges: approved,
         });
         close(); await reload();
@@ -1066,21 +1108,13 @@
       ]);
       mount.replaceChildren(...frag.childNodes);
 
-      const onDelete = async (d) => {
-        if (!confirm(`Delete “${d.name}” from the library?`)) return;
-        try { await API.deleteDocument(API.getToken(role), d.id); await load(); }
-        catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
-      };
-      const onKind = async (d, kind) => {
-        try { await API.updateDocument(API.getToken(role), d.id, { kind }); await load(); }
-        catch (ex) { alert(`Couldn't move document: ${ex.message}`); }
-      };
       const onNewVersion = (d) => documentVersionEditor(d, role, load);
       const onDraft = (d) => documentDraftAssistant(d, role, load);
+      const onCreateOperational = (d) => createOperationalFromTemplate(d, role, load);
       const docsPanel = $("#documents-panel");
       docsPanel.replaceChildren(el("div", {}, [
         role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load),
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onDelete, onKind, onNewVersion, onDraft }),
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onDraft, onCreateOperational }),
       ].filter(Boolean)));
       const review = await uploadsReview(role, load);
       if (review) docsPanel.appendChild(review);
