@@ -362,39 +362,64 @@
     return frag;
   }
 
+  // Two top-level sections (the second dimension), each grouped by category.
+  const DOC_KINDS = [
+    ["template", "Templates & Requirements", "Reference inputs to the work — not audited by the AI scan."],
+    ["operational", "Company as Operates", "The actual operational documentation the AI deviation scan checks against the standards."],
+  ];
   function documentLibrary(audienceFilter, docsInput, opts = {}) {
     const source = docsInput || CFG.documents || [];
     const docs = source.filter((d) => !audienceFilter || (d.audience || []).includes(audienceFilter));
     const wrap = el("div");
     if (!docs.length) { wrap.appendChild(el("div", { class: "empty" }, "No documents listed yet.")); return wrap; }
-    const cats = new Map();
-    for (const d of docs) { if (!cats.has(d.category)) cats.set(d.category, []); cats.get(d.category).push(d); }
-    for (const [cat, items] of cats) {
-      const group = el("div", { class: "doc-group" }, el("h3", {}, cat));
-      const grid = el("div", { class: "docs" });
-      for (const d of items) {
-        const link = d.open_url || d.url;
-        const ext = (d.storage_path || "").split(".").pop().toLowerCase();
-        const canView = !!d.storage_path && !!window.PortalViewer && ["pdf", "docx", "xlsx", "xls", "csv"].includes(ext);
-        grid.appendChild(el("div", { class: "doc" }, [
-          el("div", {}, [
-            el("div", { class: "name" }, d.name),
-            el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`),
-          ]),
-          el("div", { class: "doc-actions" }, [
-            canView
-              ? el("button", { class: "open", type: "button", onclick: () => window.PortalViewer.open(d) }, "View")
-              : (link
-                  ? el("a", { class: "open", href: link, target: "_blank", rel: "noopener" }, "Open ↗")
-                  : el("span", { class: "pending" }, "link pending")),
-            opts.manage && opts.onDelete && d.id
-              ? el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => opts.onDelete(d) }, "Delete")
-              : null,
-          ]),
-        ]));
+
+    const kindSelect = (d) => {
+      const sel = el("select", { class: "doc-kind", "aria-label": `Section for ${d.name}` },
+        DOC_KINDS.map(([k]) => el("option", { value: k, selected: (d.kind || "template") === k ? "selected" : null },
+          k === "template" ? "Templates & req." : "Company as operates")));
+      sel.addEventListener("change", () => opts.onKind(d, sel.value));
+      return sel;
+    };
+    const renderDoc = (d) => {
+      const link = d.open_url || d.url;
+      const ext = (d.storage_path || "").split(".").pop().toLowerCase();
+      const canView = !!d.storage_path && !!window.PortalViewer && ["pdf", "docx", "xlsx", "xls", "csv"].includes(ext);
+      return el("div", { class: "doc" }, [
+        el("div", {}, [
+          el("div", { class: "name" }, d.name),
+          el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`),
+        ]),
+        el("div", { class: "doc-actions" }, [
+          canView
+            ? el("button", { class: "open", type: "button", onclick: () => window.PortalViewer.open(d) }, "View")
+            : (link ? el("a", { class: "open", href: link, target: "_blank", rel: "noopener" }, "Open ↗") : el("span", { class: "pending" }, "link pending")),
+          opts.manage && opts.onKind && d.id ? kindSelect(d) : null,
+          opts.manage && opts.onDelete && d.id ? el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => opts.onDelete(d) }, "Delete") : null,
+        ]),
+      ]);
+    };
+
+    for (const [kind, label, hint] of DOC_KINDS) {
+      const kdocs = docs.filter((d) => (d.kind || "template") === kind);
+      if (!kdocs.length && !opts.manage) continue;
+      const section = el("section", { class: "doc-kind-section" }, [
+        el("div", { class: "doc-kind-head" }, [el("h2", {}, label), el("span", { class: "muted" }, ` (${kdocs.length})`)]),
+        el("p", { class: "muted doc-kind-hint" }, hint),
+      ]);
+      if (!kdocs.length) {
+        section.appendChild(el("div", { class: "empty" }, "None yet."));
+      } else {
+        const cats = new Map();
+        for (const d of kdocs) { if (!cats.has(d.category)) cats.set(d.category, []); cats.get(d.category).push(d); }
+        for (const [cat, items] of cats) {
+          const group = el("div", { class: "doc-group" }, el("h3", {}, cat));
+          const grid = el("div", { class: "docs" });
+          for (const d of items) grid.appendChild(renderDoc(d));
+          group.appendChild(grid);
+          section.appendChild(group);
+        }
       }
-      group.appendChild(grid);
-      wrap.appendChild(group);
+      wrap.appendChild(section);
     }
     return wrap;
   }
@@ -520,6 +545,10 @@
     const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose a document to add" });
     const name = el("input", { type: "text", class: "up-text", placeholder: "Display name (defaults to file name)", "aria-label": "Document name" });
     const category = el("input", { type: "text", class: "up-text", placeholder: "Category (e.g. Test reports)", "aria-label": "Category" });
+    const kind = el("select", { class: "up-text", "aria-label": "Section" }, [
+      el("option", { value: "template" }, "Templates & Requirements"),
+      el("option", { value: "operational" }, "Company as Operates (AI-audited)"),
+    ]);
     const auds = ["internal", "supplier", "reviewer", "installer"].map((a) => {
       const cb = el("input", { type: "checkbox", value: a, checked: a === "internal" ? "checked" : null });
       return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
@@ -533,7 +562,7 @@
       if (!audience.length) audience.push("internal");
       btn.disabled = true; status.className = "up-status"; status.textContent = "Uploading…";
       try {
-        await API.uploadDocument(API.getToken(role), f, { category: category.value, name: name.value, audience });
+        await API.uploadDocument(API.getToken(role), f, { category: category.value, name: name.value, audience, kind: kind.value });
         status.className = "up-status ok"; status.textContent = `Added “${name.value || f.name}”.`;
         file.value = ""; name.value = ""; category.value = "";
         await reload();
@@ -544,7 +573,7 @@
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Manage documents"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file into the library — stored in Supabase, no Google Drive needed. Tick who should see it."),
-      el("div", { class: "upload-fields" }, [file, name, category]),
+      el("div", { class: "upload-fields" }, [file, name, category, kind]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
       el("div", { style: "margin-top:0.75rem" }, btn),
       status,
@@ -899,10 +928,14 @@
         try { await API.deleteDocument(API.getToken(role), d.id); await load(); }
         catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
       };
+      const onKind = async (d, kind) => {
+        try { await API.updateDocument(API.getToken(role), d.id, { kind }); await load(); }
+        catch (ex) { alert(`Couldn't move document: ${ex.message}`); }
+      };
       const docsPanel = $("#documents-panel");
       docsPanel.replaceChildren(el("div", {}, [
         role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load),
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onDelete }),
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onDelete, onKind }),
       ].filter(Boolean)));
       const review = await uploadsReview(role, load);
       if (review) docsPanel.appendChild(review);

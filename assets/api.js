@@ -62,6 +62,7 @@
     },
 
     deleteDocument: (token, id) => call({ action: "deleteDocument", token, id }),
+    updateDocument: (token, id, fields) => call({ action: "updateDocument", token, id, ...fields }),
 
     // Standards & Regulations register (with version history)
     standards: (token) => call({ action: "standards", token }),
@@ -83,7 +84,7 @@
 
     /* Add a library document: upload the file to the documents bucket, then
      * register it in the documents table. Rushroom only (enforced server-side). */
-    async uploadDocument(token, file, { category, name, audience } = {}) {
+    async uploadDocument(token, file, { category, name, audience, kind } = {}) {
       const { signedUrl, path } = await call({ action: "docUploadUrl", token, fileName: file.name });
       const put = await fetch(signedUrl, {
         method: "PUT",
@@ -91,7 +92,7 @@
         body: file,
       });
       if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
-      await call({ action: "addDocument", token, category, name: name || file.name, audience, storagePath: path });
+      await call({ action: "addDocument", token, category, name: name || file.name, audience, kind, storagePath: path });
       return path;
     },
   };

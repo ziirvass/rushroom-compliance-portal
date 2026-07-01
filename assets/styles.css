@@ -179,6 +179,18 @@ tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--panel-2); }
 .step-no-cell { color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* document library — two sections (Templates & Requirements / Company as Operates) */
+.doc-kind-section { margin-top: 2rem; }
+.doc-kind-section:first-child { margin-top: 0.5rem; }
+.doc-kind-head { display: flex; align-items: baseline; gap: 0.4rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+.doc-kind-head h2 { margin: 0; font-size: 1.15rem; }
+.doc-kind-hint { font-size: 0.82rem; margin: 0.4rem 0 0.2rem; }
+.doc-kind {
+  font: inherit; font-size: 0.76rem; padding: 0.2rem 0.4rem; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text); min-height: 30px;
+}
+.doc-kind option { color: #000; }
+
 /* document library */
 .doc-group { margin-top: 1.5rem; }
 .doc-group h3 { margin: 0 0 0.6rem; font-size: 1rem; }

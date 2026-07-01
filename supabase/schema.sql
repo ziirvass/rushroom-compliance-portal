@@ -31,11 +31,13 @@ create table if not exists public.documents (
   name          text not null default '',
   url           text default '',          -- external link (e.g. legacy Google Drive)
   storage_path  text default '',          -- path in the 'documents' bucket when the file is hosted here
+  kind          text not null default 'template', -- 'template' (Templates & Requirements) | 'operational' (Company as Operates)
   audience      text[] not null default array['internal']::text[],
   sort          integer default 0
 );
--- For projects created before storage_path existed:
+-- For projects created before these columns existed:
 alter table public.documents add column if not exists storage_path text default '';
+alter table public.documents add column if not exists kind text not null default 'template';
 
 create table if not exists public.uploads (
   id             uuid primary key default gen_random_uuid(),

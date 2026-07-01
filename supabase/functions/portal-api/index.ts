@@ -326,8 +326,24 @@ Deno.serve(async (req) => {
       name: name.slice(0, 200),
       url: String(body.url ?? "").slice(0, 1000),
       storage_path: String(body.storagePath ?? "").slice(0, 400),
+      kind: body.kind === "operational" ? "operational" : "template",
       audience,
     });
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  if (action === "updateDocument") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const id = String(body.id ?? "");
+    if (!id) return json({ error: "id required" }, 400);
+    const patch: Record<string, unknown> = {};
+    if (body.kind !== undefined) patch.kind = body.kind === "operational" ? "operational" : "template";
+    if (body.name !== undefined) patch.name = String(body.name).slice(0, 200);
+    if (body.category !== undefined) patch.category = String(body.category).slice(0, 80);
+    if (Array.isArray(body.audience)) patch.audience = body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
+    if (!Object.keys(patch).length) return json({ error: "nothing to update" }, 400);
+    const { error } = await db.from("documents").update(patch).eq("id", id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }
@@ -444,10 +460,12 @@ Deno.serve(async (req) => {
       const { data: v } = await db.from("standard_versions").select("*").eq("standard_id", s.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (v?.storage_path) standards.push({ ...s, version: v.version, storage_path: v.storage_path, file_name: v.file_name });
     }
-    const { data: docs } = await db.from("documents").select("name,storage_path").neq("storage_path", "");
+    // Only the operational ("Company as Operates") documents are audited — the
+    // templates/requirements are the inputs, not the evidence being checked.
+    const { data: docs } = await db.from("documents").select("name,storage_path").eq("kind", "operational").neq("storage_path", "");
     const storedDocs = (docs ?? []).filter((d) => d.storage_path);
     if (!standards.length) return json({ error: "No standards with an uploaded version yet — add standards and upload files first." }, 400);
-    if (!storedDocs.length) return json({ error: "No in-house documents to check yet — upload documents into the library first." }, 400);
+    if (!storedDocs.length) return json({ error: "No operational documents to check — mark documents as “Company as Operates” in the Document library first." }, 400);
 
     const content: any[] = [{ type: "text", text: "=== STANDARDS & REGULATIONS (the requirements) ===" }];
     for (const s of standards) {
