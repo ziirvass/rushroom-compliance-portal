@@ -18,6 +18,9 @@
 //   supabase functions deploy portal-api --no-verify-jwt
 // ============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as JSZipNS from "https://esm.sh/jszip@3.10.1";
+// jszip ships an export-assignment type (no default export); unwrap for Deno.
+const JSZip: any = (JSZipNS as any).default ?? JSZipNS;
 
 const BUCKET = "supplier-uploads";
 const DOC_BUCKET = "documents";
@@ -104,6 +107,74 @@ async function verifyToken(token: string | undefined): Promise<string | null> {
 
 const isSupplierStep = (audience: string[] | null) => Array.isArray(audience) && audience.includes("supplier");
 const safeName = (n: string) => (n || "file").replace(/[^\w.\-]+/g, "_").slice(-120);
+
+// ---- AI deviation monitoring (Claude) ----
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const SCAN_MODEL = "claude-opus-4-8";
+const SEVERITIES = ["Critical", "High", "Medium", "Low", "Info"];
+const TEXT_CAP = 40000; // per-file char cap fed to the model
+const FINDINGS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    summary: { type: "string" },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          severity: { type: "string", enum: SEVERITIES },
+          title: { type: "string" },
+          description: { type: "string" },
+          document: { type: "string" },
+          standard: { type: "string" },
+          recommendation: { type: "string" },
+        },
+        required: ["severity", "title", "description", "document", "standard", "recommendation"],
+      },
+    },
+  },
+  required: ["summary", "findings"],
+};
+
+function xmlDecode(s: string): string {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(+n)).replace(/&amp;/g, "&");
+}
+async function extractDocx(bytes: Uint8Array): Promise<string> {
+  const zip = await JSZip.loadAsync(bytes);
+  const xml = (await zip.file("word/document.xml")?.async("string")) ?? "";
+  const withBreaks = xml.replace(/<w:p[ >/]/g, "\n<w:p ").replace(/<[^>]+>/g, " ");
+  return xmlDecode(withBreaks).replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
+}
+async function extractXlsx(bytes: Uint8Array): Promise<string> {
+  const zip = await JSZip.loadAsync(bytes);
+  const shared = (await zip.file("xl/sharedStrings.xml")?.async("string")) ?? "";
+  const cells = [...shared.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((m) => xmlDecode(m[1]).trim()).filter(Boolean);
+  return cells.join(" · ");
+}
+function toBase64(bytes: Uint8Array): string {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(bin);
+}
+// Returns a Claude content block for a stored file.
+async function fileBlock(bucket: string, path: string, fileName: string) {
+  const { data, error } = await db.storage.from(bucket).download(path);
+  if (error || !data) return { type: "text", text: "(could not read file)" };
+  const bytes = new Uint8Array(await data.arrayBuffer());
+  const ext = (fileName.split(".").pop() || "").toLowerCase();
+  try {
+    if (ext === "pdf") return { type: "document", source: { type: "base64", media_type: "application/pdf", data: toBase64(bytes) } };
+    if (ext === "docx") return { type: "text", text: (await extractDocx(bytes)).slice(0, TEXT_CAP) || "(empty)" };
+    if (ext === "xlsx" || ext === "xls") return { type: "text", text: (await extractXlsx(bytes)).slice(0, TEXT_CAP) || "(empty)" };
+    return { type: "text", text: new TextDecoder().decode(bytes).slice(0, TEXT_CAP) || "(empty)" };
+  } catch (e) {
+    return { type: "text", text: `(could not extract text: ${(e as Error).message})` };
+  }
+}
 
 // ---- request handler -------------------------------------------------------
 Deno.serve(async (req) => {
@@ -351,6 +422,105 @@ Deno.serve(async (req) => {
     const { error } = await db.from("standard_versions").delete().eq("id", id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
+  }
+
+  // --- AI deviation monitoring (Rushroom only) ----------------------------
+  if (action === "deviations") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const { data: scan } = await db.from("deviation_scans").select("*").order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (!scan) return json({ scan: null, findings: [] });
+    const { data: findings } = await db.from("deviation_findings").select("*").eq("scan_id", scan.id);
+    return json({ scan, findings: findings ?? [] });
+  }
+
+  if (action === "runDeviationScan") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY in the function secrets." }, 400);
+
+    // Standards: latest version of each.
+    const { data: stds } = await db.from("standards").select("id,code,title,category").order("code");
+    const standards: any[] = [];
+    for (const s of stds ?? []) {
+      const { data: v } = await db.from("standard_versions").select("*").eq("standard_id", s.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (v?.storage_path) standards.push({ ...s, version: v.version, storage_path: v.storage_path, file_name: v.file_name });
+    }
+    const { data: docs } = await db.from("documents").select("name,storage_path").neq("storage_path", "");
+    const storedDocs = (docs ?? []).filter((d) => d.storage_path);
+    if (!standards.length) return json({ error: "No standards with an uploaded version yet — add standards and upload files first." }, 400);
+    if (!storedDocs.length) return json({ error: "No in-house documents to check yet — upload documents into the library first." }, 400);
+
+    const content: any[] = [{ type: "text", text: "=== STANDARDS & REGULATIONS (the requirements) ===" }];
+    for (const s of standards) {
+      content.push({ type: "text", text: `\n--- STANDARD: ${s.code}${s.title ? ` — ${s.title}` : ""}${s.category ? ` [${s.category}]` : ""} (version ${s.version || "?"}) ---` });
+      content.push(await fileBlock(STD_BUCKET, s.storage_path, s.file_name));
+    }
+    content.push({ type: "text", text: "\n\n=== COMPLIANCE DOCUMENTS (what Rushroom has produced) ===" });
+    for (const d of storedDocs) {
+      content.push({ type: "text", text: `\n--- DOCUMENT: ${d.name} ---` });
+      content.push(await fileBlock(DOC_BUCKET, d.storage_path, d.storage_path));
+    }
+    content.push({ type: "text", text: "\nAnalyse the compliance DOCUMENTS against the STANDARDS & REGULATIONS above. Report deviations, gaps, missing evidence, outdated references, and unmet requirements. Only report genuine issues grounded in the supplied material; do not invent requirements that were not provided." });
+
+    const system = `You are a meticulous EU product-compliance auditor for Rushroom AB (LED system-furniture). Compare the company's compliance DOCUMENTS against the provided STANDARDS & REGULATIONS and surface where the documents deviate from, or fall short of, the standards.
+
+Assign each finding a severity:
+- Critical: a legal blocker to selling or CE-marking (missing Declaration of Conformity, an unmet mandatory requirement, a safety/EMC/energy non-conformity).
+- High: a significant gap that must be closed before launch.
+- Medium: an incomplete or outdated item that needs attention.
+- Low: a minor inconsistency or improvement.
+- Info: an observation, not a deviation.
+
+Be specific: name the exact document and the exact standard (and clause where possible) each finding relates to, and give a concrete recommendation. If everything aligns, return an empty findings array and say so in the summary.`;
+
+    let apiJson: any;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+          model: SCAN_MODEL,
+          max_tokens: 16000,
+          thinking: { type: "adaptive" },
+          output_config: { effort: "medium", format: { type: "json_schema", schema: FINDINGS_SCHEMA } },
+          system,
+          messages: [{ role: "user", content }],
+        }),
+      });
+      apiJson = await res.json();
+      if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
+    } catch (e) {
+      return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
+    }
+    if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to complete the analysis (refusal)." }, 502);
+    const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
+    let parsed: any;
+    try { parsed = JSON.parse(textBlock?.text || "{}"); }
+    catch { return json({ error: "The AI response could not be parsed (it may have been truncated). Try again." }, 502); }
+
+    const findings = Array.isArray(parsed.findings) ? parsed.findings : [];
+    const counts: Record<string, number> = {};
+    for (const f of findings) counts[f.severity] = (counts[f.severity] || 0) + 1;
+
+    const { data: scan, error: scanErr } = await db.from("deviation_scans").insert({
+      model: apiJson.model || SCAN_MODEL, status: "ok", summary: String(parsed.summary || "").slice(0, 4000),
+      counts, docs_scanned: storedDocs.length, standards_scanned: standards.length,
+    }).select("*").maybeSingle();
+    if (scanErr || !scan) return json({ error: `Could not save scan: ${scanErr?.message}` }, 500);
+
+    if (findings.length) {
+      const rows = findings.slice(0, 200).map((f: any) => ({
+        scan_id: scan.id,
+        severity: SEVERITIES.includes(f.severity) ? f.severity : "Info",
+        title: String(f.title || "").slice(0, 300),
+        description: String(f.description || "").slice(0, 4000),
+        document: String(f.document || "").slice(0, 300),
+        standard: String(f.standard || "").slice(0, 300),
+        recommendation: String(f.recommendation || "").slice(0, 2000),
+      }));
+      const { error: fErr } = await db.from("deviation_findings").insert(rows);
+      if (fErr) return json({ error: `Could not save findings: ${fErr.message}` }, 500);
+    }
+    return json({ ok: true, scan, findings });
   }
 
   if (action === "uploads") {

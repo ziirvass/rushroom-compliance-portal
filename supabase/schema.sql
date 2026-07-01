@@ -72,13 +72,41 @@ create table if not exists public.standard_versions (
 );
 create index if not exists standard_versions_standard_idx on public.standard_versions (standard_id);
 
+-- AI deviation-monitoring scans: each scan compares the document library against
+-- the standards register (via the Claude API) and stores findings by severity.
+create table if not exists public.deviation_scans (
+  id                uuid primary key default gen_random_uuid(),
+  created_at        timestamptz not null default now(),
+  model             text default '',
+  status            text not null default 'ok',
+  summary           text default '',
+  counts            jsonb default '{}'::jsonb,
+  docs_scanned      integer default 0,
+  standards_scanned integer default 0,
+  error             text default ''
+);
+create table if not exists public.deviation_findings (
+  id             uuid primary key default gen_random_uuid(),
+  scan_id        uuid not null references public.deviation_scans(id) on delete cascade,
+  severity       text not null default 'Info',   -- Critical | High | Medium | Low | Info
+  title          text not null default '',
+  description    text default '',
+  document       text default '',
+  standard       text default '',
+  recommendation text default '',
+  created_at     timestamptz not null default now()
+);
+create index if not exists deviation_findings_scan_idx on public.deviation_findings (scan_id);
+
 -- ---- Row-Level Security: lock everything; only the service role (Edge
 --      Function) may read/write. No policies = no access for anon/authenticated.
 alter table public.steps             enable row level security;
 alter table public.documents         enable row level security;
 alter table public.uploads           enable row level security;
-alter table public.standards         enable row level security;
-alter table public.standard_versions enable row level security;
+alter table public.standards          enable row level security;
+alter table public.standard_versions  enable row level security;
+alter table public.deviation_scans    enable row level security;
+alter table public.deviation_findings enable row level security;
 
 -- ---- Private storage buckets ----------------------------------------------
 --   supplier-uploads : files suppliers submit

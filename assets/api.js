@@ -67,6 +67,11 @@
     addStandard: (token, fields) => call({ action: "addStandard", token, ...fields }),
     deleteStandard: (token, id) => call({ action: "deleteStandard", token, id }),
     deleteStandardVersion: (token, id) => call({ action: "deleteStandardVersion", token, id }),
+    // AI deviation monitoring (Rushroom only). The scan can take a while — the
+    // browser fetch has no timeout, so it waits for Claude to finish.
+    deviations: (token) => call({ action: "deviations", token }),
+    runDeviationScan: (token) => call({ action: "runDeviationScan", token }),
+
     async uploadStandardVersion(token, file, { standardId, version, effectiveDate, notes } = {}) {
       const { signedUrl, path } = await call({ action: "stdUploadUrl", token, fileName: file.name });
       const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });

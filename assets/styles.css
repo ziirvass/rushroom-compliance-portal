@@ -291,6 +291,32 @@ details.phase { scroll-margin-top: 1rem; }
 .std-versions li { border-left: 2px solid var(--border); padding: 0.1rem 0 0.1rem 0.75rem; }
 .std-notes { color: var(--muted); font-size: 0.85rem; margin-top: 0.15rem; }
 
+/* AI deviation monitoring */
+.scan-meta { margin-top: 0.75rem; font-size: 0.82rem; }
+.sev-summary { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 0.5rem; }
+.sev-chip { font-size: 0.78rem; font-weight: 700; padding: 0.15rem 0.6rem; border-radius: 999px; border: 1px solid; }
+.sev-group { margin-top: 1.5rem; }
+.sev-head { margin: 0 0 0.6rem; font-size: 1rem; }
+.finding {
+  border: 1px solid var(--border); border-left: 4px solid var(--border);
+  border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.6rem; background: var(--panel);
+}
+.finding-title { font-weight: 600; }
+.finding-refs { font-size: 0.8rem; margin-top: 0.25rem; }
+.finding-desc { font-size: 0.9rem; margin-top: 0.5rem; }
+.finding-rec { font-size: 0.9rem; margin-top: 0.5rem; }
+/* severity colours (text + border) */
+.sev-critical { color: var(--red);   border-color: var(--red-bd); }
+.sev-high     { color: var(--amber); border-color: var(--amber-bd); }
+.sev-medium   { color: var(--blue);  border-color: var(--blue-bd); }
+.sev-low      { color: var(--gray);  border-color: var(--gray-bd); }
+.sev-info     { color: var(--muted); border-color: var(--border); }
+.sev-border-critical { border-left-color: var(--red); }
+.sev-border-high     { border-left-color: var(--amber); }
+.sev-border-medium   { border-left-color: var(--blue); }
+.sev-border-low      { border-left-color: var(--gray); }
+.sev-border-info     { border-left-color: var(--border); }
+
 /* generic modal body + step add/edit form */
 .modal-body { padding: 1.25rem 1.5rem; overflow: auto; }
 .step-form { display: grid; gap: 0.85rem; max-width: 640px; }

@@ -638,6 +638,7 @@
 
   /* ---------------- Standards & Regulations register ---------------- */
   const fmtDate = (iso) => { if (!iso) return ""; try { return new Date(iso).toLocaleDateString("en-GB"); } catch { return iso; } };
+  const fmtDateTime = (iso) => { if (!iso) return ""; try { return new Date(iso).toLocaleString("en-GB"); } catch { return iso; } };
   const viewFile = (v) => window.PortalViewer && window.PortalViewer.open({ name: v.file_name, open_url: v.open_url, storage_path: v.file_name });
 
   async function deleteStandard(s, role, reload) {
@@ -768,6 +769,72 @@
     mount.replaceChildren(...frag.childNodes);
   }
 
+  /* ---------------- AI Deviation Monitoring (Rushroom) ---------------- */
+  const SEV_ORDER = ["Critical", "High", "Medium", "Low", "Info"];
+  async function renderDeviations(role, mount) {
+    if (role !== "rushroom") { mount.replaceChildren(el("div", { class: "empty" }, "Not available for this role.")); return; }
+    mount.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+    let payload;
+    try { payload = await API.deviations(API.getToken(role)); }
+    catch (ex) {
+      if (/auth/i.test(ex.message)) { API.clearToken(role); location.reload(); return; }
+      mount.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`)); return;
+    }
+    const reload = () => renderDeviations(role, mount);
+    const scan = payload.scan;
+    const findings = payload.findings || [];
+
+    const statusEl = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const runBtn = el("button", { class: "btn btn-primary", type: "button" }, "⟳ Run AI scan");
+    runBtn.addEventListener("click", async () => {
+      runBtn.disabled = true; statusEl.className = "up-status";
+      statusEl.textContent = "Analysing documents against standards with Claude — this can take up to a minute, please wait…";
+      try { await API.runDeviationScan(API.getToken(role)); await reload(); }
+      catch (ex) { runBtn.disabled = false; statusEl.className = "up-status err"; statusEl.textContent = `Scan failed: ${ex.message}`; }
+    });
+
+    const head = el("div", { class: "card upload-card" }, [
+      el("h3", {}, "AI deviation monitoring"),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" },
+        "Uses the Claude API to compare every document in the library against the standards register and lists deviations by severity. Uploads and scans are manual — a human decides when to run it."),
+      el("div", {}, runBtn),
+      statusEl,
+      scan ? el("div", { class: "scan-meta muted" }, `Last scan: ${fmtDateTime(scan.created_at)} · ${scan.model || ""} · ${scan.docs_scanned} documents vs ${scan.standards_scanned} standards`) : null,
+    ]);
+
+    const body = el("div");
+    if (!scan) {
+      body.appendChild(el("div", { class: "empty" }, "No scan yet — click “Run AI scan” to check your documents against the standards."));
+    } else {
+      if (scan.summary) body.appendChild(el("div", { class: "notice" }, scan.summary));
+      const counts = scan.counts || {};
+      body.appendChild(el("div", { class: "sev-summary" }, SEV_ORDER.map((sev) =>
+        el("span", { class: `sev-chip sev-${sev.toLowerCase()}` }, `${sev}: ${counts[sev] || 0}`))));
+      if (!findings.length) {
+        body.appendChild(el("div", { class: "notice ok" }, "No deviations found in this scan."));
+      } else {
+        const bySev = {};
+        for (const f of findings) (bySev[f.severity] || (bySev[f.severity] = [])).push(f);
+        for (const sev of SEV_ORDER) {
+          const items = bySev[sev];
+          if (!items || !items.length) continue;
+          const group = el("div", { class: "sev-group" }, el("h3", { class: `sev-head sev-${sev.toLowerCase()}` }, `${sev} (${items.length})`));
+          for (const f of items) {
+            group.appendChild(el("div", { class: `finding sev-border-${sev.toLowerCase()}` }, [
+              el("div", { class: "finding-title" }, f.title || "(untitled)"),
+              (f.document || f.standard) ? el("div", { class: "finding-refs muted" },
+                `${f.document ? `Document: ${f.document}` : ""}${f.document && f.standard ? "   ·   " : ""}${f.standard ? `Standard: ${f.standard}` : ""}`) : null,
+              f.description ? el("div", { class: "finding-desc" }, f.description) : null,
+              f.recommendation ? el("div", { class: "finding-rec" }, [el("strong", {}, "Recommendation: "), f.recommendation]) : null,
+            ]));
+          }
+          body.appendChild(group);
+        }
+      }
+    }
+    mount.replaceChildren(el("div", {}, [head, body]));
+  }
+
   // Full API render for a page: editable readiness + documents + uploads.
   async function renderApi(role, readinessMountId) {
     wireTabs($("#tablist"));
@@ -837,6 +904,8 @@
     await load();
     const stdPanel = $("#standards-panel");
     if (stdPanel) renderStandards(role, stdPanel);
+    const devPanel = $("#deviations-panel");
+    if (devPanel && role === "rushroom") renderDeviations(role, devPanel);
   }
 
   /* ---------------- expose shared API ---------------- */
