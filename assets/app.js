@@ -423,8 +423,12 @@
     for (const [kind, label, hint] of DOC_KINDS) {
       const kdocs = docs.filter((d) => (d.kind || "template") === kind);
       if (!kdocs.length && !opts.manage) continue;
+      const headParts = [el("h2", {}, label), el("span", { class: "muted" }, ` (${kdocs.length})`)];
+      if (opts.manage && opts.onCreateNew && kind === "operational") {
+        headParts.push(el("button", { class: "btn btn-sm btn-primary doc-kind-new", type: "button", onclick: () => opts.onCreateNew() }, "+ New As Operates"));
+      }
       const section = el("section", { class: "doc-kind-section" }, [
-        el("div", { class: "doc-kind-head" }, [el("h2", {}, label), el("span", { class: "muted" }, ` (${kdocs.length})`)]),
+        el("div", { class: "doc-kind-head" }, headParts),
         el("p", { class: "muted doc-kind-hint" }, hint),
       ]);
       if (!kdocs.length) {
@@ -601,9 +605,10 @@
     ]);
   }
 
-  function createOperationalFromTemplate(templateDoc, role, reload) {
+  function createOperationalFromTemplate(templateDoc, role, reload, templates) {
     documentDraftAssistant(null, role, reload, {
       templateDoc,
+      templates: templates || [],
       title: `Create As Operates — ${templateDoc.name || "template"}`,
       initialName: `${templateDoc.name || "Template"} — As Operates`,
       mode: "create",
@@ -638,36 +643,73 @@
 
   function documentDraftAssistant(d, role, reload, options = {}) {
     const templateDoc = options.templateDoc || null;
+    const templates = options.templates || [];
     const isCreateMode = options.mode === "create" || !d;
     const defaultName = options.initialName || (d ? d.name : "New As Operates");
     const name = el("input", { type: "text", class: "up-text", value: defaultName, placeholder: "Name of the As Operates document", "aria-label": "As Operates document name" });
-    const notes = el("textarea", { rows: "3", placeholder: "Describe the intended changes, new requirements, or process updates to reflect in the next version" });
+    const notes = el("textarea", { rows: "3", placeholder: "e.g. reflect the latest requirements, tighten wording, add the sign-off section" });
     const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. Rev C or 2026-08)" });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const generate = el("button", { class: "btn btn-primary", type: "button" }, "Generate draft");
     const publish = el("button", { class: "btn btn-primary", type: "button" }, "Publish approved draft");
     const changeList = el("div", { style: "margin-top:0.75rem" });
     const draft = el("textarea", { rows: "12", style: "width:100%; margin-top:0.75rem", placeholder: "The AI-generated draft will appear here" });
-    const standardsWrap = el("div", { style: "margin-top:0.75rem" });
+    const standardsWrap = el("div", { style: "margin-top:0.4rem" });
     publish.disabled = true;
     let draftResult = null;
 
+    // Path 1 source — a template picker (create mode) or the base document (update mode).
+    let templateSelect = null;
+    if (isCreateMode) {
+      templateSelect = el("select", { class: "up-text", "aria-label": "Start from a template" });
+      templateSelect.appendChild(el("option", { value: "" }, "— none (start from standards and/or context) —"));
+      for (const t of templates) templateSelect.appendChild(el("option", { value: t.id }, t.name));
+      if (templateDoc && templateDoc.id) templateSelect.value = templateDoc.id;
+      templateSelect.addEventListener("change", () => {
+        const t = templates.find((x) => x.id === templateSelect.value);
+        if (t && (!name.value.trim() || name.dataset.auto === "1")) { name.value = `${t.name} — As Operates`; name.dataset.auto = "1"; }
+        else if (!templateSelect.value && name.dataset.auto === "1") { name.value = "New As Operates"; }
+      });
+    }
+    const selectedTemplateId = () => (templateSelect ? (templateSelect.value || "") : "");
+
+    const source1 = isCreateMode
+      ? el("label", { class: "form-row src-row" }, [
+          el("span", { class: "form-label" }, "1 · Start from a template"),
+          templates.length ? templateSelect : el("div", { class: "muted" }, "No templates available — you can still build from standards and/or context below."),
+        ])
+      : el("div", { class: "src-row" }, [
+          el("span", { class: "form-label" }, "1 · Base document"),
+          el("div", { class: "muted" }, `${d.name} — its current version is the starting point.`),
+        ]);
+    const source2 = el("div", { class: "src-row" }, [
+      el("span", { class: "form-label" }, "2 · Reference standards & regulations"),
+      el("div", { class: "muted", style: "margin:0.1rem 0 0.35rem" }, "Only standards with an uploaded version appear here. Add them in the Standards & Regulations section first."),
+      standardsWrap,
+    ]);
+    const source3 = el("label", { class: "form-row src-row" }, [
+      el("span", { class: "form-label" }, "3 · Context / change request"),
+      notes,
+    ]);
+    const sourceSection = el("div", { class: "src-section" }, [
+      el("div", { class: "src-head" }, "Source material — combine any of these"),
+      el("p", { class: "muted", style: "margin:0.1rem 0 0.7rem" }, isCreateMode
+        ? "Build a new As Operates document from a template, from one or more standards/regulations, or from both — plus optional context."
+        : "Update this document from its current version, optionally guided by standards/regulations and your change notes."),
+      source1, source2, source3,
+    ]);
+
     const form = el("div", { class: "step-form" }, [
       isCreateMode ? el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document name"), name]) : null,
-      templateDoc ? el("div", { class: "muted", style: "margin-bottom:0.5rem" }, `Template source: ${templateDoc.name || "template"}`) : null,
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Context"), notes]),
+      sourceSection,
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
-      el("div", { style: "margin-top:0.65rem" }, [
-        el("div", { class: "muted", style: "margin-bottom:0.35rem" }, "Reference one or more standards/regulations from the register. These must already exist in the Standards & Regulations section first."),
-        standardsWrap,
-      ]),
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem" }, [generate, publish]),
       status,
       el("div", { style: "margin-top:1rem" }, [el("strong", {}, "Suggested changes"), changeList]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Draft text"), draft]),
     ].filter(Boolean));
 
-    const close = openModal(options.title || (d ? `AI draft — ${d.name}` : "AI draft — New As Operates"), form);
+    const close = openModal(options.title || (d ? `AI draft — ${d.name}` : "New As Operates document"), form);
     (isCreateMode ? name : notes).focus();
 
     const loadStandards = async () => {
@@ -701,14 +743,15 @@
     generate.addEventListener("click", async () => {
       const context = notes.value.trim();
       const selectedStandardIds = Array.from(standardsWrap.querySelectorAll("input[type='checkbox']:checked")).map((cb) => cb.value);
-      if (!context && !selectedStandardIds.length && !templateDoc && !d) {
-        status.className = "up-status warn"; status.textContent = "Add a bit of context or choose one or more standards/regulations first."; return;
+      const tmplId = selectedTemplateId();
+      if (!context && !selectedStandardIds.length && !tmplId && !d) {
+        status.className = "up-status warn"; status.textContent = "Choose a template, select one or more standards/regulations, or add context first."; return;
       }
       generate.disabled = true; publish.disabled = true; status.className = "up-status"; status.textContent = "Generating draft…";
       try {
         draftResult = await API.suggestDocumentVersion(API.getToken(role), {
           documentId: d ? d.id : null,
-          templateDocumentId: templateDoc ? templateDoc.id : null,
+          templateDocumentId: tmplId || null,
           notes: context,
           preferredVersion: version.value.trim(),
           sourceStandardIds: selectedStandardIds,
@@ -751,7 +794,7 @@
         await API.publishDocumentDraft(API.getToken(role), {
           documentId: d ? d.id : null,
           newDocumentName: isCreateMode ? name.value.trim() : null,
-          templateDocumentId: templateDoc ? templateDoc.id : null,
+          templateDocumentId: selectedTemplateId() || null,
           version: version.value.trim() || draftResult.versionHint || "AI draft",
           notes: `Approved changes: ${approved.join(", ") || "none"}\n${notes.value.trim()}`,
           draftText: finalText,
@@ -1108,13 +1151,15 @@
       ]);
       mount.replaceChildren(...frag.childNodes);
 
+      const templatesOf = () => (payload.documents || []).filter((d) => (d.kind || "template") === "template" && d.id);
       const onNewVersion = (d) => documentVersionEditor(d, role, load);
-      const onDraft = (d) => documentDraftAssistant(d, role, load);
-      const onCreateOperational = (d) => createOperationalFromTemplate(d, role, load);
+      const onDraft = (d) => documentDraftAssistant(d, role, load, { templates: templatesOf() });
+      const onCreateOperational = (d) => createOperationalFromTemplate(d, role, load, templatesOf());
+      const onCreateNew = () => documentDraftAssistant(null, role, load, { mode: "create", templates: templatesOf() });
       const docsPanel = $("#documents-panel");
       docsPanel.replaceChildren(el("div", {}, [
         role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load),
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onDraft, onCreateOperational }),
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onDraft, onCreateOperational, onCreateNew }),
       ].filter(Boolean)));
       const review = await uploadsReview(role, load);
       if (review) docsPanel.appendChild(review);

@@ -426,18 +426,19 @@ Deno.serve(async (req) => {
     let storagePath = "";
     let fileName = "document";
     if (document_id) {
-      const { data: foundDoc, error: docErr } = await db.from("documents").select("id,name,kind").eq("id", document_id).maybeSingle();
+      const { data: foundDoc, error: docErr } = await db.from("documents").select("id,name,kind,storage_path").eq("id", document_id).maybeSingle();
       if (docErr || !foundDoc) return json({ error: "Document not found" }, 404);
       doc = foundDoc;
       const { data: latest } = await db.from("document_versions").select("*").eq("document_id", document_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      storagePath = latest?.storage_path || "";
+      // Fall back to the document's own file when no version row exists yet.
+      storagePath = latest?.storage_path || foundDoc.storage_path || "";
       fileName = latest?.file_name || doc.name || "document";
     } else if (templateDocumentId) {
-      const { data: foundDoc } = await db.from("documents").select("id,name,kind").eq("id", templateDocumentId).maybeSingle();
+      const { data: foundDoc } = await db.from("documents").select("id,name,kind,storage_path").eq("id", templateDocumentId).maybeSingle();
       if (foundDoc) {
         doc = foundDoc;
         const { data: latest } = await db.from("document_versions").select("*").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
-        storagePath = latest?.storage_path || "";
+        storagePath = latest?.storage_path || foundDoc.storage_path || "";
         fileName = latest?.file_name || doc.name || "document";
       }
     }
