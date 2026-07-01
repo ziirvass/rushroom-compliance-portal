@@ -194,12 +194,12 @@ tbody tr:hover { background: var(--panel-2); }
 /* document library */
 .doc-group { margin-top: 1.5rem; }
 .doc-group h3 { margin: 0 0 0.6rem; font-size: 1rem; }
-.docs { display: grid; gap: 0.6rem; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.docs { display: grid; gap: 0.6rem; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 .doc {
-  display: flex; gap: 0.7rem; align-items: center; justify-content: space-between;
+  display: flex; flex-direction: column; gap: 0.55rem;
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 0.9rem;
 }
-.doc .name { font-size: 0.9rem; }
+.doc .name { font-size: 0.9rem; font-weight: 600; }
 .doc .audience { font-size: 0.72rem; color: var(--muted); margin-top: 0.15rem; }
 .doc .open { white-space: nowrap; font-size: 0.85rem; }
 .doc .pending { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
@@ -273,7 +273,12 @@ details.phase { scroll-margin-top: 1rem; }
 .aud-check { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.88rem; color: var(--muted); }
 
 /* document actions (open + delete) */
-.doc-actions { display: flex; align-items: center; gap: 0.5rem; white-space: nowrap; }
+.doc-actions {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  margin-top: auto; padding-top: 0.55rem; border-top: 1px solid var(--border);
+}
+.doc-actions .open { margin-right: auto; }
+.doc-actions .doc-kind { flex: 0 1 auto; }
 .doc-del { min-height: 32px; padding: 0.2rem 0.55rem; font-size: 0.78rem; color: var(--red); border-color: var(--red-bd); }
 .doc-del:hover { background: var(--red-bg); }
 
