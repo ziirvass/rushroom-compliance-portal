@@ -21,6 +21,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const BUCKET = "supplier-uploads";
 const DOC_BUCKET = "documents";
+const STD_BUCKET = "standards";
 const TOKEN_TTL_SECONDS = 60 * 60 * 8; // 8 hours
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -267,6 +268,87 @@ Deno.serve(async (req) => {
     const { data: doc } = await db.from("documents").select("storage_path").eq("id", id).maybeSingle();
     if (doc?.storage_path) await db.storage.from(DOC_BUCKET).remove([doc.storage_path]);
     const { error } = await db.from("documents").delete().eq("id", id);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  // --- Standards & Regulations register -----------------------------------
+  if (action === "standards") {
+    const { data: stds } = await db.from("standards").select("*").order("code");
+    const list = role === "supplier" ? (stds ?? []).filter((s) => isSupplierStep(s.audience)) : (stds ?? []);
+    const ids = list.map((s) => s.id);
+    let versions: any[] = [];
+    if (ids.length) {
+      const { data: vs } = await db.from("standard_versions").select("*").in("standard_id", ids).order("created_at", { ascending: false });
+      versions = vs ?? [];
+    }
+    const withUrls = await Promise.all(versions.map(async (v) => {
+      const { data: signed } = await db.storage.from(STD_BUCKET).createSignedUrl(v.storage_path, 60 * 60);
+      return { ...v, open_url: signed?.signedUrl ?? "" };
+    }));
+    const byStd: Record<string, any[]> = {};
+    for (const v of withUrls) (byStd[v.standard_id] ||= []).push(v);
+    const result = list.map((s) => ({ ...s, versions: byStd[s.id] ?? [] }));
+    return json({ role, standards: result });
+  }
+
+  if (action === "addStandard") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const code = String(body.code ?? "").trim();
+    const title = String(body.title ?? "").trim();
+    if (!code && !title) return json({ error: "code or title required" }, 400);
+    const audience = Array.isArray(body.audience) && body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
+    const { data, error } = await db.from("standards").insert({
+      code: code.slice(0, 120), title: title.slice(0, 300), category: String(body.category ?? "").slice(0, 80), audience,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true, id: data?.id });
+  }
+
+  if (action === "deleteStandard") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const id = String(body.id ?? "");
+    if (!id) return json({ error: "id required" }, 400);
+    const { data: vs } = await db.from("standard_versions").select("storage_path").eq("standard_id", id);
+    const paths = (vs ?? []).map((v) => v.storage_path).filter(Boolean);
+    if (paths.length) await db.storage.from(STD_BUCKET).remove(paths);
+    const { error } = await db.from("standards").delete().eq("id", id); // cascade removes version rows
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  if (action === "stdUploadUrl") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const path = `${Date.now()}-${safeName(String(body.fileName ?? "file"))}`;
+    const { data, error } = await db.storage.from(STD_BUCKET).createSignedUploadUrl(path);
+    if (error) return json({ error: error.message }, 500);
+    return json({ signedUrl: data.signedUrl, token: data.token, path });
+  }
+
+  if (action === "addStandardVersion") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const standard_id = String(body.standardId ?? "");
+    const path = String(body.path ?? "");
+    const fileName = String(body.fileName ?? "");
+    if (!standard_id || !path || !fileName) return json({ error: "standardId, path, fileName required" }, 400);
+    const { error } = await db.from("standard_versions").insert({
+      standard_id,
+      version: String(body.version ?? "").slice(0, 80),
+      effective_date: String(body.effectiveDate ?? "").slice(0, 40),
+      notes: String(body.notes ?? "").slice(0, 1000),
+      storage_path: path, file_name: fileName.slice(0, 200), uploaded_by: "rushroom",
+    });
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  if (action === "deleteStandardVersion") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const id = String(body.id ?? "");
+    if (!id) return json({ error: "id required" }, 400);
+    const { data: v } = await db.from("standard_versions").select("storage_path").eq("id", id).maybeSingle();
+    if (v?.storage_path) await db.storage.from(STD_BUCKET).remove([v.storage_path]);
+    const { error } = await db.from("standard_versions").delete().eq("id", id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }

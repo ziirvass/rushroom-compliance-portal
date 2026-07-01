@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Supplier View · Rushroom Compliance Portal</title>
   <meta name="description" content="Supplier view: supplier documents and the status of supplier compliance steps for Rushroom AB." />
-  <link rel="stylesheet" href="./assets/styles.css?v=8" />
+  <link rel="stylesheet" href="./assets/styles.css?v=9" />
 </head>
 <body data-page="supplier">
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -47,6 +47,8 @@
                 aria-controls="steps-panel" tabindex="0">Supplier steps</button>
         <button class="tab" id="tab-documents" role="tab" aria-selected="false"
                 aria-controls="documents-panel" tabindex="-1">Supplier documents</button>
+        <button class="tab" id="tab-standards" role="tab" aria-selected="false"
+                aria-controls="standards-panel" tabindex="-1">Standards &amp; regulations</button>
       </div>
 
       <section id="steps-panel" role="tabpanel" aria-labelledby="tab-steps" tabindex="0">
@@ -55,6 +57,10 @@
 
       <section id="documents-panel" role="tabpanel" aria-labelledby="tab-documents" tabindex="0" hidden>
         <div class="loading">Loading documents…</div>
+      </section>
+
+      <section id="standards-panel" role="tabpanel" aria-labelledby="tab-standards" tabindex="0" hidden>
+        <div class="loading">Loading standards…</div>
       </section>
     </div>
   </main>
@@ -66,10 +72,10 @@
     </div>
   </footer>
 
-  <script src="./assets/config.js?v=8"></script>
-  <script src="./assets/api.js?v=8"></script>
-  <script src="./assets/viewer.js?v=8"></script>
-  <script src="./assets/app.js?v=8"></script>
-  <script src="./assets/supplier.js?v=8"></script>
+  <script src="./assets/config.js?v=9"></script>
+  <script src="./assets/api.js?v=9"></script>
+  <script src="./assets/viewer.js?v=9"></script>
+  <script src="./assets/app.js?v=9"></script>
+  <script src="./assets/supplier.js?v=9"></script>
 </body>
 </html>

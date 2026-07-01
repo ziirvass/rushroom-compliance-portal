@@ -62,6 +62,19 @@
 
     deleteDocument: (token, id) => call({ action: "deleteDocument", token, id }),
 
+    // Standards & Regulations register (with version history)
+    standards: (token) => call({ action: "standards", token }),
+    addStandard: (token, fields) => call({ action: "addStandard", token, ...fields }),
+    deleteStandard: (token, id) => call({ action: "deleteStandard", token, id }),
+    deleteStandardVersion: (token, id) => call({ action: "deleteStandardVersion", token, id }),
+    async uploadStandardVersion(token, file, { standardId, version, effectiveDate, notes } = {}) {
+      const { signedUrl, path } = await call({ action: "stdUploadUrl", token, fileName: file.name });
+      const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+      if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+      await call({ action: "addStandardVersion", token, standardId, version, effectiveDate, notes, path, fileName: file.name });
+      return path;
+    },
+
     /* Add a library document: upload the file to the documents bucket, then
      * register it in the documents table. Rushroom only (enforced server-side). */
     async uploadDocument(token, file, { category, name, audience } = {}) {

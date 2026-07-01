@@ -50,18 +50,43 @@ create table if not exists public.uploads (
 
 create index if not exists uploads_step_idx on public.uploads (step);
 
+-- Standards & Regulations register, with per-standard version history.
+create table if not exists public.standards (
+  id         uuid primary key default gen_random_uuid(),
+  code       text not null default '',   -- e.g. "EN 60598-1"
+  title      text not null default '',
+  category   text default '',            -- e.g. "LVD", "EMC", "Materials"
+  audience   text[] not null default array['internal']::text[],
+  created_at timestamptz not null default now()
+);
+create table if not exists public.standard_versions (
+  id             uuid primary key default gen_random_uuid(),
+  standard_id    uuid not null references public.standards(id) on delete cascade,
+  version        text not null default '',   -- e.g. "2015+A1:2022"
+  effective_date text default '',
+  notes          text default '',            -- what changed
+  storage_path   text not null,              -- file in the 'standards' bucket
+  file_name      text not null,
+  uploaded_by    text default '',
+  created_at     timestamptz not null default now()
+);
+create index if not exists standard_versions_standard_idx on public.standard_versions (standard_id);
+
 -- ---- Row-Level Security: lock everything; only the service role (Edge
 --      Function) may read/write. No policies = no access for anon/authenticated.
-alter table public.steps     enable row level security;
-alter table public.documents enable row level security;
-alter table public.uploads   enable row level security;
+alter table public.steps             enable row level security;
+alter table public.documents         enable row level security;
+alter table public.uploads           enable row level security;
+alter table public.standards         enable row level security;
+alter table public.standard_versions enable row level security;
 
 -- ---- Private storage buckets ----------------------------------------------
 --   supplier-uploads : files suppliers submit
 --   documents        : the compliance document library files (Google-free mode)
 insert into storage.buckets (id, name, public)
 values ('supplier-uploads', 'supplier-uploads', false),
-       ('documents', 'documents', false)
+       ('documents', 'documents', false),
+       ('standards', 'standards', false)
 on conflict (id) do nothing;
 
 -- Storage objects are likewise reached only via the Edge Function (signed URLs),

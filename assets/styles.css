@@ -271,6 +271,26 @@ details.phase { scroll-margin-top: 1rem; }
 .linklike { font: inherit; background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
 .linklike:hover { filter: brightness(1.1); }
 
+/* standards & regulations register */
+.standards { display: grid; gap: 0.9rem; margin-top: 1rem; }
+.std-card { display: grid; gap: 0.7rem; }
+.std-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.std-title { font-size: 1rem; }
+.std-meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.35rem; font-size: 0.82rem; }
+.std-actions { display: flex; gap: 0.4rem; white-space: nowrap; }
+.std-current {
+  font-size: 0.9rem; padding: 0.5rem 0.75rem; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem;
+}
+.std-vlabel { font-weight: 600; }
+.std-view { margin-left: 0.6rem; }
+.std-del { margin-left: 0.6rem; color: var(--red); }
+.std-history { font-size: 0.88rem; }
+.std-history > summary { cursor: pointer; color: var(--muted); padding: 0.3rem 0; }
+.std-versions { list-style: none; margin: 0.4rem 0 0; padding: 0; display: grid; gap: 0.55rem; }
+.std-versions li { border-left: 2px solid var(--border); padding: 0.1rem 0 0.1rem 0.75rem; }
+.std-notes { color: var(--muted); font-size: 0.85rem; margin-top: 0.15rem; }
+
 /* generic modal body + step add/edit form */
 .modal-body { padding: 1.25rem 1.5rem; overflow: auto; }
 .step-form { display: grid; gap: 0.85rem; max-width: 640px; }

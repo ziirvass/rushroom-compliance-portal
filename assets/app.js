@@ -636,6 +636,138 @@
     return wrap;
   }
 
+  /* ---------------- Standards & Regulations register ---------------- */
+  const fmtDate = (iso) => { if (!iso) return ""; try { return new Date(iso).toLocaleDateString("en-GB"); } catch { return iso; } };
+  const viewFile = (v) => window.PortalViewer && window.PortalViewer.open({ name: v.file_name, open_url: v.open_url, storage_path: v.file_name });
+
+  async function deleteStandard(s, role, reload) {
+    if (!confirm(`Delete standard “${s.code || s.title}” and all its versions?`)) return;
+    try { await API.deleteStandard(API.getToken(role), s.id); await reload(); } catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
+  }
+  async function deleteStandardVersion(v, role, reload) {
+    if (!confirm(`Delete version “${v.version || v.file_name}”?`)) return;
+    try { await API.deleteStandardVersion(API.getToken(role), v.id); await reload(); } catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
+  }
+
+  function addStandardCard(role, reload) {
+    const code = el("input", { type: "text", class: "up-text", placeholder: "Code (e.g. EN 60598-1)" });
+    const title = el("input", { type: "text", class: "up-text", placeholder: "Title" });
+    const category = el("input", { type: "text", class: "up-text", placeholder: "Category (e.g. LVD, EMC)" });
+    const auds = ["internal", "supplier", "reviewer", "installer"].map((a) => {
+      const cb = el("input", { type: "checkbox", value: a, checked: a === "internal" ? "checked" : null });
+      return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
+    });
+    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const btn = el("button", { class: "btn btn-primary", type: "button" }, "Add standard");
+    btn.addEventListener("click", async () => {
+      if (!code.value.trim() && !title.value.trim()) { status.className = "up-status warn"; status.textContent = "Enter a code or title."; return; }
+      const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
+      btn.disabled = true; status.className = "up-status"; status.textContent = "Saving…";
+      try {
+        await API.addStandard(API.getToken(role), { code: code.value, title: title.value, category: category.value, audience: audience.length ? audience : ["internal"] });
+        code.value = title.value = category.value = ""; await reload();
+      } catch (ex) { btn.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`; }
+    });
+    return el("div", { class: "card upload-card" }, [
+      el("h3", {}, "Add a standard / regulation"),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Register a standard, then upload its versions below. Every upload is kept for a full revision trail."),
+      el("div", { class: "upload-fields" }, [code, title, category]),
+      el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
+      el("div", { style: "margin-top:0.75rem" }, btn),
+      status,
+    ]);
+  }
+
+  function standardVersionEditor(s, role, reload) {
+    const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose the standard file" });
+    const version = el("input", { type: "text", placeholder: "e.g. 2015+A1:2022 or Rev 3" });
+    const eff = el("input", { type: "text", placeholder: "Effective date (optional)" });
+    const notes = el("textarea", { rows: "3", placeholder: "What changed in this revision (optional)" });
+    const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload version");
+    const form = el("div", { class: "step-form" }, [
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), file]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version"), version]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Effective date"), eff]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Revision notes"), notes]),
+      note, el("div", { style: "margin-top:0.5rem" }, save),
+    ]);
+    const close = openModal(`New version — ${s.code || s.title || "standard"}`, form);
+    file.focus();
+    save.addEventListener("click", async () => {
+      const f = file.files && file.files[0];
+      if (!f) { note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
+      save.disabled = true; note.className = "up-status"; note.textContent = "Uploading…";
+      try {
+        await API.uploadStandardVersion(API.getToken(role), f, { standardId: s.id, version: version.value, effectiveDate: eff.value, notes: notes.value });
+        close(); await reload();
+      } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
+    });
+  }
+
+  function standardCard(s, role, reload) {
+    const versions = s.versions || []; // newest first (server-ordered)
+    const current = versions[0];
+    const manage = role === "rushroom";
+    const head = el("div", { class: "std-head" }, [
+      el("div", {}, [
+        el("div", { class: "std-title" }, [el("strong", {}, s.code || "(no code)"), s.title ? el("span", { class: "muted" }, ` — ${s.title}`) : null]),
+        el("div", { class: "std-meta" }, [
+          s.category ? el("span", { class: "pill-priority" }, s.category) : null,
+          el("span", { class: "muted" }, ` ${versions.length} version${versions.length === 1 ? "" : "s"}`),
+        ]),
+      ]),
+      manage ? el("div", { class: "std-actions" }, [
+        el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => standardVersionEditor(s, role, reload) }, "+ New version"),
+        el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => deleteStandard(s, role, reload) }, "Delete"),
+      ]) : null,
+    ]);
+    const currentEl = current
+      ? el("div", { class: "std-current" }, [
+          el("span", { class: "std-vlabel" }, `Current: ${current.version || "—"}`),
+          current.effective_date ? el("span", { class: "muted" }, ` · effective ${current.effective_date}`) : null,
+          el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
+          current.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => viewFile(current) }, "View") : null,
+        ])
+      : el("div", { class: "std-current muted" }, "No file uploaded yet.");
+    const history = versions.length
+      ? el("details", { class: "std-history" }, [
+          el("summary", {}, `Revision history (${versions.length})`),
+          el("ul", { class: "std-versions" }, versions.map((v) => el("li", {}, [
+            el("div", {}, [
+              el("span", { class: "std-vlabel" }, v.version || "—"),
+              v.effective_date ? el("span", { class: "muted" }, ` · effective ${v.effective_date}`) : null,
+              el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
+              v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => viewFile(v) }, "View") : null,
+              manage ? el("button", { class: "linklike std-del", type: "button", onclick: () => deleteStandardVersion(v, role, reload) }, "delete") : null,
+            ]),
+            v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
+          ]))),
+        ])
+      : null;
+    return el("div", { class: "card std-card" }, [head, currentEl, history]);
+  }
+
+  async function renderStandards(role, mount) {
+    mount.replaceChildren(el("div", { class: "loading" }, "Loading standards…"));
+    let payload;
+    try { payload = await API.standards(API.getToken(role)); }
+    catch (ex) {
+      if (/auth/i.test(ex.message)) { API.clearToken(role); location.reload(); return; }
+      mount.replaceChildren(el("div", { class: "error" }, `Couldn't load standards: ${ex.message}`)); return;
+    }
+    const standards = payload.standards || [];
+    const reload = () => renderStandards(role, mount);
+    const frag = el("div", {}, [
+      role === "rushroom" ? addStandardCard(role, reload) : null,
+      el("div", { class: "notice" }, "Version-controlled register of the standards and regulations this product must meet. Every uploaded revision is kept, so the history stays fully traceable."),
+      standards.length
+        ? el("div", { class: "standards" }, standards.map((s) => standardCard(s, role, reload)))
+        : el("div", { class: "empty" }, role === "rushroom" ? "No standards yet — add one above." : "No standards shared with you yet."),
+    ].filter(Boolean));
+    mount.replaceChildren(...frag.childNodes);
+  }
+
   // Full API render for a page: editable readiness + documents + uploads.
   async function renderApi(role, readinessMountId) {
     wireTabs($("#tablist"));
@@ -703,6 +835,8 @@
       if (review) docsPanel.appendChild(review);
     };
     await load();
+    const stdPanel = $("#standards-panel");
+    if (stdPanel) renderStandards(role, stdPanel);
   }
 
   /* ---------------- expose shared API ---------------- */
