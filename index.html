@@ -5,7 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Rushroom Compliance Portal</title>
   <meta name="description" content="Live compliance readiness and document library for Rushroom AB's LED system-furniture product." />
-  <link rel="stylesheet" href="./assets/styles.css?v=15" />
+  <link rel="stylesheet" href="./assets/styles.css?v=16" />
+  <script>
+    /* Keep the sticky tab bar pinned right below the sticky header, whatever
+       height the header renders at (responsive / wrapped). */
+    (function () {
+      function setHeaderH() {
+        var h = document.querySelector(".site-header");
+        if (h) document.documentElement.style.setProperty("--header-h", h.offsetHeight + "px");
+      }
+      document.addEventListener("DOMContentLoaded", setHeaderH);
+      window.addEventListener("load", setHeaderH);
+      window.addEventListener("resize", setHeaderH);
+    })();
+  </script>
 </head>
 <body data-page="full">
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -79,9 +92,9 @@
     </div>
   </footer>
 
-  <script src="./assets/config.js?v=15"></script>
-  <script src="./assets/api.js?v=15"></script>
-  <script src="./assets/viewer.js?v=15"></script>
-  <script src="./assets/app.js?v=15"></script>
+  <script src="./assets/config.js?v=16"></script>
+  <script src="./assets/api.js?v=16"></script>
+  <script src="./assets/viewer.js?v=16"></script>
+  <script src="./assets/app.js?v=16"></script>
 </body>
 </html>

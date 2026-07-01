@@ -5,7 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Supplier View · Rushroom Compliance Portal</title>
   <meta name="description" content="Supplier view: supplier documents and the status of supplier compliance steps for Rushroom AB." />
-  <link rel="stylesheet" href="./assets/styles.css?v=15" />
+  <link rel="stylesheet" href="./assets/styles.css?v=16" />
+  <script>
+    (function () {
+      function setHeaderH() {
+        var h = document.querySelector(".site-header");
+        if (h) document.documentElement.style.setProperty("--header-h", h.offsetHeight + "px");
+      }
+      document.addEventListener("DOMContentLoaded", setHeaderH);
+      window.addEventListener("load", setHeaderH);
+      window.addEventListener("resize", setHeaderH);
+    })();
+  </script>
 </head>
 <body data-page="supplier">
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -72,10 +83,10 @@
     </div>
   </footer>
 
-  <script src="./assets/config.js?v=15"></script>
-  <script src="./assets/api.js?v=15"></script>
-  <script src="./assets/viewer.js?v=15"></script>
-  <script src="./assets/app.js?v=15"></script>
-  <script src="./assets/supplier.js?v=15"></script>
+  <script src="./assets/config.js?v=16"></script>
+  <script src="./assets/api.js?v=16"></script>
+  <script src="./assets/viewer.js?v=16"></script>
+  <script src="./assets/app.js?v=16"></script>
+  <script src="./assets/supplier.js?v=16"></script>
 </body>
 </html>
