@@ -647,6 +647,8 @@
     const isCreateMode = options.mode === "create" || !d;
     const defaultName = options.initialName || (d ? d.name : "New As Operates");
     const name = el("input", { type: "text", class: "up-text", value: defaultName, placeholder: "Name of the As Operates document", "aria-label": "As Operates document name" });
+    // A generic default name may be auto-replaced when a template is picked.
+    if (isCreateMode && !options.initialName) name.dataset.auto = "1";
     const notes = el("textarea", { rows: "3", placeholder: "e.g. reflect the latest requirements, tighten wording, add the sign-off section" });
     const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. Rev C or 2026-08)" });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
