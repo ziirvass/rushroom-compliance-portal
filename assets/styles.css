@@ -149,7 +149,7 @@ details.phase {
 }
 .phase-summary::-webkit-details-marker { display: none; }
 .phase-summary::before {
-  content: "▸"; color: var(--muted); font-size: 0.9rem; display: inline-block;
+  content: "▸"; color: var(--muted); font-size: 1.35rem; line-height: 1; display: inline-block;
   transition: transform 0.15s ease;
 }
 details.phase[open] > .phase-summary::before { transform: rotate(90deg); }
