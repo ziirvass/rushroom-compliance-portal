@@ -203,13 +203,16 @@
     for (const [phase, items] of byPhase(steps)) {
       const done = items.filter((s) => s.done).length;
       const pct = items.length ? Math.round((done / items.length) * 100) : 0;
-      list.appendChild(el("div", { class: "phase-bar" }, [
+      list.appendChild(el("button", {
+        class: "phase-bar phase-jump", type: "button",
+        "aria-label": `Jump to ${phase} — ${pct}% complete`,
+        onclick: () => jumpToPhase(phase),
+      }, [
         el("div", { class: "phase-bar-head" }, [
           el("span", {}, phase),
           el("span", { class: "muted" }, `${done}/${items.length} · ${pct}%`),
         ]),
-        el("div", { class: "progress", role: "progressbar", "aria-valuenow": String(pct), "aria-valuemin": "0", "aria-valuemax": "100", "aria-label": `${phase}: ${pct}% complete` },
-          el("span", { style: `width:${pct}%` })),
+        el("div", { class: "progress", "aria-hidden": "true" }, el("span", { style: `width:${pct}%` })),
       ]));
     }
     return collapsibleSection("__overview__", "Progress by phase", null, list);
@@ -297,6 +300,17 @@
       if (!open) { const n = d.dataset.phase; if (n) names.add(n); }
     }
     setCollapsed(open ? new Set() : names);
+  }
+
+  // Expand and smooth-scroll to a phase section (fast navigation from overview).
+  function jumpToPhase(phase) {
+    const target = $$("details.phase").find((d) => d.dataset.phase === phase);
+    if (!target) return;
+    target.open = true;
+    const c = getCollapsed(); c.delete(phase); setCollapsed(c);
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    const s = target.querySelector("summary");
+    if (s && s.focus) s.focus({ preventScroll: true });
   }
 
   // Reusable collapsible block (same look/behaviour/persistence as phases).

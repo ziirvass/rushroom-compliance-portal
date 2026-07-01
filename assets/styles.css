@@ -218,8 +218,16 @@ tbody tr:hover { background: var(--panel-2); }
 
 /* progress-by-phase overview */
 .phase-overview { margin-bottom: 1.5rem; }
-.phase-bars { display: grid; gap: 0.8rem; }
+.phase-bars { display: grid; gap: 0.5rem; }
 .phase-bar-head { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.85rem; margin-bottom: 0.3rem; }
+/* each bar is a jump-to-section button */
+.phase-jump {
+  display: block; width: 100%; text-align: left; font: inherit; color: inherit;
+  background: none; border: 1px solid transparent; border-radius: 8px; padding: 0.45rem 0.55rem; cursor: pointer;
+}
+.phase-jump:hover { background: var(--panel-2); border-color: var(--border); }
+.phase-jump:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+details.phase { scroll-margin-top: 1rem; }
 
 /* editable status dropdown */
 .status-select {
