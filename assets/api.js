@@ -92,7 +92,16 @@
         body: file,
       });
       if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
-      await call({ action: "addDocument", token, category, name: name || file.name, audience, kind, storagePath: path });
+      await call({ action: "addDocument", token, category, name: name || file.name, audience, kind, storagePath: path, fileName: file.name });
+      return path;
+    },
+
+    // Upload a new version of an existing operational document (previous versions kept).
+    async uploadDocumentVersion(token, file, { documentId, version, notes } = {}) {
+      const { signedUrl, path } = await call({ action: "docUploadUrl", token, fileName: file.name });
+      const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+      if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+      await call({ action: "addDocumentVersion", token, documentId, version, notes, path, fileName: file.name });
       return path;
     },
   };

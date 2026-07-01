@@ -380,7 +380,43 @@
       sel.addEventListener("change", () => opts.onKind(d, sel.value));
       return sel;
     };
+    const openViewer = (name, url) => window.PortalViewer && window.PortalViewer.open({ name, open_url: url, storage_path: name });
+    // Operational document — version-managed (current + history), never deleted.
+    const renderOpDoc = (d) => {
+      const versions = d.versions || [];
+      const current = versions[0];
+      const currentRow = current
+        ? el("div", { class: "std-current" }, [
+            el("span", { class: "std-vlabel" }, `Current${current.version ? `: ${current.version}` : ""}`),
+            el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
+            current.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer(current.file_name, current.open_url) }, "View") : null,
+          ])
+        : el("div", { class: "std-current muted" }, "No file uploaded yet.");
+      const history = versions.length
+        ? el("details", { class: "std-history" }, [
+            el("summary", {}, `Version history (${versions.length})`),
+            el("ul", { class: "std-versions" }, versions.map((v) => el("li", {}, [
+              el("div", {}, [
+                el("span", { class: "std-vlabel" }, v.version || "—"),
+                el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
+                v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer(v.file_name, v.open_url) }, "View") : null,
+              ]),
+              v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
+            ]))),
+          ])
+        : null;
+      return el("div", { class: "doc doc-op" }, [
+        el("div", {}, [el("div", { class: "name" }, d.name), el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`)]),
+        currentRow,
+        history,
+        el("div", { class: "doc-actions" }, [
+          opts.manage && opts.onNewVersion && d.id ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => opts.onNewVersion(d) }, "+ New version") : null,
+          opts.manage && opts.onKind && d.id ? kindSelect(d) : null,
+        ]),
+      ]);
+    };
     const renderDoc = (d) => {
+      if ((d.kind || "template") === "operational") return renderOpDoc(d);
       const link = d.open_url || d.url;
       const ext = (d.storage_path || "").split(".").pop().toLowerCase();
       const canView = !!d.storage_path && !!window.PortalViewer && ["pdf", "docx", "xlsx", "xls", "csv"].includes(ext);
@@ -578,6 +614,32 @@
       el("div", { style: "margin-top:0.75rem" }, btn),
       status,
     ]);
+  }
+
+  // Upload a new version of an operational document (previous versions kept).
+  function documentVersionEditor(d, role, reload) {
+    const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose the new version file" });
+    const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. 2026-07 or Rev B)" });
+    const notes = el("textarea", { rows: "2", placeholder: "What changed (optional)" });
+    const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload new version");
+    const form = el("div", { class: "step-form" }, [
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), file]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Notes"), notes]),
+      note, el("div", { style: "margin-top:0.5rem" }, save),
+    ]);
+    const close = openModal(`New version — ${d.name}`, form);
+    file.focus();
+    save.addEventListener("click", async () => {
+      const f = file.files && file.files[0];
+      if (!f) { note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
+      save.disabled = true; note.className = "up-status"; note.textContent = "Uploading…";
+      try {
+        await API.uploadDocumentVersion(API.getToken(role), f, { documentId: d.id, version: version.value, notes: notes.value });
+        close(); await reload();
+      } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
+    });
   }
 
   // Generic accessible modal (reuses the viewer's overlay/dialog styling).
@@ -932,10 +994,11 @@
         try { await API.updateDocument(API.getToken(role), d.id, { kind }); await load(); }
         catch (ex) { alert(`Couldn't move document: ${ex.message}`); }
       };
+      const onNewVersion = (d) => documentVersionEditor(d, role, load);
       const docsPanel = $("#documents-panel");
       docsPanel.replaceChildren(el("div", {}, [
         role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load),
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onDelete, onKind }),
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onDelete, onKind, onNewVersion }),
       ].filter(Boolean)));
       const review = await uploadsReview(role, load);
       if (review) docsPanel.appendChild(review);

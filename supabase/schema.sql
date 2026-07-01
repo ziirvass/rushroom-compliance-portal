@@ -39,6 +39,20 @@ create table if not exists public.documents (
 alter table public.documents add column if not exists storage_path text default '';
 alter table public.documents add column if not exists kind text not null default 'template';
 
+-- Version history for operational ("Company as Operates") documents. These are
+-- never deleted — a new version is uploaded and the previous ones stay accessible.
+create table if not exists public.document_versions (
+  id           uuid primary key default gen_random_uuid(),
+  document_id  uuid not null references public.documents(id) on delete cascade,
+  version      text default '',
+  file_name    text not null,
+  storage_path text not null,
+  notes        text default '',
+  uploaded_by  text default '',
+  created_at   timestamptz not null default now()
+);
+create index if not exists document_versions_doc_idx on public.document_versions (document_id);
+
 create table if not exists public.uploads (
   id             uuid primary key default gen_random_uuid(),
   step           integer references public.steps(step) on delete set null,
@@ -103,8 +117,9 @@ create index if not exists deviation_findings_scan_idx on public.deviation_findi
 -- ---- Row-Level Security: lock everything; only the service role (Edge
 --      Function) may read/write. No policies = no access for anon/authenticated.
 alter table public.steps             enable row level security;
-alter table public.documents         enable row level security;
-alter table public.uploads           enable row level security;
+alter table public.documents          enable row level security;
+alter table public.document_versions  enable row level security;
+alter table public.uploads            enable row level security;
 alter table public.standards          enable row level security;
 alter table public.standard_versions  enable row level security;
 alter table public.deviation_scans    enable row level security;

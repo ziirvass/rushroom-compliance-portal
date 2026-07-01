@@ -210,11 +210,21 @@ Deno.serve(async (req) => {
     // Attach an "open" link: a short-lived signed URL for files stored here, or
     // the external URL for legacy/Drive-linked documents.
     const docs = await Promise.all(d.map(async (doc) => {
-      if (doc.storage_path) {
-        const { data: signed } = await db.storage.from(DOC_BUCKET).createSignedUrl(doc.storage_path, 60 * 60);
-        return { ...doc, open_url: signed?.signedUrl ?? "" };
+      // Operational documents are version-managed: attach the version history
+      // (newest first) with signed links, and use the latest as the current file.
+      let versions: any[] = [];
+      if (doc.kind === "operational") {
+        const { data: vs } = await db.from("document_versions").select("*").eq("document_id", doc.id).order("created_at", { ascending: false });
+        versions = await Promise.all((vs ?? []).map(async (v) => {
+          const { data: s } = await db.storage.from(DOC_BUCKET).createSignedUrl(v.storage_path, 60 * 60);
+          return { ...v, open_url: s?.signedUrl ?? "" };
+        }));
       }
-      return { ...doc, open_url: doc.url || "" };
+      let open_url = "";
+      if (versions.length) open_url = versions[0].open_url;
+      else if (doc.storage_path) { const { data: s } = await db.storage.from(DOC_BUCKET).createSignedUrl(doc.storage_path, 60 * 60); open_url = s?.signedUrl ?? ""; }
+      else open_url = doc.url || "";
+      return { ...doc, open_url, versions };
     }));
     return json({ role, steps: s, documents: docs });
   }
@@ -321,15 +331,41 @@ Deno.serve(async (req) => {
     if (!name) return json({ error: "name required" }, 400);
     const audience = Array.isArray(body.audience) && body.audience.length
       ? body.audience.map((a: unknown) => String(a)) : ["internal"];
-    const { error } = await db.from("documents").insert({
+    const kind = body.kind === "operational" ? "operational" : "template";
+    const storagePath = String(body.storagePath ?? "").slice(0, 400);
+    const { data: doc, error } = await db.from("documents").insert({
       category: (String(body.category ?? "").trim() || "Uncategorised").slice(0, 80),
       name: name.slice(0, 200),
       url: String(body.url ?? "").slice(0, 1000),
-      storage_path: String(body.storagePath ?? "").slice(0, 400),
-      kind: body.kind === "operational" ? "operational" : "template",
+      storage_path: storagePath,
+      kind,
       audience,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 500);
+    // Operational docs are version-managed — record the first version.
+    if (kind === "operational" && storagePath && doc) {
+      await db.from("document_versions").insert({
+        document_id: doc.id, version: String(body.version ?? "").slice(0, 80),
+        file_name: String(body.fileName ?? "file").slice(0, 200), storage_path: storagePath,
+        notes: String(body.notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
+      });
+    }
+    return json({ ok: true, id: doc?.id });
+  }
+
+  if (action === "addDocumentVersion") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const document_id = String(body.documentId ?? "");
+    const path = String(body.path ?? "");
+    const fileName = String(body.fileName ?? "");
+    if (!document_id || !path || !fileName) return json({ error: "documentId, path, fileName required" }, 400);
+    const { error } = await db.from("document_versions").insert({
+      document_id, version: String(body.version ?? "").slice(0, 80),
+      file_name: fileName.slice(0, 200), storage_path: path,
+      notes: String(body.notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
     });
     if (error) return json({ error: error.message }, 500);
+    await db.from("documents").update({ storage_path: path }).eq("id", document_id); // keep current pointer in sync
     return json({ ok: true });
   }
 
@@ -345,6 +381,17 @@ Deno.serve(async (req) => {
     if (!Object.keys(patch).length) return json({ error: "nothing to update" }, 400);
     const { error } = await db.from("documents").update(patch).eq("id", id);
     if (error) return json({ error: error.message }, 500);
+    // Moving a single-file template into the versioned operational track: seed v1.
+    if (patch.kind === "operational") {
+      const { data: doc } = await db.from("documents").select("storage_path").eq("id", id).maybeSingle();
+      const { count } = await db.from("document_versions").select("id", { count: "exact", head: true }).eq("document_id", id);
+      if (doc?.storage_path && !count) {
+        await db.from("document_versions").insert({
+          document_id: id, version: "v1", file_name: (doc.storage_path.split("/").pop() || "file"),
+          storage_path: doc.storage_path, uploaded_by: "rushroom",
+        });
+      }
+    }
     return json({ ok: true });
   }
 
@@ -352,7 +399,8 @@ Deno.serve(async (req) => {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const id = String(body.id ?? "");
     if (!id) return json({ error: "id required" }, 400);
-    const { data: doc } = await db.from("documents").select("storage_path").eq("id", id).maybeSingle();
+    const { data: doc } = await db.from("documents").select("kind,storage_path").eq("id", id).maybeSingle();
+    if (doc?.kind === "operational") return json({ error: "Operational documents are version-managed and cannot be deleted — upload a new version instead." }, 400);
     if (doc?.storage_path) await db.storage.from(DOC_BUCKET).remove([doc.storage_path]);
     const { error } = await db.from("documents").delete().eq("id", id);
     if (error) return json({ error: error.message }, 500);
