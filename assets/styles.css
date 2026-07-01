@@ -24,6 +24,7 @@ html { scroll-behavior: smooth; }
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: clip;  /* contain the full-bleed 100vw tab divider; safe for sticky */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
@@ -60,7 +61,6 @@ a:hover { text-decoration: underline; }
   position: sticky;
   top: 0;
   z-index: 150;   /* above content + tabs, below the viewer modal (200) */
-  border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, #141821, #0f1115);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
 }
@@ -117,13 +117,25 @@ main {
 
 /* ---- Tabs (AA keyboard operable) ---- */
 .tabs {
-  display: flex; gap: 0.2rem; border-bottom: 1px solid var(--border); margin-bottom: 1.2rem; flex-wrap: wrap;
+  display: flex; gap: 0.2rem; margin-bottom: 1.2rem; flex-wrap: wrap;
   position: sticky;
   top: var(--header-h, 64px);  /* stick just below the sticky header */
   z-index: 50;                 /* above content, below modals (viewer overlay = 200) */
   background: var(--bg);
   padding: 0.45rem 0 0.3rem;
   box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.45);
+}
+/* Full-bleed divider under the tab bar — spans the whole screen width,
+   not just the centered content column. */
+.tabs::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 100vw;
+  margin-left: -50vw;
+  border-bottom: 1px solid var(--border);
+  pointer-events: none;
 }
 .tab {
   font: inherit; cursor: pointer; background: none; border: none; color: var(--muted);
