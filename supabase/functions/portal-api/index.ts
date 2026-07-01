@@ -113,6 +113,30 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const SCAN_MODEL = "claude-opus-4-8";
 const SEVERITIES = ["Critical", "High", "Medium", "Low", "Info"];
 const TEXT_CAP = 40000; // per-file char cap fed to the model
+const DOCUMENT_DRAFT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    summary: { type: "string" },
+    proposed_changes: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          rationale: { type: "string" },
+        },
+        required: ["title", "description", "rationale"],
+      },
+    },
+    draft_text: { type: "string" },
+    version_hint: { type: "string" },
+    file_name_hint: { type: "string" },
+  },
+  required: ["summary", "proposed_changes", "draft_text", "version_hint", "file_name_hint"],
+};
 const FINDINGS_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -351,6 +375,92 @@ Deno.serve(async (req) => {
       });
     }
     return json({ ok: true, id: doc?.id });
+  }
+
+  if (action === "suggestDocumentVersion") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const document_id = String(body.documentId ?? "");
+    if (!document_id) return json({ error: "documentId required" }, 400);
+    const context = String(body.notes ?? "").trim();
+    const preferredVersion = String(body.preferredVersion ?? "").trim();
+
+    const { data: doc, error: docErr } = await db.from("documents").select("id,name,kind").eq("id", document_id).maybeSingle();
+    if (docErr || !doc) return json({ error: "Document not found" }, 404);
+    const { data: latest } = await db.from("document_versions").select("*", { count: "exact" }).eq("document_id", document_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const storagePath = latest?.storage_path || "";
+    const fileName = latest?.file_name || doc.name || "document";
+    if (!storagePath) return json({ error: "No uploaded file found for this document yet" }, 400);
+
+    const content: any[] = [{ type: "text", text: "You are helping Rushroom update a compliance-operational document. Draft the next version using the supplied document and the user's change request. Return strict JSON matching the requested schema." }];
+    if (context) content.push({ type: "text", text: `\nChange request / context:\n${context}` });
+    if (preferredVersion) content.push({ type: "text", text: `\nPreferred version label:\n${preferredVersion}` });
+    content.push({ type: "text", text: "\n=== CURRENT DOCUMENT ===" });
+    content.push(await fileBlock(DOC_BUCKET, storagePath, fileName));
+
+    const system = `You are an expert compliance-document editor for Rushroom AB. Review the supplied operational document and produce a practical next version draft. Keep it concise, professional, and suitable for compliance use. If the document contains outdated wording, add clear improvement suggestions. Return a JSON object with:
+- summary: a short explanation of the proposed update
+- proposed_changes: an array of objects with title, description, rationale
+- draft_text: a full draft of the updated document in plain markdown
+- version_hint: a suggested version label such as Rev C or 2026-08
+- file_name_hint: a file name suggestion such as as-operated-v3.md`;
+
+    let apiJson: any;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+          model: SCAN_MODEL,
+          max_tokens: 16000,
+          thinking: { type: "adaptive" },
+          output_config: { effort: "medium", format: { type: "json_schema", schema: DOCUMENT_DRAFT_SCHEMA } },
+          system,
+          messages: [{ role: "user", content }],
+        }),
+      });
+      apiJson = await res.json();
+      if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
+    } catch (e) {
+      return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
+    }
+    if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to draft the document update." }, 502);
+    const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
+    let parsed: any;
+    try { parsed = JSON.parse(textBlock?.text || "{}"); }
+    catch { return json({ error: "The AI response could not be parsed. Try again." }, 502); }
+
+    const proposedChanges = Array.isArray(parsed.proposed_changes) ? parsed.proposed_changes : [];
+    return json({
+      ok: true,
+      summary: String(parsed.summary || "Draft prepared."),
+      proposedChanges,
+      draftText: String(parsed.draft_text || ""),
+      versionHint: String(parsed.version_hint || "AI draft"),
+      fileNameHint: String(parsed.file_name_hint || "draft.md"),
+    });
+  }
+
+  if (action === "publishDocumentDraft") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const document_id = String(body.documentId ?? "");
+    const path = String(body.path ?? "");
+    const draftText = String(body.draftText ?? "");
+    const fileName = String(body.fileName ?? "draft.md");
+    if (!document_id || !path || !draftText.trim()) return json({ error: "documentId, path, draftText required" }, 400);
+
+    const approvedChanges = Array.isArray(body.approvedChanges) ? body.approvedChanges : [];
+    const noteText = [String(body.notes ?? "").slice(0, 1000), approvedChanges.length ? `Approved changes: ${approvedChanges.join(", ")}` : ""].filter(Boolean).join("\n");
+    const { error: insertErr } = await db.from("document_versions").insert({
+      document_id,
+      version: String(body.version ?? "AI draft").slice(0, 80),
+      file_name: fileName.slice(0, 200),
+      storage_path: path,
+      notes: noteText.slice(0, 1000),
+      uploaded_by: "rushroom",
+    });
+    if (insertErr) return json({ error: insertErr.message }, 500);
+    await db.from("documents").update({ storage_path: path }).eq("id", document_id);
+    return json({ ok: true });
   }
 
   if (action === "addDocumentVersion") {

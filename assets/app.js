@@ -411,6 +411,7 @@
         history,
         el("div", { class: "doc-actions" }, [
           opts.manage && opts.onNewVersion && d.id ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => opts.onNewVersion(d) }, "+ New version") : null,
+          opts.manage && opts.onDraft && d.id ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onDraft(d) }, "AI draft") : null,
           opts.manage && opts.onKind && d.id ? kindSelect(d) : null,
         ]),
       ]);
@@ -426,6 +427,7 @@
           el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`),
         ]),
         el("div", { class: "doc-actions" }, [
+          opts.manage && opts.onDraft && d.id ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onDraft(d) }, "AI draft") : null,
           canView
             ? el("button", { class: "open", type: "button", onclick: () => window.PortalViewer.open(d) }, "View")
             : (link ? el("a", { class: "open", href: link, target: "_blank", rel: "noopener" }, "Open ↗") : el("span", { class: "pending" }, "link pending")),
@@ -639,6 +641,85 @@
         await API.uploadDocumentVersion(API.getToken(role), f, { documentId: d.id, version: version.value, notes: notes.value });
         close(); await reload();
       } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
+    });
+  }
+
+  function documentDraftAssistant(d, role, reload) {
+    const notes = el("textarea", { rows: "3", placeholder: "Describe the intended changes, new requirements, or process updates to reflect in the next version" });
+    const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. Rev C or 2026-08)" });
+    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const generate = el("button", { class: "btn btn-primary", type: "button" }, "Generate draft");
+    const publish = el("button", { class: "btn btn-primary", type: "button" }, "Publish approved draft");
+    const changeList = el("div", { style: "margin-top:0.75rem" });
+    const draft = el("textarea", { rows: "12", style: "width:100%; margin-top:0.75rem", placeholder: "The AI-generated draft will appear here" });
+    publish.disabled = true;
+    let draftResult = null;
+
+    const form = el("div", { class: "step-form" }, [
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Context"), notes]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem" }, [generate, publish]),
+      status,
+      el("div", { style: "margin-top:1rem" }, [el("strong", {}, "Suggested changes"), changeList]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Draft text"), draft]),
+    ]);
+
+    const close = openModal(`AI draft — ${d.name}`, form);
+    notes.focus();
+
+    generate.addEventListener("click", async () => {
+      const context = notes.value.trim();
+      if (!context) { status.className = "up-status warn"; status.textContent = "Add a bit of context first so the draft can be meaningful."; return; }
+      generate.disabled = true; publish.disabled = true; status.className = "up-status"; status.textContent = "Generating draft…";
+      try {
+        draftResult = await API.suggestDocumentVersion(API.getToken(role), { documentId: d.id, notes: context, preferredVersion: version.value.trim() });
+        const proposals = Array.isArray(draftResult.proposedChanges) ? draftResult.proposedChanges : [];
+        changeList.replaceChildren();
+        if (proposals.length) {
+          const items = proposals.map((c) => {
+            const checkbox = el("input", { type: "checkbox", checked: "checked" });
+            checkbox.dataset.title = c.title || "Change";
+            return el("label", { style: "display:flex; gap:0.5rem; align-items:flex-start; margin-bottom:0.5rem" }, [
+              checkbox,
+              el("span", {}, [el("strong", {}, c.title || "Change"), el("div", { class: "muted", style: "margin-top:0.2rem" }, c.description || "")]),
+            ]);
+          });
+          changeList.append(...items);
+        } else {
+          changeList.appendChild(el("div", { class: "muted" }, "No specific change list was returned. You can still publish the draft as-is."));
+        }
+        draft.value = draftResult.draftText || "";
+        status.className = "up-status ok"; status.textContent = draftResult.summary || "Draft ready for review.";
+        publish.disabled = false;
+      } catch (ex) {
+        status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
+      } finally {
+        generate.disabled = false;
+      }
+    });
+
+    publish.addEventListener("click", async () => {
+      if (!draftResult) { status.className = "up-status warn"; status.textContent = "Generate a draft first."; return; }
+      const approved = Array.from(changeList.querySelectorAll("input[type='checkbox']"))
+        .filter((cb) => cb.checked)
+        .map((cb) => cb.dataset.title || "change")
+        .filter(Boolean);
+      const finalText = draft.value.trim();
+      if (!finalText) { status.className = "up-status warn"; status.textContent = "The draft text is empty."; return; }
+      publish.disabled = true; status.className = "up-status"; status.textContent = "Publishing draft…";
+      try {
+        await API.publishDocumentDraft(API.getToken(role), {
+          documentId: d.id,
+          version: version.value.trim() || draftResult.versionHint || "AI draft",
+          notes: `Approved changes: ${approved.join(", ") || "none"}\n${notes.value.trim()}`,
+          draftText: finalText,
+          fileName: `${(d.name || "document").replace(/[^a-z0-9._-]+/gi, "_") || "document"}.md`,
+          approvedChanges: approved,
+        });
+        close(); await reload();
+      } catch (ex) {
+        publish.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
+      }
     });
   }
 
@@ -995,10 +1076,11 @@
         catch (ex) { alert(`Couldn't move document: ${ex.message}`); }
       };
       const onNewVersion = (d) => documentVersionEditor(d, role, load);
+      const onDraft = (d) => documentDraftAssistant(d, role, load);
       const docsPanel = $("#documents-panel");
       docsPanel.replaceChildren(el("div", {}, [
         role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load),
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onDelete, onKind, onNewVersion }),
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onDelete, onKind, onNewVersion, onDraft }),
       ].filter(Boolean)));
       const review = await uploadsReview(role, load);
       if (review) docsPanel.appendChild(review);

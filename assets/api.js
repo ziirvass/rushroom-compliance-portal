@@ -104,6 +104,19 @@
       await call({ action: "addDocumentVersion", token, documentId, version, notes, path, fileName: file.name });
       return path;
     },
+
+    suggestDocumentVersion(token, { documentId, notes, preferredVersion } = {}) {
+      return call({ action: "suggestDocumentVersion", token, documentId, notes, preferredVersion });
+    },
+
+    async publishDocumentDraft(token, { documentId, version, notes, draftText, fileName, approvedChanges } = {}) {
+      const { signedUrl, path } = await call({ action: "docUploadUrl", token, fileName: fileName || "draft.md" });
+      const body = new Blob([draftText || ""], { type: "text/markdown;charset=utf-8" });
+      const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": "text/markdown;charset=utf-8" }, body });
+      if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+      await call({ action: "publishDocumentDraft", token, documentId, version, notes, draftText, fileName, approvedChanges, path });
+      return path;
+    },
   };
 
   window.PortalAPI = API;

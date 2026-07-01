@@ -99,6 +99,10 @@
         await loadScript(CDN.mammoth);
         const result = await window.mammoth.convertToHtml({ arrayBuffer: buf });
         body.replaceChildren(h("div", { class: "doc-render", html: result.value || "<p>(empty document)</p>" }));
+      } else if (ext === "txt" || ext === "md" || ext === "markdown") {
+        const buf = await fetchBytes(url);
+        const text = new TextDecoder().decode(new Uint8Array(buf));
+        body.replaceChildren(h("pre", { class: "viewer-text", style: "white-space:pre-wrap; word-break:break-word; padding:1rem; background:#f7f9fc; border-radius:8px; max-height:70vh; overflow:auto;" }, text || "(empty document)"));
       } else if (ext === "xlsx" || ext === "xls" || ext === "csv") {
         const buf = await fetchBytes(url);
         await loadScript(CDN.xlsx);
