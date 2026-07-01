@@ -523,6 +523,17 @@ Be specific: name the exact document and the exact standard (and clause where po
     return json({ ok: true, scan, findings });
   }
 
+  if (action === "deleteUpload") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const id = String(body.id ?? "");
+    if (!id) return json({ error: "id required" }, 400);
+    const { data: u } = await db.from("uploads").select("file_path").eq("id", id).maybeSingle();
+    if (u?.file_path) await db.storage.from(BUCKET).remove([u.file_path]);
+    const { error } = await db.from("uploads").delete().eq("id", id);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
   if (action === "uploads") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const { data, error } = await db.from("uploads").select("*").order("created_at", { ascending: false }).limit(200);

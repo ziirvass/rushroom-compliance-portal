@@ -611,12 +611,17 @@
   }
 
   // Rushroom-only: list of supplier uploads with signed download links.
-  async function uploadsReview(role) {
+  async function uploadsReview(role, reload) {
     if (role !== "rushroom") return null;
     const wrap = el("div", { class: "card" }, el("h3", {}, "Supplier uploads"));
     try {
       const { uploads } = await API.listUploads(API.getToken(role));
       if (!uploads || !uploads.length) { wrap.appendChild(el("p", { class: "muted", style: "margin:0" }, "No uploads yet.")); return wrap; }
+      const onDelete = async (u) => {
+        if (!confirm(`Delete upload “${u.file_name}”? This removes the file permanently.`)) return;
+        try { await API.deleteUpload(API.getToken(role), u.id); await reload(); }
+        catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
+      };
       const list = el("ul", { class: "uploads" });
       for (const u of uploads) {
         const ext = (u.file_name || "").split(".").pop().toLowerCase();
@@ -627,6 +632,7 @@
             : (u.download_url ? el("a", { href: u.download_url, target: "_blank", rel: "noopener" }, u.file_name) : el("span", {}, u.file_name)),
           el("span", { class: "muted" }, ` — ${u.supplier_label || u.uploaded_role}${u.step ? ` · step #${u.step}` : ""}${u.note ? ` · ${u.note}` : ""}`),
           canView ? el("span", { class: "muted" }, [" · ", el("a", { href: u.download_url, target: "_blank", rel: "noopener" }, "download")]) : null,
+          u.id ? el("span", {}, [" · ", el("button", { class: "linklike std-del", type: "button", onclick: () => onDelete(u) }, "delete")]) : null,
         ]));
       }
       wrap.appendChild(list);
@@ -898,7 +904,7 @@
         role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load),
         documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onDelete }),
       ].filter(Boolean)));
-      const review = await uploadsReview(role);
+      const review = await uploadsReview(role, load);
       if (review) docsPanel.appendChild(review);
     };
     await load();

@@ -45,6 +45,7 @@
     deleteStep: (token, step) => call({ action: "deleteStep", token, step }),
 
     listUploads: (token) => call({ action: "uploads", token }),
+    deleteUpload: (token, id) => call({ action: "deleteUpload", token, id }),
 
     /* Upload a File: ask the function for a signed URL, PUT the bytes straight
      * to storage, then record the metadata. Returns the stored path. */
