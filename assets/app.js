@@ -180,7 +180,7 @@
     const blocked = steps.filter((s) => norm(s.status) === "blocked").length;
     return el("div", { class: "summary" }, [
       el("div", { class: "card stat" }, [
-        el("h3", {}, "Overall readiness"),
+        el("h3", {}, "Overall compliance status"),
         el("div", { class: "value" }, `${pct}%`),
         el("div", { class: "progress", "aria-hidden": "true" }, el("span", { style: `width:${pct}%` })),
         el("div", { class: "sub" }, `${done} of ${total} steps complete`),
