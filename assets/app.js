@@ -640,7 +640,8 @@
   function uploadZone(role, bucket, opts = {}) {
     const input = el("input", { type: "file", class: "up-file", "aria-label": opts.ariaLabel || "Choose a file" });
     const bar = el("div", { class: "up-progress-bar" });
-    const barWrap = el("div", { class: "up-progress", hidden: "" }, bar);
+    const pct = el("span", { class: "up-progress-pct" }, "0%");
+    const barWrap = el("div", { class: "up-progress-row", hidden: "" }, [el("div", { class: "up-progress" }, bar), pct]);
     const info = el("div", { class: "dropzone-file muted" }, "No file selected.");
     const zone = el("div", { class: "dropzone" }, [
       el("div", { class: "dropzone-hint" }, [
@@ -660,14 +661,16 @@
     // a steady "trickle" both push the target forward.
     let dispPct = 0, targetPct = 0, rafId = null, trickleId = null, done = false;
     const paint = () => {
-      bar.style.width = dispPct.toFixed(1) + "%";
-      if (!done && file) info.textContent = `Uploading “${file.name}”… ${Math.round(dispPct)}%`;
+      const v = Math.max(0, Math.min(100, dispPct));
+      bar.style.width = v.toFixed(1) + "%";
+      pct.textContent = Math.round(v) + "%";           // always-updating counter
+      if (!done && file) info.textContent = `Uploading “${file.name}”…`;
     };
     const tick = () => {
       const diff = targetPct - dispPct;
       if (diff <= 0.4) {
         dispPct = targetPct; paint(); rafId = null;
-        if (done && dispPct >= 100 && file) { info.className = "dropzone-file ok"; info.textContent = `✓ ${file.name} — uploaded (100%)`; }
+        if (done && dispPct >= 100 && file) { info.className = "dropzone-file ok"; info.textContent = `✓ ${file.name} — uploaded`; }
         return;
       }
       dispPct = Math.min(targetPct, dispPct + diff * 0.12 + 0.4);
@@ -721,7 +724,7 @@
         file = null; uploaded = null; uploading = false; done = false;
         dispPct = 0; targetPct = 0;
         try { input.value = ""; } catch (_) {}
-        bar.style.width = "0%"; barWrap.hidden = true;
+        bar.style.width = "0%"; pct.textContent = "0%"; barWrap.hidden = true;
         info.className = "dropzone-file muted"; info.textContent = "No file selected.";
         sync();
       },

@@ -397,8 +397,10 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .dropzone-file.ok { color: var(--green); }
 .dropzone-file.err { color: var(--red); }
 /* file-upload progress bar */
-.up-progress { width: 100%; height: 6px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+.up-progress-row { display: flex; align-items: center; gap: 0.6rem; width: 100%; }
+.up-progress { flex: 1; height: 8px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
 .up-progress-bar { height: 100%; width: 0; background: var(--accent); }
+.up-progress-pct { min-width: 3.2ch; text-align: right; font-size: 0.82rem; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 /* disabled action buttons (until the file has finished uploading) */
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn:disabled:hover { background: var(--panel-2); }
