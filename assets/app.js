@@ -984,7 +984,7 @@
         ]),
       ]),
       manage ? el("div", { class: "std-actions" }, [
-        el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => standardVersionEditor(s, role, reload) }, "+ New version"),
+        el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => standardVersionEditor(s, role, reload) }, versions.length ? "+ New version" : "Upload file"),
         el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => deleteStandard(s, role, reload) }, "Delete"),
       ]) : null,
     ]);
@@ -995,7 +995,10 @@
           el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
           current.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => viewFile(current) }, "View") : null,
         ])
-      : el("div", { class: "std-current muted" }, "No file uploaded yet.");
+      : el("div", { class: "std-current" }, [
+          el("span", { class: "muted" }, "No file uploaded yet."),
+          manage ? el("button", { class: "linklike std-view", type: "button", onclick: () => standardVersionEditor(s, role, reload) }, "Upload file") : null,
+        ]);
     const history = versions.length
       ? el("details", { class: "std-history" }, [
           el("summary", {}, `Revision history (${versions.length})`),
