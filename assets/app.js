@@ -650,6 +650,35 @@
     return { btn, ensureUploaded };
   }
 
+  /* Wrap a file <input> in a drag-and-drop zone (keeps the themed Choose File
+   * button inside). Dropping a file assigns it to the input and fires "change"
+   * so every existing flow keeps working unchanged. */
+  function fileDropzone(fileEl, opts = {}) {
+    const zone = el("div", { class: "dropzone" }, [
+      el("div", { class: "dropzone-hint" }, [
+        el("span", { class: "dropzone-ico", "aria-hidden": "true" }, "⬆"),
+        el("span", {}, opts.hint || "Drag & drop a file here, or"),
+      ]),
+      fileEl,
+    ]);
+    const setDrag = (on) => zone.classList.toggle("dragover", on);
+    zone.addEventListener("dragenter", (e) => { e.preventDefault(); setDrag(true); });
+    zone.addEventListener("dragover", (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; setDrag(true); });
+    zone.addEventListener("dragleave", (e) => { if (!zone.contains(e.relatedTarget)) setDrag(false); });
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault(); setDrag(false);
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(files[0]);
+        fileEl.files = dt.files;
+      } catch (_) { /* older browsers: fall back to the button */ }
+      fileEl.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    return zone;
+  }
+
   function uploadCard(role, steps) {
     const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose a file to upload" });
     const stepSel = el("select", { class: "up-step", "aria-label": "Related step (optional)" }, [
@@ -682,7 +711,8 @@
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, role === "supplier"
         ? "Submit your signed declaration, test reports, datasheets, or RoHS/REACH declarations. The AI can read the file and suggest a note."
         : "Attach a file to the technical file or a specific step. The AI can read the file and suggest a note."),
-      el("div", { class: "upload-fields" }, [file, stepSel, who, note].filter(Boolean)),
+      fileDropzone(file),
+      el("div", { class: "upload-fields", style: "margin-top:0.6rem" }, [stepSel, who, note].filter(Boolean)),
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.6rem" }, [af.btn, btn]),
       status,
     ]);
@@ -729,7 +759,7 @@
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Manage documents"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file — the AI reads its name, category and section for you. Review, then add. Templates can later become As Operates documents without deleting anything."),
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document file"), file]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document file"), fileDropzone(file)]),
       el("div", { style: "margin:0.5rem 0 0.9rem" }, af.btn),
       el("div", { class: "upload-fields" }, [name, category, kind]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
@@ -760,7 +790,7 @@
       if (meta.summary && !notes.value.trim()) notes.value = meta.summary;
     } });
     const form = el("div", { class: "step-form" }, [
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), file]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), fileDropzone(file)]),
       el("div", {}, af.btn),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Notes"), notes]),
@@ -1115,7 +1145,7 @@
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Add a standard / regulation"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload the standard file — the AI reads its code, title, category and version for you. Review the fields, then approve to add it. Every upload is kept for a full revision trail."),
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Standard file"), file]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Standard file"), fileDropzone(file)]),
       el("div", { style: "margin:0.5rem 0 0.9rem" }, autofill),
       el("div", { class: "upload-fields" }, [code, title, category]),
       el("div", { class: "upload-fields", style: "margin-top:0.5rem" }, [version, eff]),
@@ -1138,7 +1168,7 @@
       if (meta.summary && !notes.value.trim()) notes.value = meta.summary;
     } });
     const form = el("div", { class: "step-form" }, [
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), file]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), fileDropzone(file)]),
       el("div", {}, af.btn),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version"), version]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Effective date"), eff]),

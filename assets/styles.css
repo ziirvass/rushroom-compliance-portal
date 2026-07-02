@@ -381,6 +381,19 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
   background: var(--panel-2); color: var(--text);
 }
 
+/* Drag-and-drop zone wrapping a file input */
+.dropzone {
+  display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-start;
+  border: 2px dashed var(--border); border-radius: 10px;
+  padding: 1rem; background: var(--bg);
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.dropzone.dragover { border-color: var(--accent); background: rgba(94, 224, 143, 0.08); }
+.dropzone-hint { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.85rem; pointer-events: none; }
+.dropzone.dragover .dropzone-hint { color: var(--accent); }
+.dropzone-ico { font-size: 1.1rem; line-height: 1; }
+.dropzone .up-file { max-width: 100%; }
+
 .up-status { font-size: 0.85rem; margin: 0.75rem 0 0; min-height: 1.2em; color: var(--muted); }
 .up-status.ok { color: var(--green); }
 .up-status.err { color: var(--red); }
