@@ -82,6 +82,19 @@
       return path;
     },
 
+    // Upload the standard file WITHOUT registering it yet (for AI auto-fill + human approval).
+    async uploadStandardFile(token, file) {
+      const { signedUrl, path } = await call({ action: "stdUploadUrl", token, fileName: file.name });
+      const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+      if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+      return { path, fileName: file.name };
+    },
+    // AI reads an already-uploaded standard file and proposes its catalogue fields.
+    suggestStandardMetadata: (token, { path, fileName }) => call({ action: "suggestStandardMetadata", token, path, fileName }),
+    // Record a version row for an already-uploaded file (used after AI auto-fill approval).
+    addStandardVersionRecord: (token, { standardId, version, effectiveDate, notes, path, fileName }) =>
+      call({ action: "addStandardVersion", token, standardId, version, effectiveDate, notes, path, fileName }),
+
     /* Add a library document: upload the file to the documents bucket, then
      * register it in the documents table. Rushroom only (enforced server-side). */
     async uploadDocument(token, file, { category, name, audience, kind } = {}) {

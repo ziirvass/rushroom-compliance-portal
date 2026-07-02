@@ -916,28 +916,70 @@
   }
 
   function addStandardCard(role, reload) {
+    const file = el("input", { type: "file", class: "up-file", "aria-label": "Standard or regulation file" });
     const code = el("input", { type: "text", class: "up-text", placeholder: "Code (e.g. EN 60598-1)" });
     const title = el("input", { type: "text", class: "up-text", placeholder: "Title" });
     const category = el("input", { type: "text", class: "up-text", placeholder: "Category (e.g. LVD, EMC)" });
+    const version = el("input", { type: "text", class: "up-text", placeholder: "Version (e.g. 2015+A1:2022)" });
+    const eff = el("input", { type: "text", class: "up-text", placeholder: "Effective date (optional)" });
     const auds = ["internal", "supplier", "reviewer", "installer"].map((a) => {
       const cb = el("input", { type: "checkbox", value: a, checked: a === "internal" ? "checked" : null });
       return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
     });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
-    const btn = el("button", { class: "btn btn-primary", type: "button" }, "Add standard");
+    const autofill = el("button", { class: "btn btn-primary", type: "button" }, "✨ Read file & auto-fill");
+    const btn = el("button", { class: "btn btn-primary", type: "button" }, "Approve & add standard");
+
+    let uploaded = null; // { path, fileName } of the file already sent to storage
+    const ensureUploaded = async () => {
+      const f = file.files && file.files[0];
+      if (!f) return null;
+      if (uploaded && uploaded.fileName === f.name) return uploaded;
+      uploaded = await API.uploadStandardFile(API.getToken(role), f);
+      return uploaded;
+    };
+
+    autofill.addEventListener("click", async () => {
+      const f = file.files && file.files[0];
+      if (!f) { status.className = "up-status warn"; status.textContent = "Choose a file first, then let the AI read it."; return; }
+      autofill.disabled = true; status.className = "up-status"; status.textContent = "Uploading and reading the file with AI…";
+      try {
+        const up = await ensureUploaded();
+        const meta = await API.suggestStandardMetadata(API.getToken(role), up);
+        if (meta.code) code.value = meta.code;
+        if (meta.title) title.value = meta.title;
+        if (meta.category) category.value = meta.category;
+        if (meta.version) version.value = meta.version;
+        if (meta.effectiveDate) eff.value = meta.effectiveDate;
+        status.className = "up-status ok";
+        status.textContent = meta.summary ? `AI read: ${meta.summary} — review the fields and approve.` : "AI filled the fields — review and approve.";
+      } catch (ex) {
+        status.className = "up-status err"; status.textContent = `Couldn't read the file: ${ex.message}. You can still fill the fields manually.`;
+      } finally { autofill.disabled = false; }
+    });
+
     btn.addEventListener("click", async () => {
-      if (!code.value.trim() && !title.value.trim()) { status.className = "up-status warn"; status.textContent = "Enter a code or title."; return; }
+      if (!code.value.trim() && !title.value.trim()) { status.className = "up-status warn"; status.textContent = "Enter a code or title (or auto-fill from a file)."; return; }
       const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
       btn.disabled = true; status.className = "up-status"; status.textContent = "Saving…";
       try {
-        await API.addStandard(API.getToken(role), { code: code.value, title: title.value, category: category.value, audience: audience.length ? audience : ["internal"] });
-        code.value = title.value = category.value = ""; await reload();
+        const up = await ensureUploaded(); // attach the chosen file, if any
+        const { id } = await API.addStandard(API.getToken(role), { code: code.value, title: title.value, category: category.value, audience: audience.length ? audience : ["internal"] });
+        if (up && id) {
+          await API.addStandardVersionRecord(API.getToken(role), { standardId: id, version: version.value, effectiveDate: eff.value, notes: "", path: up.path, fileName: up.fileName });
+        }
+        code.value = title.value = category.value = version.value = eff.value = ""; file.value = ""; uploaded = null;
+        await reload();
       } catch (ex) { btn.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`; }
     });
+
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Add a standard / regulation"),
-      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Register a standard, then upload its versions below. Every upload is kept for a full revision trail."),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload the standard file — the AI reads its code, title, category and version for you. Review the fields, then approve to add it. Every upload is kept for a full revision trail."),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Standard file"), file]),
+      el("div", { style: "margin:0.5rem 0 0.9rem" }, autofill),
       el("div", { class: "upload-fields" }, [code, title, category]),
+      el("div", { class: "upload-fields", style: "margin-top:0.5rem" }, [version, eff]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
       el("div", { style: "margin-top:0.75rem" }, btn),
       status,

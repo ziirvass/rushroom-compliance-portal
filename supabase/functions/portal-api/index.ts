@@ -137,6 +137,19 @@ const DOCUMENT_DRAFT_SCHEMA = {
   },
   required: ["summary", "proposed_changes", "draft_text", "version_hint", "file_name_hint"],
 };
+const STANDARD_META_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    code: { type: "string" },
+    title: { type: "string" },
+    category: { type: "string" },
+    version: { type: "string" },
+    effective_date: { type: "string" },
+    summary: { type: "string" },
+  },
+  required: ["code", "title", "category", "version", "effective_date", "summary"],
+};
 const FINDINGS_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -197,6 +210,30 @@ async function fileBlock(bucket: string, path: string, fileName: string) {
     return { type: "text", text: new TextDecoder().decode(bytes).slice(0, TEXT_CAP) || "(empty)" };
   } catch (e) {
     return { type: "text", text: `(could not extract text: ${(e as Error).message})` };
+  }
+}
+
+async function summarizeRequirementSource(bucket: string, path: string, fileName: string, label: string) {
+  const block = await fileBlock(bucket, path, fileName);
+  const text = typeof block === "object" && "text" in block ? String(block.text || "") : "";
+  if (!text || text.includes("could not read") || text.includes("(empty)")) return `- ${label}: no readable text available`;
+  const prompt = `Extract the most important compliance requirements and obligations from the following document text. Return a concise bullet list with no more than 8 bullets. Focus on requirements relevant to an operational compliance document.\n\nDocument: ${label}\n\n${text.slice(0, 18000)}`;
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: SCAN_MODEL,
+        max_tokens: 4000,
+        messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) return `- ${label}: could not summarize automatically`; 
+    const textBlock = (json.content || []).find((b: any) => b.type === "text");
+    return `- ${label}:\n${String(textBlock?.text || "").trim()}`;
+  } catch {
+    return `- ${label}: could not summarize automatically`;
   }
 }
 
@@ -452,14 +489,19 @@ Deno.serve(async (req) => {
     }
     if (sourceStandardIds.length) {
       content.push({ type: "text", text: "\n=== REFERENCE STANDARDS & REGULATIONS ===" });
+      const summaries: string[] = [];
       for (const standardId of sourceStandardIds) {
         const { data: standard } = await db.from("standards").select("id,code,title,category").eq("id", standardId).maybeSingle();
         if (!standard) continue;
         const { data: latestVersion } = await db.from("standard_versions").select("*").eq("standard_id", standard.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-        content.push({ type: "text", text: `\n--- STANDARD: ${standard.code || standard.title || "standard"}${standard.title ? ` — ${standard.title}` : ""}${standard.category ? ` [${standard.category}]` : ""} ---` });
-        if (latestVersion?.storage_path) content.push(await fileBlock(STD_BUCKET, latestVersion.storage_path, latestVersion.file_name || standard.code || "standard"));
-        else content.push({ type: "text", text: "(no uploaded file for this standard yet)" });
+        if (latestVersion?.storage_path) {
+          const summary = await summarizeRequirementSource(STD_BUCKET, latestVersion.storage_path, latestVersion.file_name || standard.code || "standard", `${standard.code || standard.title || "standard"}${standard.title ? ` — ${standard.title}` : ""}`);
+          summaries.push(summary);
+        } else {
+          summaries.push(`- ${standard.code || standard.title || "standard"}: no uploaded file yet`);
+        }
       }
+      content.push({ type: "text", text: summaries.join("\n") });
     }
     if (!document_id && !templateDocumentId && !sourceStandardIds.length) return json({ error: "Provide either a current document, a template, or at least one source standard/regulation." }, 400);
 
@@ -669,6 +711,61 @@ Deno.serve(async (req) => {
     });
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
+  }
+
+  if (action === "suggestStandardMetadata") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY in the function secrets." }, 400);
+    const path = String(body.path ?? "").trim();
+    const fileName = String(body.fileName ?? "file").trim();
+    if (!path) return json({ error: "path required" }, 400);
+
+    const system = `You are a compliance librarian reading a single standard or regulation document. Extract its catalogue metadata precisely from the document itself — do not invent values. Return a JSON object:
+- code: the official designation exactly as published (e.g. "EN 60598-1", "2014/35/EU", "(EU) 2019/2020", "EN IEC 63000"). If none is visible, "".
+- title: the official document title.
+- category: a short classifying tag for a compliance register — one of LVD, EMC, RoHS, REACH, Ecodesign, Energy labelling, Packaging/PPWR, WEEE, Batteries, Radio/RED, CPR, Machinery, or another concise domain tag if none fit.
+- version: the edition / amendment / year that identifies this revision (e.g. "2015+A1:2022", "Rev 3", "2014"). If none is visible, "".
+- effective_date: the date the document applies from if explicitly stated (ISO or as printed), else "".
+- summary: one sentence on what the document covers.`;
+
+    const content: any[] = [
+      { type: "text", text: "Extract the metadata for this standard/regulation document." },
+      await fileBlock(STD_BUCKET, path, fileName),
+    ];
+
+    let apiJson: any;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+          model: SCAN_MODEL,
+          max_tokens: 2000,
+          thinking: { type: "adaptive" },
+          output_config: { effort: "low", format: { type: "json_schema", schema: STANDARD_META_SCHEMA } },
+          system,
+          messages: [{ role: "user", content }],
+        }),
+      });
+      apiJson = await res.json();
+      if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
+    } catch (e) {
+      return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
+    }
+    if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to read this document." }, 502);
+    const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
+    let parsed: any;
+    try { parsed = JSON.parse(textBlock?.text || "{}"); }
+    catch { return json({ error: "The AI response could not be parsed. Try again or fill the fields manually." }, 502); }
+    return json({
+      ok: true,
+      code: String(parsed.code || ""),
+      title: String(parsed.title || ""),
+      category: String(parsed.category || ""),
+      version: String(parsed.version || ""),
+      effectiveDate: String(parsed.effective_date || ""),
+      summary: String(parsed.summary || ""),
+    });
   }
 
   if (action === "deleteStandardVersion") {
