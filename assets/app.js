@@ -371,6 +371,7 @@
    * flash(id) marks a freshly uploaded item to blink for 30s. */
   const flashUntil = new Map();   // id -> expiry timestamp (ms)
   const paneSelection = {};       // browser key -> selected item id
+  const collapsedCats = new Set(); // "key::heading::category" of collapsed groups (persists across reloads)
   function flash(id) { if (id) flashUntil.set(String(id), Date.now() + 30000); }
 
   /* Generic Finder-style browser: a left list grouped by heading/category and a
@@ -396,6 +397,17 @@
       main.replaceChildren(renderCard(item));
     };
 
+    const setAll = (open) => {
+      nav.querySelectorAll("details.browser-cat-group").forEach((d) => {
+        d.open = open;
+        if (open) collapsedCats.delete(d.dataset.catkey); else collapsedCats.add(d.dataset.catkey);
+      });
+    };
+    nav.appendChild(el("div", { class: "browser-tools" }, [
+      el("button", { class: "btn btn-sm", type: "button", onclick: () => setAll(true) }, "⊞ Expand all"),
+      el("button", { class: "btn btn-sm", type: "button", onclick: () => setAll(false) }, "⊟ Collapse all"),
+    ]));
+
     for (const group of tree) {
       if (group.heading || group.action || typeof group.count === "number") {
         nav.appendChild(el("div", { class: "browser-heading" }, [
@@ -407,7 +419,9 @@
       if (group.hint) nav.appendChild(el("div", { class: "browser-hint" }, group.hint));
       if (!group.categories.length) { nav.appendChild(el("div", { class: "browser-empty muted" }, opts.emptyGroup || "None yet.")); continue; }
       for (const cat of group.categories) {
-        nav.appendChild(el("div", { class: "browser-cat" }, cat.name));
+        const catKey = `${key}::${group.heading || ""}::${cat.name}`;
+        const rows = [];
+        let hasFlash = false;
         for (const item of cat.items) {
           items.push(item);
           const row = el("button", { class: "browser-row", type: "button", "data-id": item.id, title: item.name }, [
@@ -416,10 +430,23 @@
           ].filter(Boolean));
           rowById.set(item.id, row);
           const exp = flashUntil.get(String(item.id));
-          if (exp && exp > Date.now()) { row.classList.add("blink"); setTimeout(() => row.classList.remove("blink"), exp - Date.now()); }
+          if (exp && exp > Date.now()) { hasFlash = true; row.classList.add("blink"); setTimeout(() => row.classList.remove("blink"), exp - Date.now()); }
           row.addEventListener("click", () => select(item));
-          nav.appendChild(row);
+          rows.push(row);
         }
+        if (hasFlash) collapsedCats.delete(catKey); // keep a flashing category open so its blink is visible
+        const details = el("details", { class: "browser-cat-group", "data-catkey": catKey }, [
+          el("summary", { class: "browser-cat-summary" }, [
+            el("span", { class: "browser-cat-name" }, cat.name),
+            el("span", { class: "browser-cat-count" }, String(cat.items.length)),
+          ]),
+          el("div", { class: "browser-cat-items" }, rows),
+        ]);
+        if (!collapsedCats.has(catKey)) details.open = true;
+        details.addEventListener("toggle", () => {
+          if (details.open) collapsedCats.delete(catKey); else collapsedCats.add(catKey);
+        });
+        nav.appendChild(details);
       }
     }
 

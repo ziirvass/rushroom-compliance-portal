@@ -238,14 +238,37 @@ tbody tr:hover { background: var(--panel-2); }
   border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
   padding: 0.4rem; max-height: 72vh; overflow: auto;
   position: sticky; top: calc(var(--header-h, 64px) + 3.6rem);
+  /* Hide the scrollbar but keep scrolling */
+  scrollbar-width: none; -ms-overflow-style: none;
 }
+.browser-nav::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .browser-main { min-width: 0; }
 .browser-main .doc, .browser-main .std-card { width: 100%; }
+.browser-tools {
+  display: flex; gap: 0.4rem; padding: 0.2rem 0.3rem 0.5rem;
+  position: sticky; top: 0; z-index: 1; background: var(--panel);
+  border-bottom: 1px solid var(--border); margin-bottom: 0.25rem;
+}
 .browser-heading { display: flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.5rem 0.15rem; font-weight: 700; font-size: 0.92rem; }
 .browser-heading .count { color: var(--muted); font-weight: 400; font-size: 0.85rem; }
 .browser-head-action { margin-left: auto; }
 .browser-hint { font-size: 0.74rem; color: var(--muted); padding: 0 0.5rem 0.3rem; }
-.browser-cat { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); padding: 0.6rem 0.5rem 0.15rem; }
+/* Collapsible category groups (same feel as the Compliance Status phases) */
+.browser-cat-group { border: 0; }
+.browser-cat-summary {
+  cursor: pointer; list-style: none; user-select: none;
+  display: flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.5rem 0.2rem;
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+}
+.browser-cat-summary::-webkit-details-marker { display: none; }
+.browser-cat-summary::before {
+  content: "▸"; font-size: 0.95rem; line-height: 1; color: var(--muted);
+  transition: transform 0.15s ease;
+}
+.browser-cat-group[open] > .browser-cat-summary::before { transform: rotate(90deg); }
+.browser-cat-summary:hover { color: var(--text); }
+.browser-cat-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-cat-count { color: var(--muted); }
 .browser-row {
   display: block; width: 100%; text-align: left; font: inherit; cursor: pointer;
   background: none; border: none; color: var(--text);
