@@ -393,6 +393,16 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .dropzone.dragover .dropzone-hint { color: var(--accent); }
 .dropzone-ico { font-size: 1.1rem; line-height: 1; }
 .dropzone .up-file { max-width: 100%; }
+.dropzone-file { font-size: 0.82rem; color: var(--muted); }
+.dropzone-file.ok { color: var(--green); }
+.dropzone-file.err { color: var(--red); }
+/* file-upload progress bar */
+.up-progress { width: 100%; height: 6px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+.up-progress-bar { height: 100%; width: 0; background: var(--accent); transition: width 0.15s ease; }
+/* disabled action buttons (until the file has finished uploading) */
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled:hover { background: var(--panel-2); }
+.btn-primary:disabled, .btn-primary:disabled:hover { background: var(--accent); }
 
 .up-status { font-size: 0.85rem; margin: 0.75rem 0 0; min-height: 1.2em; color: var(--muted); }
 .up-status.ok { color: var(--green); }

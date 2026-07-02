@@ -99,6 +99,10 @@
      * uploadAnyFile sends the bytes to the right bucket WITHOUT registering the
      * file; suggestFileMetadata then has the AI read it and propose fields; a
      * flow-specific record* call registers it after the human approves. */
+    // Ask for a signed upload URL for the right bucket (the PUT is done by the
+    // caller, e.g. via XHR so upload progress can be shown).
+    signedUploadUrl: (token, fileName, bucket = "documents") =>
+      call({ action: bucket === "standards" ? "stdUploadUrl" : bucket === "uploads" ? "uploadUrl" : "docUploadUrl", token, fileName }),
     async uploadAnyFile(token, file, bucket = "documents") {
       const uploadAction = bucket === "standards" ? "stdUploadUrl" : bucket === "uploads" ? "uploadUrl" : "docUploadUrl";
       const { signedUrl, path } = await call({ action: uploadAction, token, fileName: file.name });

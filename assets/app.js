@@ -618,28 +618,99 @@
   }
 
   // File-upload card (suppliers submit declarations; Rushroom can attach files).
-  /* Shared "AI reads the file and fills the fields" control for every upload
-   * flow. Uploads the chosen file once to `bucket`, asks the AI to read it, then
-   * calls onFill(meta) so the flow populates its own fields. Returns the button
-   * plus ensureUploaded() so the flow's own submit reuses the already-sent file
-   * (nothing is registered until the human approves). */
-  function aiAutofill(role, { fileEl, bucket, statusEl, onFill }) {
-    const btn = el("button", { class: "btn btn-primary", type: "button" }, "✨ Read file & auto-fill");
-    let uploaded = null;
-    const ensureUploaded = async () => {
-      const f = fileEl.files && fileEl.files[0];
-      if (!f) return null;
-      if (uploaded && uploaded.fileName === f.name) return uploaded;
-      uploaded = await API.uploadAnyFile(API.getToken(role), f, bucket);
-      return uploaded;
-    };
-    btn.addEventListener("click", async () => {
-      const f = fileEl.files && fileEl.files[0];
-      if (!f) { statusEl.className = "up-status warn"; statusEl.textContent = "Choose a file first, then let the AI read it."; return; }
-      btn.disabled = true; statusEl.className = "up-status"; statusEl.textContent = "Uploading and reading the file with AI…";
+  // PUT a file to a signed URL via XHR so we get real upload-progress events.
+  function xhrPut(url, file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", url);
+      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+      if (xhr.upload) xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); };
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error(`HTTP ${xhr.status}`));
+      xhr.onerror = () => reject(new Error("network error"));
+      xhr.send(file);
+    });
+  }
+
+  /* An upload field: drag-and-drop zone + themed Choose File + progress bar. The
+   * file is uploaded to storage as soon as it is chosen or dropped, showing a
+   * progress bar; dependent buttons (registered via register()) stay disabled
+   * until the upload has completed. This also makes drag-and-drop robust on
+   * browsers that don't allow assigning input.files (the dropped File is used
+   * directly, not read back from the input). */
+  function uploadZone(role, bucket, opts = {}) {
+    const input = el("input", { type: "file", class: "up-file", "aria-label": opts.ariaLabel || "Choose a file" });
+    const bar = el("div", { class: "up-progress-bar" });
+    const barWrap = el("div", { class: "up-progress", hidden: "" }, bar);
+    const info = el("div", { class: "dropzone-file muted" }, "No file selected.");
+    const zone = el("div", { class: "dropzone" }, [
+      el("div", { class: "dropzone-hint" }, [
+        el("span", { class: "dropzone-ico", "aria-hidden": "true" }, "⬆"),
+        el("span", {}, opts.hint || "Drag & drop a file here, or"),
+      ]),
+      input, info, barWrap,
+    ]);
+
+    let file = null, uploaded = null, uploading = false;
+    const gated = []; // { el, requireFile }
+    const sync = () => { for (const g of gated) g.el.disabled = uploading || (g.requireFile && !uploaded); };
+    const register = (btnEl, requireFile = true) => { gated.push({ el: btnEl, requireFile }); sync(); };
+
+    const startUpload = async (f) => {
+      file = f; uploaded = null; uploading = true; sync();
+      info.className = "dropzone-file"; info.textContent = `Uploading “${f.name}”…`;
+      barWrap.hidden = false; bar.style.width = "0%";
       try {
-        const up = await ensureUploaded();
-        const meta = await API.suggestFileMetadata(API.getToken(role), { path: up.path, fileName: up.fileName, bucket });
+        const { signedUrl, path } = await API.signedUploadUrl(API.getToken(role), f.name, bucket);
+        await xhrPut(signedUrl, f, (pct) => { bar.style.width = `${pct}%`; });
+        bar.style.width = "100%";
+        uploaded = { path, fileName: f.name }; uploading = false; sync();
+        info.className = "dropzone-file ok"; info.textContent = `✓ ${f.name} — uploaded`;
+        if (opts.onReady) opts.onReady(uploaded, f);
+      } catch (ex) {
+        uploading = false; uploaded = null; sync();
+        info.className = "dropzone-file err"; info.textContent = `Upload failed: ${ex.message}. Please try again.`;
+        barWrap.hidden = true;
+      }
+    };
+
+    input.addEventListener("change", () => { const f = input.files && input.files[0]; if (f) startUpload(f); });
+    const setDrag = (on) => zone.classList.toggle("dragover", on);
+    zone.addEventListener("dragenter", (e) => { e.preventDefault(); setDrag(true); });
+    zone.addEventListener("dragover", (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; setDrag(true); });
+    zone.addEventListener("dragleave", (e) => { if (!zone.contains(e.relatedTarget)) setDrag(false); });
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault(); setDrag(false);
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!f) return;
+      try { const dt = new DataTransfer(); dt.items.add(f); input.files = dt.files; } catch (_) { /* Safari: ignore, we use f directly */ }
+      startUpload(f);
+    });
+
+    return {
+      el: zone, bucket, register,
+      getUploaded: () => uploaded,
+      getFile: () => file,
+      isUploading: () => uploading,
+      reset: () => {
+        file = null; uploaded = null; uploading = false;
+        try { input.value = ""; } catch (_) {}
+        bar.style.width = "0%"; barWrap.hidden = true;
+        info.className = "dropzone-file muted"; info.textContent = "No file selected.";
+        sync();
+      },
+    };
+  }
+
+  /* AI "read the uploaded file and fill fields" button. Uses the file already
+   * uploaded by the uploadZone, so it is instant and never re-uploads. */
+  function aiAutofill(role, { zone, statusEl, onFill }) {
+    const btn = el("button", { class: "btn btn-primary", type: "button" }, "✨ Read file & auto-fill");
+    btn.addEventListener("click", async () => {
+      const up = zone.getUploaded();
+      if (!up) { statusEl.className = "up-status warn"; statusEl.textContent = zone.isUploading() ? "Please wait — the file is still uploading." : "Add a file first."; return; }
+      btn.disabled = true; statusEl.className = "up-status"; statusEl.textContent = "Reading the file with AI…";
+      try {
+        const meta = await API.suggestFileMetadata(API.getToken(role), { path: up.path, fileName: up.fileName, bucket: zone.bucket });
         onFill(meta, up);
         statusEl.className = "up-status ok";
         statusEl.textContent = meta.summary ? `AI read: ${meta.summary} — review and approve.` : "AI filled the fields — review and approve.";
@@ -647,40 +718,11 @@
         statusEl.className = "up-status err"; statusEl.textContent = `Couldn't read the file: ${ex.message}. You can still fill the fields manually.`;
       } finally { btn.disabled = false; }
     });
-    return { btn, ensureUploaded };
-  }
-
-  /* Wrap a file <input> in a drag-and-drop zone (keeps the themed Choose File
-   * button inside). Dropping a file assigns it to the input and fires "change"
-   * so every existing flow keeps working unchanged. */
-  function fileDropzone(fileEl, opts = {}) {
-    const zone = el("div", { class: "dropzone" }, [
-      el("div", { class: "dropzone-hint" }, [
-        el("span", { class: "dropzone-ico", "aria-hidden": "true" }, "⬆"),
-        el("span", {}, opts.hint || "Drag & drop a file here, or"),
-      ]),
-      fileEl,
-    ]);
-    const setDrag = (on) => zone.classList.toggle("dragover", on);
-    zone.addEventListener("dragenter", (e) => { e.preventDefault(); setDrag(true); });
-    zone.addEventListener("dragover", (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; setDrag(true); });
-    zone.addEventListener("dragleave", (e) => { if (!zone.contains(e.relatedTarget)) setDrag(false); });
-    zone.addEventListener("drop", (e) => {
-      e.preventDefault(); setDrag(false);
-      const files = e.dataTransfer && e.dataTransfer.files;
-      if (!files || !files.length) return;
-      try {
-        const dt = new DataTransfer();
-        dt.items.add(files[0]);
-        fileEl.files = dt.files;
-      } catch (_) { /* older browsers: fall back to the button */ }
-      fileEl.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    return zone;
+    return { btn };
   }
 
   function uploadCard(role, steps) {
-    const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose a file to upload" });
+    const zone = uploadZone(role, "uploads", { ariaLabel: "Choose a file to upload" });
     const stepSel = el("select", { class: "up-step", "aria-label": "Related step (optional)" }, [
       el("option", { value: "" }, "— related step (optional) —"),
       ...steps.map((s) => el("option", { value: String(s.step) }, `#${s.step} · ${s.action.slice(0, 60)}`)),
@@ -691,27 +733,28 @@
     const note = el("input", { type: "text", class: "up-note", placeholder: "Note (optional)", "aria-label": "Note" });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const btn = el("button", { class: "btn btn-primary", type: "button" }, "Upload");
-    const af = aiAutofill(role, { fileEl: file, bucket: "uploads", statusEl: status, onFill: (meta) => {
+    const af = aiAutofill(role, { zone, statusEl: status, onFill: (meta) => {
       if (meta.summary && !note.value.trim()) note.value = meta.summary;
     } });
+    zone.register(af.btn); zone.register(btn);
     btn.addEventListener("click", async () => {
-      btn.disabled = true; status.className = "up-status"; status.textContent = "Uploading…";
+      const up = zone.getUploaded();
+      if (!up) { status.className = "up-status warn"; status.textContent = "Add a file first."; return; }
+      btn.disabled = true; status.className = "up-status"; status.textContent = "Saving…";
       try {
-        const up = await af.ensureUploaded();
-        if (!up) { btn.disabled = false; status.className = "up-status warn"; status.textContent = "Choose a file first."; return; }
         await API.recordUploadRecord(API.getToken(role), { step: stepSel.value || null, note: note.value, supplierLabel: who ? who.value : "", path: up.path, fileName: up.fileName });
         status.className = "up-status ok"; status.textContent = `Uploaded “${up.fileName}”. Thank you.`;
-        file.value = ""; note.value = "";
+        zone.reset(); note.value = "";
       } catch (ex) {
-        status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
-      } finally { btn.disabled = false; }
+        btn.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
+      }
     });
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Upload a document"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, role === "supplier"
         ? "Submit your signed declaration, test reports, datasheets, or RoHS/REACH declarations. The AI can read the file and suggest a note."
         : "Attach a file to the technical file or a specific step. The AI can read the file and suggest a note."),
-      fileDropzone(file),
+      zone.el,
       el("div", { class: "upload-fields", style: "margin-top:0.6rem" }, [stepSel, who, note].filter(Boolean)),
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.6rem" }, [af.btn, btn]),
       status,
@@ -721,7 +764,7 @@
   // Rushroom-only: add a file to the document library (stored in Supabase).
   function manageDocumentsCard(role, reload) {
     if (role !== "rushroom") return null;
-    const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose a document to add" });
+    const zone = uploadZone(role, "documents", { ariaLabel: "Choose a document to add" });
     const name = el("input", { type: "text", class: "up-text", placeholder: "Display name (defaults to file name)", "aria-label": "Document name" });
     const category = el("input", { type: "text", class: "up-text", placeholder: "Category (e.g. Test reports)", "aria-label": "Category" });
     const kind = el("select", { class: "up-text", "aria-label": "Section" }, [
@@ -734,32 +777,32 @@
     });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const btn = el("button", { class: "btn btn-primary", type: "button" }, "Add document");
-    const af = aiAutofill(role, { fileEl: file, bucket: "documents", statusEl: status, onFill: (meta) => {
+    const af = aiAutofill(role, { zone, statusEl: status, onFill: (meta) => {
       if (meta.name) name.value = meta.name;
       if (meta.category) category.value = meta.category;
       if (meta.kind === "template" || meta.kind === "operational") kind.value = meta.kind;
     } });
+    zone.register(af.btn); zone.register(btn);
     btn.addEventListener("click", async () => {
-      const f = file.files && file.files[0];
-      if (!f) { status.className = "up-status warn"; status.textContent = "Choose a file first."; return; }
+      const up = zone.getUploaded();
+      if (!up) { status.className = "up-status warn"; status.textContent = "Add a file first."; return; }
       const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
       if (!audience.length) audience.push("internal");
       btn.disabled = true; status.className = "up-status"; status.textContent = "Adding…";
       try {
-        const up = await af.ensureUploaded();
-        const res = await API.addDocumentRecord(API.getToken(role), { category: category.value, name: name.value || f.name, audience, kind: kind.value, path: up.path, fileName: up.fileName });
+        const res = await API.addDocumentRecord(API.getToken(role), { category: category.value, name: name.value || up.fileName, audience, kind: kind.value, path: up.path, fileName: up.fileName });
         flash(res && res.id);
-        status.className = "up-status ok"; status.textContent = `Added “${name.value || f.name}”.`;
-        file.value = ""; name.value = ""; category.value = "";
+        status.className = "up-status ok"; status.textContent = `Added “${name.value || up.fileName}”.`;
+        zone.reset(); name.value = ""; category.value = "";
         await reload();
       } catch (ex) {
-        status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
-      } finally { btn.disabled = false; }
+        btn.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
+      }
     });
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Manage documents"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file — the AI reads its name, category and section for you. Review, then add. Templates can later become As Operates documents without deleting anything."),
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document file"), fileDropzone(file)]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document file"), zone.el]),
       el("div", { style: "margin:0.5rem 0 0.9rem" }, af.btn),
       el("div", { class: "upload-fields" }, [name, category, kind]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
@@ -780,29 +823,29 @@
 
   // Upload a new version of a document (previous versions kept).
   function documentVersionEditor(d, role, reload) {
-    const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose the new version file" });
+    const zone = uploadZone(role, "documents", { ariaLabel: "Choose the new version file" });
     const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. 2026-07 or Rev B)" });
     const notes = el("textarea", { rows: "2", placeholder: "What changed (optional)" });
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload new version");
-    const af = aiAutofill(role, { fileEl: file, bucket: "documents", statusEl: note, onFill: (meta) => {
+    const af = aiAutofill(role, { zone, statusEl: note, onFill: (meta) => {
       if (meta.version && !version.value.trim()) version.value = meta.version;
       if (meta.summary && !notes.value.trim()) notes.value = meta.summary;
     } });
+    zone.register(af.btn); zone.register(save);
     const form = el("div", { class: "step-form" }, [
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), fileDropzone(file)]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), zone.el]),
       el("div", {}, af.btn),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Notes"), notes]),
       note, el("div", { style: "margin-top:0.5rem" }, save),
     ]);
     const close = openModal(`New version — ${d.name}`, form);
-    file.focus();
     save.addEventListener("click", async () => {
-      save.disabled = true; note.className = "up-status"; note.textContent = "Uploading…";
+      const up = zone.getUploaded();
+      if (!up) { note.className = "up-status warn"; note.textContent = "Add a file first."; return; }
+      save.disabled = true; note.className = "up-status"; note.textContent = "Saving…";
       try {
-        const up = await af.ensureUploaded();
-        if (!up) { save.disabled = false; note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
         await API.addDocumentVersionRecord(API.getToken(role), { documentId: d.id, version: version.value, notes: notes.value, path: up.path, fileName: up.fileName });
         flash(d.id); close(); await reload();
       } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
@@ -1084,7 +1127,6 @@
   }
 
   function addStandardCard(role, reload) {
-    const file = el("input", { type: "file", class: "up-file", "aria-label": "Standard or regulation file" });
     const code = el("input", { type: "text", class: "up-text", placeholder: "Code (e.g. EN 60598-1)" });
     const title = el("input", { type: "text", class: "up-text", placeholder: "Title" });
     const category = el("input", { type: "text", class: "up-text", placeholder: "Category (e.g. LVD, EMC)" });
@@ -1095,25 +1137,18 @@
       return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
     });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const zone = uploadZone(role, "standards", { ariaLabel: "Standard or regulation file" });
     const autofill = el("button", { class: "btn btn-primary", type: "button" }, "✨ Read file & auto-fill");
     const btn = el("button", { class: "btn btn-primary", type: "button" }, "Approve & add standard");
-
-    let uploaded = null; // { path, fileName } of the file already sent to storage
-    const ensureUploaded = async () => {
-      const f = file.files && file.files[0];
-      if (!f) return null;
-      if (uploaded && uploaded.fileName === f.name) return uploaded;
-      uploaded = await API.uploadStandardFile(API.getToken(role), f);
-      return uploaded;
-    };
+    zone.register(autofill);        // needs an uploaded file
+    zone.register(btn, false);      // a file is optional; only block while uploading
 
     autofill.addEventListener("click", async () => {
-      const f = file.files && file.files[0];
-      if (!f) { status.className = "up-status warn"; status.textContent = "Choose a file first, then let the AI read it."; return; }
-      autofill.disabled = true; status.className = "up-status"; status.textContent = "Uploading and reading the file with AI…";
+      const up = zone.getUploaded();
+      if (!up) { status.className = "up-status warn"; status.textContent = zone.isUploading() ? "Please wait — the file is still uploading." : "Add a file first."; return; }
+      autofill.disabled = true; status.className = "up-status"; status.textContent = "Reading the file with AI…";
       try {
-        const up = await ensureUploaded();
-        const meta = await API.suggestStandardMetadata(API.getToken(role), up);
+        const meta = await API.suggestStandardMetadata(API.getToken(role), { path: up.path, fileName: up.fileName });
         if (meta.code) code.value = meta.code;
         if (meta.title) title.value = meta.title;
         if (meta.category) category.value = meta.category;
@@ -1131,13 +1166,13 @@
       const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
       btn.disabled = true; status.className = "up-status"; status.textContent = "Saving…";
       try {
-        const up = await ensureUploaded(); // attach the chosen file, if any
+        const up = zone.getUploaded(); // attach the uploaded file, if any
         const { id } = await API.addStandard(API.getToken(role), { code: code.value, title: title.value, category: category.value, audience: audience.length ? audience : ["internal"] });
         if (up && id) {
           await API.addStandardVersionRecord(API.getToken(role), { standardId: id, version: version.value, effectiveDate: eff.value, notes: "", path: up.path, fileName: up.fileName });
         }
         flash(id);
-        code.value = title.value = category.value = version.value = eff.value = ""; file.value = ""; uploaded = null;
+        code.value = title.value = category.value = version.value = eff.value = ""; zone.reset();
         await reload();
       } catch (ex) { btn.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`; }
     });
@@ -1145,7 +1180,7 @@
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Add a standard / regulation"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload the standard file — the AI reads its code, title, category and version for you. Review the fields, then approve to add it. Every upload is kept for a full revision trail."),
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Standard file"), fileDropzone(file)]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Standard file"), zone.el]),
       el("div", { style: "margin:0.5rem 0 0.9rem" }, autofill),
       el("div", { class: "upload-fields" }, [code, title, category]),
       el("div", { class: "upload-fields", style: "margin-top:0.5rem" }, [version, eff]),
@@ -1156,19 +1191,20 @@
   }
 
   function standardVersionEditor(s, role, reload) {
-    const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose the standard file" });
+    const zone = uploadZone(role, "standards", { ariaLabel: "Choose the standard file" });
     const version = el("input", { type: "text", placeholder: "e.g. 2015+A1:2022 or Rev 3" });
     const eff = el("input", { type: "text", placeholder: "Effective date (optional)" });
     const notes = el("textarea", { rows: "3", placeholder: "What changed in this revision (optional)" });
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload version");
-    const af = aiAutofill(role, { fileEl: file, bucket: "standards", statusEl: note, onFill: (meta) => {
+    const af = aiAutofill(role, { zone, statusEl: note, onFill: (meta) => {
       if (meta.version && !version.value.trim()) version.value = meta.version;
       if (meta.effectiveDate && !eff.value.trim()) eff.value = meta.effectiveDate;
       if (meta.summary && !notes.value.trim()) notes.value = meta.summary;
     } });
+    zone.register(af.btn); zone.register(save);
     const form = el("div", { class: "step-form" }, [
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), fileDropzone(file)]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), zone.el]),
       el("div", {}, af.btn),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version"), version]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Effective date"), eff]),
@@ -1176,12 +1212,11 @@
       note, el("div", { style: "margin-top:0.5rem" }, save),
     ]);
     const close = openModal(`New version — ${s.code || s.title || "standard"}`, form);
-    file.focus();
     save.addEventListener("click", async () => {
-      save.disabled = true; note.className = "up-status"; note.textContent = "Uploading…";
+      const up = zone.getUploaded();
+      if (!up) { note.className = "up-status warn"; note.textContent = "Add a file first."; return; }
+      save.disabled = true; note.className = "up-status"; note.textContent = "Saving…";
       try {
-        const up = await af.ensureUploaded();
-        if (!up) { save.disabled = false; note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
         await API.addStandardVersionRecord(API.getToken(role), { standardId: s.id, version: version.value, effectiveDate: eff.value, notes: notes.value, path: up.path, fileName: up.fileName });
         flash(s.id); close(); await reload();
       } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
