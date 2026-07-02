@@ -232,6 +232,46 @@ tbody tr:hover { background: var(--panel-2); }
 .doc .open { white-space: nowrap; font-size: 0.85rem; }
 .doc .pending { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
 
+/* ---- Finder-style two-pane browser (Document library + Standards) ---- */
+.browser { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 1.1rem; align-items: start; margin-top: 1rem; }
+.browser-nav {
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
+  padding: 0.4rem; max-height: 72vh; overflow: auto;
+  position: sticky; top: calc(var(--header-h, 64px) + 3.6rem);
+}
+.browser-main { min-width: 0; }
+.browser-main .doc, .browser-main .std-card { width: 100%; }
+.browser-heading { display: flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.5rem 0.15rem; font-weight: 700; font-size: 0.92rem; }
+.browser-heading .count { color: var(--muted); font-weight: 400; font-size: 0.85rem; }
+.browser-head-action { margin-left: auto; }
+.browser-hint { font-size: 0.74rem; color: var(--muted); padding: 0 0.5rem 0.3rem; }
+.browser-cat { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); padding: 0.6rem 0.5rem 0.15rem; }
+.browser-row {
+  display: block; width: 100%; text-align: left; font: inherit; cursor: pointer;
+  background: none; border: none; color: var(--text);
+  padding: 0.45rem 0.6rem; border-radius: 7px; min-height: 38px;
+}
+.browser-row:hover { background: var(--panel-2); }
+.browser-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.browser-row.active { background: var(--accent); color: var(--accent-ink); }
+.browser-row-name { display: block; font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-row-sub { display: block; font-size: 0.74rem; }
+.browser-row.active .browser-row-sub { color: var(--accent-ink); opacity: 0.85; }
+.browser-empty { padding: 0.5rem; font-size: 0.85rem; }
+/* Blink a freshly uploaded row until it is clicked (JS stops it after 30s) */
+.browser-row.blink { animation: rowblink 1s ease-in-out infinite; }
+@keyframes rowblink {
+  0%, 100% { background: var(--accent); color: var(--accent-ink); }
+  50% { background: transparent; color: var(--text); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .browser-row.blink { animation: none; outline: 2px solid var(--accent); }
+}
+@media (max-width: 720px) {
+  .browser { grid-template-columns: 1fr; }
+  .browser-nav { position: static; max-height: 320px; }
+}
+
 /* states */
 .notice {
   background: var(--amber-bg); border: 1px solid var(--amber-bd); color: var(--amber);

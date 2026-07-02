@@ -367,6 +367,70 @@
     ["template", "Templates & Requirements", "Reference inputs to the work — version-controlled and reusable as starting points."],
     ["operational", "Company as Operates", "The actual operational documentation the AI deviation scan checks against the standards."],
   ];
+  /* Blink state + remembered selection for the two-pane browsers.
+   * flash(id) marks a freshly uploaded item to blink for 30s. */
+  const flashUntil = new Map();   // id -> expiry timestamp (ms)
+  const paneSelection = {};       // browser key -> selected item id
+  function flash(id) { if (id) flashUntil.set(String(id), Date.now() + 30000); }
+
+  /* Generic Finder-style browser: a left list grouped by heading/category and a
+   * right pane showing the selected item's card.
+   *   key       — stable string so the selection persists across reloads
+   *   tree      — [{ heading, count, action(el|null), hint, categories:[{ name, items:[{id,name,sub,data}] }] }]
+   *   renderCard(item) -> element for the right pane
+   */
+  function twoPaneBrowser(key, tree, renderCard, opts = {}) {
+    const root = el("div", { class: "browser" });
+    const nav = el("nav", { class: "browser-nav", "aria-label": opts.navLabel || "Files" });
+    const main = el("div", { class: "browser-main" });
+    root.append(nav, main);
+
+    const items = [];
+    const rowById = new Map();
+    const select = (item) => {
+      if (!item) { main.replaceChildren(el("div", { class: "empty" }, opts.emptyDetail || "Select an item on the left.")); return; }
+      paneSelection[key] = item.id;
+      for (const [id, r] of rowById) r.classList.toggle("active", id === item.id);
+      const r = rowById.get(item.id);
+      if (r) { r.classList.remove("blink"); flashUntil.delete(String(item.id)); }
+      main.replaceChildren(renderCard(item));
+    };
+
+    for (const group of tree) {
+      if (group.heading || group.action || typeof group.count === "number") {
+        nav.appendChild(el("div", { class: "browser-heading" }, [
+          group.heading ? el("span", {}, group.heading) : null,
+          typeof group.count === "number" ? el("span", { class: "count" }, `(${group.count})`) : null,
+          group.action ? el("span", { class: "browser-head-action" }, group.action) : null,
+        ].filter(Boolean)));
+      }
+      if (group.hint) nav.appendChild(el("div", { class: "browser-hint" }, group.hint));
+      if (!group.categories.length) { nav.appendChild(el("div", { class: "browser-empty muted" }, opts.emptyGroup || "None yet.")); continue; }
+      for (const cat of group.categories) {
+        nav.appendChild(el("div", { class: "browser-cat" }, cat.name));
+        for (const item of cat.items) {
+          items.push(item);
+          const row = el("button", { class: "browser-row", type: "button", "data-id": item.id, title: item.name }, [
+            el("span", { class: "browser-row-name" }, item.name),
+            item.sub ? el("span", { class: "browser-row-sub muted" }, item.sub) : null,
+          ].filter(Boolean));
+          rowById.set(item.id, row);
+          const exp = flashUntil.get(String(item.id));
+          if (exp && exp > Date.now()) { row.classList.add("blink"); setTimeout(() => row.classList.remove("blink"), exp - Date.now()); }
+          row.addEventListener("click", () => select(item));
+          nav.appendChild(row);
+        }
+      }
+    }
+
+    // Keep the prior selection (or default to the first item). A freshly-uploaded
+    // item is left to blink for attention rather than auto-opened, so its blink
+    // persists until the user clicks it.
+    const initial = items.find((i) => i.id === paneSelection[key]) || items[0];
+    select(initial);
+    return root;
+  }
+
   function documentLibrary(audienceFilter, docsInput, opts = {}) {
     const source = docsInput || CFG.documents || [];
     const docs = source.filter((d) => !audienceFilter || (d.audience || []).includes(audienceFilter));
@@ -420,32 +484,29 @@
       ]);
     };
 
+    const tree = [];
     for (const [kind, label, hint] of DOC_KINDS) {
       const kdocs = docs.filter((d) => (d.kind || "template") === kind);
       if (!kdocs.length && !opts.manage) continue;
-      const headParts = [el("h2", {}, label), el("span", { class: "muted" }, ` (${kdocs.length})`)];
-      if (opts.manage && opts.onCreateNew && kind === "operational") {
-        headParts.push(el("button", { class: "btn btn-sm btn-primary doc-kind-new", type: "button", onclick: () => opts.onCreateNew() }, "+ New As Operates"));
-      }
-      const section = el("section", { class: "doc-kind-section" }, [
-        el("div", { class: "doc-kind-head" }, headParts),
-        el("p", { class: "muted doc-kind-hint" }, hint),
-      ]);
-      if (!kdocs.length) {
-        section.appendChild(el("div", { class: "empty" }, "None yet."));
-      } else {
-        const cats = new Map();
-        for (const d of kdocs) { if (!cats.has(d.category)) cats.set(d.category, []); cats.get(d.category).push(d); }
-        for (const [cat, items] of cats) {
-          const group = el("div", { class: "doc-group" }, el("h3", {}, cat));
-          const grid = el("div", { class: "docs" });
-          for (const d of items) grid.appendChild(renderDoc(d));
-          group.appendChild(grid);
-          section.appendChild(group);
-        }
-      }
-      wrap.appendChild(section);
+      const cats = new Map();
+      for (const d of kdocs) { const c = d.category || "Uncategorised"; if (!cats.has(c)) cats.set(c, []); cats.get(c).push(d); }
+      const categories = [...cats].map(([name, list]) => ({
+        name,
+        items: list.map((d) => ({
+          id: d.id || d.name,
+          name: d.name,
+          sub: `${(d.versions || []).length} version${(d.versions || []).length === 1 ? "" : "s"}`,
+          data: d,
+        })),
+      }));
+      const action = (opts.manage && opts.onCreateNew && kind === "operational")
+        ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => opts.onCreateNew() }, "+ New As Operates")
+        : null;
+      tree.push({ heading: label, count: kdocs.length, action, hint, categories });
     }
+    wrap.appendChild(twoPaneBrowser("documents", tree, (item) => renderDoc(item.data), {
+      navLabel: "Documents", emptyDetail: "Select a document on the left.",
+    }));
     return wrap;
   }
 
@@ -629,7 +690,8 @@
       btn.disabled = true; status.className = "up-status"; status.textContent = "Adding…";
       try {
         const up = await af.ensureUploaded();
-        await API.addDocumentRecord(API.getToken(role), { category: category.value, name: name.value || f.name, audience, kind: kind.value, path: up.path, fileName: up.fileName });
+        const res = await API.addDocumentRecord(API.getToken(role), { category: category.value, name: name.value || f.name, audience, kind: kind.value, path: up.path, fileName: up.fileName });
+        flash(res && res.id);
         status.className = "up-status ok"; status.textContent = `Added “${name.value || f.name}”.`;
         file.value = ""; name.value = ""; category.value = "";
         await reload();
@@ -685,7 +747,7 @@
         const up = await af.ensureUploaded();
         if (!up) { save.disabled = false; note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
         await API.addDocumentVersionRecord(API.getToken(role), { documentId: d.id, version: version.value, notes: notes.value, path: up.path, fileName: up.fileName });
-        close(); await reload();
+        flash(d.id); close(); await reload();
       } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
     });
   }
@@ -1017,6 +1079,7 @@
         if (up && id) {
           await API.addStandardVersionRecord(API.getToken(role), { standardId: id, version: version.value, effectiveDate: eff.value, notes: "", path: up.path, fileName: up.fileName });
         }
+        flash(id);
         code.value = title.value = category.value = version.value = eff.value = ""; file.value = ""; uploaded = null;
         await reload();
       } catch (ex) { btn.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`; }
@@ -1063,7 +1126,7 @@
         const up = await af.ensureUploaded();
         if (!up) { save.disabled = false; note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
         await API.addStandardVersionRecord(API.getToken(role), { standardId: s.id, version: version.value, effectiveDate: eff.value, notes: notes.value, path: up.path, fileName: up.fileName });
-        close(); await reload();
+        flash(s.id); close(); await reload();
       } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
     });
   }
@@ -1124,12 +1187,29 @@
     }
     const standards = payload.standards || [];
     const reload = () => renderStandards(role, mount);
+    let browser;
+    if (standards.length) {
+      const cats = new Map();
+      for (const s of standards) { const c = s.category || "Uncategorised"; if (!cats.has(c)) cats.set(c, []); cats.get(c).push(s); }
+      const categories = [...cats].map(([name, list]) => ({
+        name,
+        items: list.map((s) => ({
+          id: s.id,
+          name: s.code || s.title || "Standard",
+          sub: `${(s.versions || []).length} version${(s.versions || []).length === 1 ? "" : "s"}`,
+          data: s,
+        })),
+      }));
+      browser = twoPaneBrowser("standards", [{ heading: "Register", count: standards.length, categories }],
+        (item) => standardCard(item.data, role, reload),
+        { navLabel: "Standards & regulations", emptyDetail: "Select a standard on the left." });
+    } else {
+      browser = el("div", { class: "empty" }, role === "rushroom" ? "No standards yet — add one above." : "No standards shared with you yet.");
+    }
     const frag = el("div", {}, [
       role === "rushroom" ? addStandardCard(role, reload) : null,
       el("div", { class: "notice" }, "Version-controlled register of the standards and regulations this product must meet. Every uploaded revision is kept, so the history stays fully traceable."),
-      standards.length
-        ? el("div", { class: "standards" }, standards.map((s) => standardCard(s, role, reload)))
-        : el("div", { class: "empty" }, role === "rushroom" ? "No standards yet — add one above." : "No standards shared with you yet."),
+      browser,
     ].filter(Boolean));
     mount.replaceChildren(...frag.childNodes);
   }
