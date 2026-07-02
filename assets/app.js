@@ -655,19 +655,44 @@
     const sync = () => { for (const g of gated) g.el.disabled = uploading || (g.requireFile && !uploaded); };
     const register = (btnEl, requireFile = true) => { gated.push({ el: btnEl, requireFile }); sync(); };
 
+    // Smoothly animated 0→100 progress: the displayed value eases toward a moving
+    // target, so even an instant upload visibly counts up; real XHR progress and
+    // a steady "trickle" both push the target forward.
+    let dispPct = 0, targetPct = 0, rafId = null, trickleId = null, done = false;
+    const paint = () => {
+      bar.style.width = dispPct.toFixed(1) + "%";
+      if (!done && file) info.textContent = `Uploading “${file.name}”… ${Math.round(dispPct)}%`;
+    };
+    const tick = () => {
+      const diff = targetPct - dispPct;
+      if (diff <= 0.4) {
+        dispPct = targetPct; paint(); rafId = null;
+        if (done && dispPct >= 100 && file) { info.className = "dropzone-file ok"; info.textContent = `✓ ${file.name} — uploaded (100%)`; }
+        return;
+      }
+      dispPct = Math.min(targetPct, dispPct + diff * 0.12 + 0.4);
+      paint();
+      rafId = requestAnimationFrame(tick);
+    };
+    const bump = (t) => { targetPct = Math.max(targetPct, Math.min(100, t)); if (rafId == null) rafId = requestAnimationFrame(tick); };
+    const stopAnim = () => { if (trickleId) { clearInterval(trickleId); trickleId = null; } if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; } };
+
     const startUpload = async (f) => {
       file = f; uploaded = null; uploading = true; sync();
-      info.className = "dropzone-file"; info.textContent = `Uploading “${f.name}”…`;
-      barWrap.hidden = false; bar.style.width = "0%";
+      stopAnim(); dispPct = 0; targetPct = 0; done = false;
+      info.className = "dropzone-file"; barWrap.hidden = false; paint();
+      // creep the target toward 90% so the bar always shows steady movement
+      trickleId = setInterval(() => { if (!done && targetPct < 90) bump(targetPct + Math.max(1.5, (90 - targetPct) * 0.06)); }, 120);
       try {
         const { signedUrl, path } = await API.signedUploadUrl(API.getToken(role), f.name, bucket);
-        await xhrPut(signedUrl, f, (pct) => { bar.style.width = `${pct}%`; });
-        bar.style.width = "100%";
-        uploaded = { path, fileName: f.name }; uploading = false; sync();
-        info.className = "dropzone-file ok"; info.textContent = `✓ ${f.name} — uploaded`;
+        await xhrPut(signedUrl, f, (pct) => bump(Math.min(95, pct)));
+        if (trickleId) { clearInterval(trickleId); trickleId = null; }
+        uploaded = { path, fileName: f.name }; uploading = false; done = true; sync();
+        bump(100);
         if (opts.onReady) opts.onReady(uploaded, f);
       } catch (ex) {
-        uploading = false; uploaded = null; sync();
+        stopAnim();
+        uploading = false; uploaded = null; done = false; sync();
         info.className = "dropzone-file err"; info.textContent = `Upload failed: ${ex.message}. Please try again.`;
         barWrap.hidden = true;
       }
@@ -692,7 +717,9 @@
       getFile: () => file,
       isUploading: () => uploading,
       reset: () => {
-        file = null; uploaded = null; uploading = false;
+        stopAnim();
+        file = null; uploaded = null; uploading = false; done = false;
+        dispPct = 0; targetPct = 0;
         try { input.value = ""; } catch (_) {}
         bar.style.width = "0%"; barWrap.hidden = true;
         info.className = "dropzone-file muted"; info.textContent = "No file selected.";
