@@ -530,6 +530,38 @@
   }
 
   // File-upload card (suppliers submit declarations; Rushroom can attach files).
+  /* Shared "AI reads the file and fills the fields" control for every upload
+   * flow. Uploads the chosen file once to `bucket`, asks the AI to read it, then
+   * calls onFill(meta) so the flow populates its own fields. Returns the button
+   * plus ensureUploaded() so the flow's own submit reuses the already-sent file
+   * (nothing is registered until the human approves). */
+  function aiAutofill(role, { fileEl, bucket, statusEl, onFill }) {
+    const btn = el("button", { class: "btn btn-primary", type: "button" }, "✨ Read file & auto-fill");
+    let uploaded = null;
+    const ensureUploaded = async () => {
+      const f = fileEl.files && fileEl.files[0];
+      if (!f) return null;
+      if (uploaded && uploaded.fileName === f.name) return uploaded;
+      uploaded = await API.uploadAnyFile(API.getToken(role), f, bucket);
+      return uploaded;
+    };
+    btn.addEventListener("click", async () => {
+      const f = fileEl.files && fileEl.files[0];
+      if (!f) { statusEl.className = "up-status warn"; statusEl.textContent = "Choose a file first, then let the AI read it."; return; }
+      btn.disabled = true; statusEl.className = "up-status"; statusEl.textContent = "Uploading and reading the file with AI…";
+      try {
+        const up = await ensureUploaded();
+        const meta = await API.suggestFileMetadata(API.getToken(role), { path: up.path, fileName: up.fileName, bucket });
+        onFill(meta, up);
+        statusEl.className = "up-status ok";
+        statusEl.textContent = meta.summary ? `AI read: ${meta.summary} — review and approve.` : "AI filled the fields — review and approve.";
+      } catch (ex) {
+        statusEl.className = "up-status err"; statusEl.textContent = `Couldn't read the file: ${ex.message}. You can still fill the fields manually.`;
+      } finally { btn.disabled = false; }
+    });
+    return { btn, ensureUploaded };
+  }
+
   function uploadCard(role, steps) {
     const file = el("input", { type: "file", class: "up-file", "aria-label": "Choose a file to upload" });
     const stepSel = el("select", { class: "up-step", "aria-label": "Related step (optional)" }, [
@@ -542,13 +574,16 @@
     const note = el("input", { type: "text", class: "up-note", placeholder: "Note (optional)", "aria-label": "Note" });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const btn = el("button", { class: "btn btn-primary", type: "button" }, "Upload");
+    const af = aiAutofill(role, { fileEl: file, bucket: "uploads", statusEl: status, onFill: (meta) => {
+      if (meta.summary && !note.value.trim()) note.value = meta.summary;
+    } });
     btn.addEventListener("click", async () => {
-      const f = file.files && file.files[0];
-      if (!f) { status.className = "up-status warn"; status.textContent = "Choose a file first."; return; }
       btn.disabled = true; status.className = "up-status"; status.textContent = "Uploading…";
       try {
-        await API.uploadFile(API.getToken(role), f, { step: stepSel.value || null, note: note.value, supplierLabel: who ? who.value : "" });
-        status.className = "up-status ok"; status.textContent = `Uploaded “${f.name}”. Thank you.`;
+        const up = await af.ensureUploaded();
+        if (!up) { btn.disabled = false; status.className = "up-status warn"; status.textContent = "Choose a file first."; return; }
+        await API.recordUploadRecord(API.getToken(role), { step: stepSel.value || null, note: note.value, supplierLabel: who ? who.value : "", path: up.path, fileName: up.fileName });
+        status.className = "up-status ok"; status.textContent = `Uploaded “${up.fileName}”. Thank you.`;
         file.value = ""; note.value = "";
       } catch (ex) {
         status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
@@ -557,9 +592,10 @@
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Upload a document"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, role === "supplier"
-        ? "Submit your signed declaration, test reports, datasheets, or RoHS/REACH declarations."
-        : "Attach a file to the technical file or a specific step."),
-      el("div", { class: "upload-fields" }, [file, stepSel, who, note, btn].filter(Boolean)),
+        ? "Submit your signed declaration, test reports, datasheets, or RoHS/REACH declarations. The AI can read the file and suggest a note."
+        : "Attach a file to the technical file or a specific step. The AI can read the file and suggest a note."),
+      el("div", { class: "upload-fields" }, [file, stepSel, who, note].filter(Boolean)),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.6rem" }, [af.btn, btn]),
       status,
     ]);
   }
@@ -580,14 +616,20 @@
     });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const btn = el("button", { class: "btn btn-primary", type: "button" }, "Add document");
+    const af = aiAutofill(role, { fileEl: file, bucket: "documents", statusEl: status, onFill: (meta) => {
+      if (meta.name) name.value = meta.name;
+      if (meta.category) category.value = meta.category;
+      if (meta.kind === "template" || meta.kind === "operational") kind.value = meta.kind;
+    } });
     btn.addEventListener("click", async () => {
       const f = file.files && file.files[0];
       if (!f) { status.className = "up-status warn"; status.textContent = "Choose a file first."; return; }
       const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
       if (!audience.length) audience.push("internal");
-      btn.disabled = true; status.className = "up-status"; status.textContent = "Uploading…";
+      btn.disabled = true; status.className = "up-status"; status.textContent = "Adding…";
       try {
-        await API.uploadDocument(API.getToken(role), f, { category: category.value, name: name.value, audience, kind: kind.value });
+        const up = await af.ensureUploaded();
+        await API.addDocumentRecord(API.getToken(role), { category: category.value, name: name.value || f.name, audience, kind: kind.value, path: up.path, fileName: up.fileName });
         status.className = "up-status ok"; status.textContent = `Added “${name.value || f.name}”.`;
         file.value = ""; name.value = ""; category.value = "";
         await reload();
@@ -597,8 +639,10 @@
     });
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Manage documents"),
-      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file as a versioned document. Templates can later become As Operates documents without deleting anything."),
-      el("div", { class: "upload-fields" }, [file, name, category, kind]),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file — the AI reads its name, category and section for you. Review, then add. Templates can later become As Operates documents without deleting anything."),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document file"), file]),
+      el("div", { style: "margin:0.5rem 0 0.9rem" }, af.btn),
+      el("div", { class: "upload-fields" }, [name, category, kind]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
       el("div", { style: "margin-top:0.75rem" }, btn),
       status,
@@ -622,8 +666,13 @@
     const notes = el("textarea", { rows: "2", placeholder: "What changed (optional)" });
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload new version");
+    const af = aiAutofill(role, { fileEl: file, bucket: "documents", statusEl: note, onFill: (meta) => {
+      if (meta.version && !version.value.trim()) version.value = meta.version;
+      if (meta.summary && !notes.value.trim()) notes.value = meta.summary;
+    } });
     const form = el("div", { class: "step-form" }, [
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), file]),
+      el("div", {}, af.btn),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Notes"), notes]),
       note, el("div", { style: "margin-top:0.5rem" }, save),
@@ -631,11 +680,11 @@
     const close = openModal(`New version — ${d.name}`, form);
     file.focus();
     save.addEventListener("click", async () => {
-      const f = file.files && file.files[0];
-      if (!f) { note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
       save.disabled = true; note.className = "up-status"; note.textContent = "Uploading…";
       try {
-        await API.uploadDocumentVersion(API.getToken(role), f, { documentId: d.id, version: version.value, notes: notes.value });
+        const up = await af.ensureUploaded();
+        if (!up) { save.disabled = false; note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
+        await API.addDocumentVersionRecord(API.getToken(role), { documentId: d.id, version: version.value, notes: notes.value, path: up.path, fileName: up.fileName });
         close(); await reload();
       } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
     });
@@ -993,8 +1042,14 @@
     const notes = el("textarea", { rows: "3", placeholder: "What changed in this revision (optional)" });
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload version");
+    const af = aiAutofill(role, { fileEl: file, bucket: "standards", statusEl: note, onFill: (meta) => {
+      if (meta.version && !version.value.trim()) version.value = meta.version;
+      if (meta.effectiveDate && !eff.value.trim()) eff.value = meta.effectiveDate;
+      if (meta.summary && !notes.value.trim()) notes.value = meta.summary;
+    } });
     const form = el("div", { class: "step-form" }, [
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), file]),
+      el("div", {}, af.btn),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version"), version]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Effective date"), eff]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Revision notes"), notes]),
@@ -1003,11 +1058,11 @@
     const close = openModal(`New version — ${s.code || s.title || "standard"}`, form);
     file.focus();
     save.addEventListener("click", async () => {
-      const f = file.files && file.files[0];
-      if (!f) { note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
       save.disabled = true; note.className = "up-status"; note.textContent = "Uploading…";
       try {
-        await API.uploadStandardVersion(API.getToken(role), f, { standardId: s.id, version: version.value, effectiveDate: eff.value, notes: notes.value });
+        const up = await af.ensureUploaded();
+        if (!up) { save.disabled = false; note.className = "up-status warn"; note.textContent = "Choose a file first."; return; }
+        await API.addStandardVersionRecord(API.getToken(role), { standardId: s.id, version: version.value, effectiveDate: eff.value, notes: notes.value, path: up.path, fileName: up.fileName });
         close(); await reload();
       } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
     });

@@ -95,6 +95,29 @@
     addStandardVersionRecord: (token, { standardId, version, effectiveDate, notes, path, fileName }) =>
       call({ action: "addStandardVersion", token, standardId, version, effectiveDate, notes, path, fileName }),
 
+    /* ---- Generic upload + AI auto-fill (used by every file-upload flow) ----
+     * uploadAnyFile sends the bytes to the right bucket WITHOUT registering the
+     * file; suggestFileMetadata then has the AI read it and propose fields; a
+     * flow-specific record* call registers it after the human approves. */
+    async uploadAnyFile(token, file, bucket = "documents") {
+      const uploadAction = bucket === "standards" ? "stdUploadUrl" : bucket === "uploads" ? "uploadUrl" : "docUploadUrl";
+      const { signedUrl, path } = await call({ action: uploadAction, token, fileName: file.name });
+      const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+      if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+      return { path, fileName: file.name };
+    },
+    suggestFileMetadata: (token, { path, fileName, bucket = "documents" }) =>
+      call({ action: "suggestFileMetadata", token, path, fileName, bucket }),
+    // Register an already-uploaded library document (after AI auto-fill approval).
+    addDocumentRecord: (token, { category, name, audience, kind, path, fileName, version }) =>
+      call({ action: "addDocument", token, category, name, audience, kind, storagePath: path, fileName, version }),
+    // Add a version row to an existing document for an already-uploaded file.
+    addDocumentVersionRecord: (token, { documentId, version, notes, path, fileName }) =>
+      call({ action: "addDocumentVersion", token, documentId, version, notes, path, fileName }),
+    // Register an already-uploaded supplier/technical-file upload.
+    recordUploadRecord: (token, { step, note, supplierLabel, path, fileName }) =>
+      call({ action: "recordUpload", token, step, note, supplierLabel, path, fileName }),
+
     /* Add a library document: upload the file to the documents bucket, then
      * register it in the documents table. Rushroom only (enforced server-side). */
     async uploadDocument(token, file, { category, name, audience, kind } = {}) {

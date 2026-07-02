@@ -150,6 +150,19 @@ const STANDARD_META_SCHEMA = {
   },
   required: ["code", "title", "category", "version", "effective_date", "summary"],
 };
+const FILE_META_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    name: { type: "string" },
+    category: { type: "string" },
+    version: { type: "string" },
+    effective_date: { type: "string" },
+    kind: { type: "string" },
+    summary: { type: "string" },
+  },
+  required: ["name", "category", "version", "effective_date", "kind", "summary"],
+};
 const FINDINGS_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -764,6 +777,65 @@ Deno.serve(async (req) => {
       category: String(parsed.category || ""),
       version: String(parsed.version || ""),
       effectiveDate: String(parsed.effective_date || ""),
+      summary: String(parsed.summary || ""),
+    });
+  }
+
+  if (action === "suggestFileMetadata") {
+    if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY in the function secrets." }, 400);
+    const bucketKey = String(body.bucket ?? "documents");
+    const bucket = bucketKey === "standards" ? STD_BUCKET : bucketKey === "uploads" ? BUCKET : DOC_BUCKET;
+    // The document library and standards register are Rushroom-managed; supplier
+    // uploads may be auto-described by whoever uploaded them.
+    if ((bucketKey === "documents" || bucketKey === "standards") && role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const path = String(body.path ?? "").trim();
+    const fileName = String(body.fileName ?? "file").trim();
+    if (!path) return json({ error: "path required" }, 400);
+
+    const system = `You are a compliance librarian cataloguing an uploaded file. Read the document and extract its metadata precisely — do not invent values. Return a JSON object:
+- name: a clear, concise title for the document (e.g. "EU Declaration of Conformity", "LVD Safety Test Report — Model X", "Supplier Declaration of Compliance"). If the file has an obvious title, use it.
+- category: a short classifying tag for a compliance file library — e.g. Declarations & CE, Technical file, Test reports, Suppliers, Materials & packaging, Records & monitoring, or another concise domain tag if none fit.
+- version: an edition / revision / date-based version label if the document states one (e.g. "Rev B", "2026-06", "2015+A1:2022"), else "".
+- effective_date: a date the document is dated or effective from if stated, else "".
+- kind: "template" if this is a blank or fillable template, form, or reference-requirement document; "operational" if it is completed operational evidence or a filled-in record; else "".
+- summary: one sentence describing what the document is.`;
+
+    const content: any[] = [
+      { type: "text", text: "Extract catalogue metadata for this uploaded compliance file." },
+      await fileBlock(bucket, path, fileName),
+    ];
+
+    let apiJson: any;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+          model: SCAN_MODEL,
+          max_tokens: 2000,
+          thinking: { type: "adaptive" },
+          output_config: { effort: "low", format: { type: "json_schema", schema: FILE_META_SCHEMA } },
+          system,
+          messages: [{ role: "user", content }],
+        }),
+      });
+      apiJson = await res.json();
+      if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
+    } catch (e) {
+      return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
+    }
+    if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to read this document." }, 502);
+    const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
+    let parsed: any;
+    try { parsed = JSON.parse(textBlock?.text || "{}"); }
+    catch { return json({ error: "The AI response could not be parsed. Try again or fill the fields manually." }, 502); }
+    return json({
+      ok: true,
+      name: String(parsed.name || ""),
+      category: String(parsed.category || ""),
+      version: String(parsed.version || ""),
+      effectiveDate: String(parsed.effective_date || ""),
+      kind: String(parsed.kind || ""),
       summary: String(parsed.summary || ""),
     });
   }
