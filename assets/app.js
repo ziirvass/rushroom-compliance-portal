@@ -403,9 +403,34 @@
         if (open) collapsedCats.delete(d.dataset.catkey); else collapsedCats.add(d.dataset.catkey);
       });
     };
-    nav.appendChild(el("div", { class: "browser-tools" }, [
-      el("button", { class: "btn btn-sm", type: "button", onclick: () => setAll(true) }, "⊞ Expand all"),
-      el("button", { class: "btn btn-sm", type: "button", onclick: () => setAll(false) }, "⊟ Collapse all"),
+    // Live search over the left list (name + sub + keywords). Filters rows,
+    // auto-opens matching categories, hides empty ones.
+    const search = el("input", { type: "search", class: "browser-search-input", placeholder: opts.searchPlaceholder || "Search…", "aria-label": `Search ${opts.navLabel || "list"}` });
+    const noResults = el("div", { class: "browser-empty muted", style: "display:none" }, "No matches.");
+    const applyFilter = () => {
+      const q = search.value.trim().toLowerCase();
+      let total = 0;
+      nav.querySelectorAll("details.browser-cat-group").forEach((d) => {
+        let visible = 0;
+        d.querySelectorAll(".browser-row").forEach((row) => {
+          const match = !q || (row.dataset.search || "").includes(q);
+          row.style.display = match ? "" : "none";
+          if (match) visible++;
+        });
+        d.style.display = (visible || !q) ? "" : "none";
+        d.open = q ? visible > 0 : !collapsedCats.has(d.dataset.catkey);
+        total += visible;
+      });
+      noResults.style.display = (q && total === 0) ? "" : "none";
+    };
+    search.addEventListener("input", applyFilter);
+    search.addEventListener("keydown", (e) => { if (e.key === "Escape") { search.value = ""; applyFilter(); } });
+    nav.appendChild(el("div", { class: "browser-top" }, [
+      search,
+      el("div", { class: "browser-tools" }, [
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => setAll(true) }, "⊞ Expand all"),
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => setAll(false) }, "⊟ Collapse all"),
+      ]),
     ]));
 
     for (const group of tree) {
@@ -424,7 +449,7 @@
         let hasFlash = false;
         for (const item of cat.items) {
           items.push(item);
-          const row = el("button", { class: "browser-row", type: "button", "data-id": item.id, title: item.name }, [
+          const row = el("button", { class: "browser-row", type: "button", "data-id": item.id, title: item.name, "data-search": `${item.name} ${item.sub || ""} ${item.keywords || ""}`.toLowerCase() }, [
             el("span", { class: "browser-row-name" }, item.name),
             item.sub ? el("span", { class: "browser-row-sub muted" }, item.sub) : null,
           ].filter(Boolean));
@@ -449,6 +474,7 @@
         nav.appendChild(details);
       }
     }
+    nav.appendChild(noResults);
 
     // Keep the prior selection (or default to the first item). A freshly-uploaded
     // item is left to blink for attention rather than auto-opened, so its blink
@@ -533,6 +559,7 @@
           id: d.id || d.name,
           name: d.name,
           sub: `${(d.versions || []).length} version${(d.versions || []).length === 1 ? "" : "s"}`,
+          keywords: `${d.category || ""} ${(d.audience || []).join(" ")}`,
           data: d,
         })),
       }));
@@ -542,7 +569,7 @@
       tree.push({ heading: label, count: kdocs.length, action, hint, categories });
     }
     wrap.appendChild(twoPaneBrowser("documents", tree, (item) => renderDoc(item.data), {
-      navLabel: "Documents", emptyDetail: "Select a document on the left.",
+      navLabel: "Documents", emptyDetail: "Select a document on the left.", searchPlaceholder: "Search documents…",
     }));
     return wrap;
   }
@@ -1419,13 +1446,14 @@
         items: list.map((s) => ({
           id: s.id,
           name: s.code || s.title || "Standard",
-          sub: `${(s.versions || []).length} version${(s.versions || []).length === 1 ? "" : "s"}`,
+          sub: s.title && s.code ? s.title : `${(s.versions || []).length} version${(s.versions || []).length === 1 ? "" : "s"}`,
+          keywords: `${s.code || ""} ${s.title || ""} ${s.category || ""}`,
           data: s,
         })),
       }));
       browser = twoPaneBrowser("standards", [{ heading: "Register", count: standards.length, categories }],
         (item) => standardCard(item.data, role, reload),
-        { navLabel: "Standards & regulations", emptyDetail: "Select a standard on the left." });
+        { navLabel: "Standards & regulations", emptyDetail: "Select a standard on the left.", searchPlaceholder: "Search code, title, category…" });
     } else {
       browser = el("div", { class: "empty" }, role === "rushroom" ? "No standards yet — add one above." : "No standards shared with you yet.");
     }

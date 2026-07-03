@@ -244,11 +244,18 @@ tbody tr:hover { background: var(--panel-2); }
 .browser-nav::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .browser-main { min-width: 0; }
 .browser-main .doc, .browser-main .std-card { width: 100%; }
-.browser-tools {
-  display: flex; gap: 0.4rem; padding: 0.2rem 0.3rem 0.5rem;
+.browser-top {
   position: sticky; top: 0; z-index: 1; background: var(--panel);
-  border-bottom: 1px solid var(--border); margin-bottom: 0.25rem;
+  display: flex; flex-direction: column; gap: 0.4rem;
+  padding: 0.15rem 0.25rem 0.45rem; margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
 }
+.browser-search-input {
+  width: 100%; font: inherit; padding: 0.45rem 0.6rem; border-radius: 7px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+}
+.browser-search-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.browser-tools { display: flex; gap: 0.4rem; }
 .browser-heading { display: flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.5rem 0.15rem; font-weight: 700; font-size: 0.92rem; }
 .browser-heading .count { color: var(--muted); font-weight: 400; font-size: 0.85rem; }
 .browser-head-action { margin-left: auto; }
