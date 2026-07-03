@@ -481,14 +481,24 @@
       const history = versions.length
         ? el("details", { class: "std-history" }, [
             el("summary", {}, `Version history (${versions.length})`),
-            el("ul", { class: "std-versions" }, versions.map((v) => el("li", {}, [
-              el("div", {}, [
-                el("span", { class: "std-vlabel" }, v.version || "—"),
-                el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
-                v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer({ ...d, open_url: v.open_url, storage_path: v.storage_path || d.storage_path, name: v.file_name || d.name }) }, "View") : null,
-              ]),
-              v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
-            ]))),
+            el("ul", { class: "std-versions" }, versions.map((v) => {
+              const sourceNotes = [];
+              if (v.source_document_version) {
+                sourceNotes.push(`Based on document version ${v.source_document_version.version || "—"}`);
+              }
+              if (Array.isArray(v.source_standard_versions) && v.source_standard_versions.length) {
+                sourceNotes.push(`Referenced standards: ${v.source_standard_versions.map((sv) => `${sv.standard?.code || sv.standard?.title || "Standard"}${sv.version ? ` ${sv.version}` : ""}`).join(", ")}`);
+              }
+              return el("li", {}, [
+                el("div", {}, [
+                  el("span", { class: "std-vlabel" }, v.version || "—"),
+                  el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
+                  v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer({ ...d, open_url: v.open_url, storage_path: v.storage_path || d.storage_path, name: v.file_name || d.name }) }, "View") : null,
+                ]),
+                v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
+                sourceNotes.length ? el("div", { class: "std-notes" }, sourceNotes.join(" · ")) : null,
+              ]);
+            })),
           ])
         : null;
       const link = d.open_url || d.url;
@@ -901,6 +911,16 @@
     publish.disabled = true;
     let draftResult = null;
 
+    // Google Docs round-trip: edit the generated draft in Google Docs, then pull
+    // the edited content back before publishing. Shown after a draft exists.
+    const gdocEdit = el("button", { class: "btn btn-sm", type: "button" }, "📝 Edit in Google Docs");
+    const gdocFetch = el("button", { class: "btn btn-sm", type: "button" }, "↓ Fetch edited version");
+    const gdocLink = el("span", { style: "font-size:0.85rem" });
+    const gdocRow = el("div", { style: "display:none; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:0.6rem" }, [gdocEdit, gdocFetch, gdocLink]);
+    gdocFetch.style.display = "none";
+    let googleDocId = null;
+    const gdocDocName = () => (isCreateMode ? name.value.trim() : (d ? d.name : "")) || "Rushroom compliance draft";
+
     // Path 1 source — a template picker (create mode) or the base document (update mode).
     let templateSelect = null;
     if (isCreateMode) {
@@ -950,6 +970,7 @@
       status,
       el("div", { style: "margin-top:1rem" }, [el("strong", {}, "Suggested changes"), changeList]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Draft text"), draft]),
+      gdocRow,
     ].filter(Boolean));
 
     const close = openModal(options.title || (d ? `AI draft — ${d.name}` : "New As Operates document"), form);
@@ -964,17 +985,28 @@
           standardsWrap.replaceChildren(el("div", { class: "muted" }, "No uploaded standards or regulations are available yet. Add them in the Standards & Regulations section first."));
           return;
         }
-        const list = el("div", { style: "display:grid; gap:0.4rem; margin-top:0.2rem" });
+        const list = el("div", { style: "display:grid; gap:0.8rem; margin-top:0.2rem" });
         for (const std of standards) {
-          const latest = std.versions && std.versions[0];
-          const label = el("label", { style: "display:flex; gap:0.5rem; align-items:flex-start; margin-bottom:0.2rem" }, [
-            el("input", { type: "checkbox", value: std.id }),
-            el("span", {}, [
-              el("strong", {}, std.code || std.title || "Standard"),
-              el("div", { class: "muted", style: "font-size:0.82rem; margin-top:0.1rem" }, `${std.title || ""}${latest?.version ? ` · ${latest.version}` : ""}`),
+          const latest = std.versions[0];
+          const checkbox = el("input", { type: "checkbox", value: std.id });
+          const select = el("select", { class: "up-text", disabled: "disabled", style: "margin-top:0.25rem; width:100%;" },
+            std.versions.map((v) => el("option", { value: v.id, selected: v.id === latest.id ? "selected" : null }, `${v.version || "version"}${v.effective_date ? ` · ${v.effective_date}` : ""}`))
+          );
+          checkbox.addEventListener("change", () => { select.disabled = !checkbox.checked; });
+          const item = el("div", { style: "border:1px solid var(--border); padding:0.75rem; border-radius:0.4rem;" }, [
+            el("label", { style: "display:flex; gap:0.5rem; align-items:flex-start;" }, [
+              checkbox,
+              el("span", {}, [
+                el("strong", {}, std.code || std.title || "Standard"),
+                el("div", { class: "muted", style: "font-size:0.82rem; margin-top:0.1rem" }, `${std.title || ""}${latest?.version ? ` · ${latest.version}` : ""}`),
+              ]),
+            ]),
+            el("div", { style: "display:flex; flex-direction:column; gap:0.25rem; margin-top:0.5rem" }, [
+              el("span", { class: "muted", style: "font-size:0.82rem;" }, "Select the exact standard version to use for drafting."),
+              select,
             ]),
           ]);
-          list.appendChild(label);
+          list.appendChild(item);
         }
         standardsWrap.replaceChildren(list);
       } catch (ex) {
@@ -985,9 +1017,15 @@
 
     generate.addEventListener("click", async () => {
       const context = notes.value.trim();
-      const selectedStandardIds = Array.from(standardsWrap.querySelectorAll("input[type='checkbox']:checked")).map((cb) => cb.value);
+      const selectedStandardVersionIds = Array.from(standardsWrap.querySelectorAll("input[type='checkbox']"))
+        .filter((cb) => cb.checked)
+        .map((cb) => {
+          const select = cb.closest("div")?.querySelector("select");
+          return select ? select.value : cb.value;
+        })
+        .filter(Boolean);
       const tmplId = selectedTemplateId();
-      if (!context && !selectedStandardIds.length && !tmplId && !d) {
+      if (!context && !selectedStandardVersionIds.length && !tmplId && !d) {
         status.className = "up-status warn"; status.textContent = "Choose a template, select one or more standards/regulations, or add context first."; return;
       }
       generate.disabled = true; publish.disabled = true; status.className = "up-status"; status.textContent = "Generating draft…";
@@ -997,7 +1035,7 @@
           templateDocumentId: tmplId || null,
           notes: context,
           preferredVersion: version.value.trim(),
-          sourceStandardIds: selectedStandardIds,
+          sourceStandardVersionIds: selectedStandardVersionIds,
         });
         const proposals = Array.isArray(draftResult.proposedChanges) ? draftResult.proposedChanges : [];
         changeList.replaceChildren();
@@ -1017,6 +1055,8 @@
         draft.value = draftResult.draftText || "";
         status.className = "up-status ok"; status.textContent = draftResult.summary || "Draft ready for review.";
         publish.disabled = false;
+        // fresh draft → reset any prior Google Doc round-trip
+        googleDocId = null; gdocRow.style.display = "flex"; gdocFetch.style.display = "none"; gdocLink.replaceChildren();
       } catch (ex) {
         status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
       } finally {
@@ -1029,6 +1069,13 @@
       const approved = Array.from(changeList.querySelectorAll("input[type='checkbox']"))
         .filter((cb) => cb.checked)
         .map((cb) => cb.dataset.title || "change")
+        .filter(Boolean);
+      const selectedStandardVersionIds = Array.from(standardsWrap.querySelectorAll("input[type='checkbox']"))
+        .filter((cb) => cb.checked)
+        .map((cb) => {
+          const select = cb.closest("div")?.querySelector("select");
+          return select ? select.value : cb.value;
+        })
         .filter(Boolean);
       const finalText = draft.value.trim();
       if (!finalText) { status.className = "up-status warn"; status.textContent = "The draft text is empty."; return; }
@@ -1043,11 +1090,41 @@
           draftText: finalText,
           fileName: `${((isCreateMode ? name.value.trim() : (d ? d.name : "document")) || "document").replace(/[^a-z0-9._-]+/gi, "_") || "document"}.md`,
           approvedChanges: approved,
+          sourceStandardVersionIds: selectedStandardVersionIds,
         });
         close(); await reload();
       } catch (ex) {
         publish.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
       }
+    });
+
+    gdocEdit.addEventListener("click", async () => {
+      const text = draft.value.trim();
+      if (!text) { status.className = "up-status warn"; status.textContent = "Generate or write a draft first."; return; }
+      gdocEdit.disabled = true; status.className = "up-status"; status.textContent = "Creating a Google Doc…";
+      try {
+        const res = await API.createGoogleDoc(API.getToken(role), { draftText: draft.value, documentName: gdocDocName() });
+        googleDocId = res.googleDocId;
+        if (draftResult) draftResult.googleDocId = googleDocId;
+        window.open(res.editUrl, "_blank", "noopener");
+        gdocFetch.style.display = "inline-flex";
+        gdocLink.replaceChildren(el("a", { href: res.editUrl, target: "_blank", rel: "noopener", class: "linklike" }, "Open Google Doc ↗"));
+        status.className = "up-status ok"; status.textContent = "Google Doc created and opened in a new tab. Edit there, then click “Fetch edited version”.";
+      } catch (ex) {
+        status.className = "up-status err"; status.textContent = `Couldn't create the Google Doc: ${ex.message}`;
+      } finally { gdocEdit.disabled = false; }
+    });
+
+    gdocFetch.addEventListener("click", async () => {
+      if (!googleDocId) { status.className = "up-status warn"; status.textContent = "Create the Google Doc first."; return; }
+      gdocFetch.disabled = true; status.className = "up-status"; status.textContent = "Fetching the edited version…";
+      try {
+        const res = await API.fetchGoogleDocContent(API.getToken(role), { googleDocId });
+        draft.value = res.content || "";
+        status.className = "up-status ok"; status.textContent = "Fetched the edited version into the draft. Review and publish.";
+      } catch (ex) {
+        status.className = "up-status err"; status.textContent = `Couldn't fetch the edited version: ${ex.message}`;
+      } finally { gdocFetch.disabled = false; }
     });
   }
 

@@ -108,6 +108,63 @@ async function verifyToken(token: string | undefined): Promise<string | null> {
 const isSupplierStep = (audience: string[] | null) => Array.isArray(audience) && audience.includes("supplier");
 const safeName = (n: string) => (n || "file").replace(/[^\w.\-]+/g, "_").slice(-120);
 
+// ---- Google Docs integration (service-account OAuth) ----------------------
+const GOOGLE_SERVICE_ACCOUNT = Deno.env.get("GOOGLE_SERVICE_ACCOUNT") ?? "";
+
+function b64decode(s: string): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// Mint a short-lived Google OAuth access token from the service-account JSON
+// (signs a JWT with the SA private key, then exchanges it at the token endpoint).
+async function googleAccessToken(scopes: string[]): Promise<string> {
+  if (!GOOGLE_SERVICE_ACCOUNT) throw new Error("GOOGLE_SERVICE_ACCOUNT secret is not set");
+  let sa: any;
+  try { sa = JSON.parse(GOOGLE_SERVICE_ACCOUNT); }
+  catch { throw new Error("GOOGLE_SERVICE_ACCOUNT is not valid JSON"); }
+  if (!sa.client_email || !sa.private_key) throw new Error("GOOGLE_SERVICE_ACCOUNT is missing client_email or private_key");
+  const now = Math.floor(Date.now() / 1000);
+  const enc64 = (obj: unknown) => b64url(enc.encode(JSON.stringify(obj)));
+  const signingInput = `${enc64({ alg: "RS256", typ: "JWT" })}.${enc64({
+    iss: sa.client_email, scope: scopes.join(" "), aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600,
+  })}`;
+  const pem = String(sa.private_key).replace(/-----BEGIN PRIVATE KEY-----/, "").replace(/-----END PRIVATE KEY-----/, "").replace(/\s+/g, "");
+  const key = await crypto.subtle.importKey("pkcs8", ab(b64decode(pem)), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, key, ab(enc.encode(signingInput))));
+  const jwt = `${signingInput}.${b64url(sig)}`;
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: jwt }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`Google auth failed: ${data.error_description || data.error || res.status}`);
+  return data.access_token as string;
+}
+
+// Flatten a Google Doc's structured body into plain text (paragraphs + tables).
+function extractGoogleDocText(doc: any): string {
+  const parts: string[] = [];
+  const runElements = (elements: any[]) => { for (const pe of elements || []) if (pe.textRun?.content) parts.push(pe.textRun.content); };
+  for (const el of doc.body?.content || []) {
+    if (el.paragraph) runElements(el.paragraph.elements);
+    else if (el.table) {
+      for (const row of el.table.tableRows || []) {
+        const cells = (row.tableCells || []).map((c: any) => {
+          const cp: string[] = [];
+          for (const cc of c.content || []) if (cc.paragraph) for (const pe of cc.paragraph.elements || []) if (pe.textRun?.content) cp.push(pe.textRun.content);
+          return cp.join("").trim();
+        });
+        parts.push(cells.join("\t") + "\n");
+      }
+    }
+  }
+  return parts.join("").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // ---- AI deviation monitoring (Claude) ----
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const SCAN_MODEL = "claude-opus-4-8";
@@ -298,7 +355,31 @@ Deno.serve(async (req) => {
       else open_url = doc.url || "";
       return { ...doc, open_url, versions };
     }));
-    return json({ role, steps: s, documents: docs });
+
+    const allStandardVersionIds = docs.flatMap((doc) => (doc.versions || []).flatMap((v: any) => Array.isArray(v.source_standard_version_ids) ? v.source_standard_version_ids : []));
+    const allSourceDocumentVersionIds = docs.flatMap((doc) => (doc.versions || []).map((v: any) => v.source_document_version_id).filter(Boolean));
+    const standardVersionMap = new Map<string, any>();
+    if (allStandardVersionIds.length) {
+      const uniq = [...new Set(allStandardVersionIds)];
+      const { data: vs } = await db.from("standard_versions").select("*, standard:standard_id(code,title)").in("id", uniq);
+      for (const v of vs ?? []) standardVersionMap.set(v.id, v);
+    }
+    const sourceVersionMap = new Map<string, any>();
+    if (allSourceDocumentVersionIds.length) {
+      const uniq = [...new Set(allSourceDocumentVersionIds)];
+      const { data: sv } = await db.from("document_versions").select("id,document_id,version,file_name,created_at").in("id", uniq);
+      for (const v of sv ?? []) sourceVersionMap.set(v.id, v);
+    }
+    const enrichedDocs = docs.map((doc) => ({
+      ...doc,
+      versions: (doc.versions || []).map((v: any) => ({
+        ...v,
+        source_standard_versions: (Array.isArray(v.source_standard_version_ids) ? v.source_standard_version_ids : []).map((id: string) => standardVersionMap.get(id)).filter(Boolean),
+        source_document_version: v.source_document_version_id ? sourceVersionMap.get(v.source_document_version_id) : null,
+      })),
+    }));
+
+    return json({ role, steps: s, documents: enrichedDocs });
   }
 
   if (action === "setStatus") {
@@ -437,6 +518,9 @@ Deno.serve(async (req) => {
     const { data: templateDoc, error: templateErr } = await db.from("documents").select("id,name,category,url,storage_path,audience").eq("id", templateDocumentId).maybeSingle();
     if (templateErr || !templateDoc) return json({ error: "Template not found" }, 404);
 
+    const { data: latestTemplateVersion } = await db.from("document_versions").select("id").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const sourceDocumentVersionId = latestTemplateVersion?.id || null;
+
     const name = String(body.name ?? "").trim() || `${templateDoc.name || "Template"} — As Operates`;
     const audience = Array.isArray(templateDoc.audience) && templateDoc.audience.length ? templateDoc.audience : ["internal"];
     const { data: doc, error } = await db.from("documents").insert({
@@ -459,6 +543,7 @@ Deno.serve(async (req) => {
         storage_path: templateDoc.storage_path,
         notes,
         uploaded_by: "rushroom",
+        source_document_version_id: sourceDocumentVersionId,
       });
     }
     return json({ ok: true, id: doc?.id });
@@ -471,6 +556,7 @@ Deno.serve(async (req) => {
     const context = String(body.notes ?? "").trim();
     const preferredVersion = String(body.preferredVersion ?? "").trim();
     const sourceStandardIds = Array.isArray(body.sourceStandardIds) ? body.sourceStandardIds.filter((v: unknown) => String(v ?? "").trim()) : [];
+    const sourceStandardVersionIds = Array.isArray(body.sourceStandardVersionIds) ? body.sourceStandardVersionIds.filter((v: unknown) => String(v ?? "").trim()) : [];
 
     let doc: any = null;
     let storagePath = "";
@@ -500,23 +586,31 @@ Deno.serve(async (req) => {
       content.push({ type: "text", text: "\n=== CURRENT DOCUMENT ===" });
       content.push(await fileBlock(DOC_BUCKET, storagePath, fileName));
     }
-    if (sourceStandardIds.length) {
+    const standardVersionIds = sourceStandardVersionIds.length ? sourceStandardVersionIds : [];
+    if (sourceStandardIds.length && !standardVersionIds.length) {
+      // backward compatibility: use the latest uploaded version for each standard ID.
+      for (const standardId of sourceStandardIds) {
+        const { data: latestVersion } = await db.from("standard_versions").select("id").eq("standard_id", standardId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        if (latestVersion?.id) standardVersionIds.push(latestVersion.id);
+      }
+    }
+    if (standardVersionIds.length) {
       content.push({ type: "text", text: "\n=== REFERENCE STANDARDS & REGULATIONS ===" });
       const summaries: string[] = [];
-      for (const standardId of sourceStandardIds) {
-        const { data: standard } = await db.from("standards").select("id,code,title,category").eq("id", standardId).maybeSingle();
-        if (!standard) continue;
-        const { data: latestVersion } = await db.from("standard_versions").select("*").eq("standard_id", standard.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-        if (latestVersion?.storage_path) {
-          const summary = await summarizeRequirementSource(STD_BUCKET, latestVersion.storage_path, latestVersion.file_name || standard.code || "standard", `${standard.code || standard.title || "standard"}${standard.title ? ` — ${standard.title}` : ""}`);
+      for (const standardVersionId of standardVersionIds) {
+        const { data: version } = await db.from("standard_versions").select("*, standard:standard_id(code,title,category)").eq("id", standardVersionId).maybeSingle();
+        if (!version) continue;
+        const label = `${version.standard?.code || version.standard?.title || "standard"}${version.version ? ` ${version.version}` : ""}`;
+        if (version.storage_path) {
+          const summary = await summarizeRequirementSource(STD_BUCKET, version.storage_path, version.file_name || label, `${label}`);
           summaries.push(summary);
         } else {
-          summaries.push(`- ${standard.code || standard.title || "standard"}: no uploaded file yet`);
+          summaries.push(`- ${label}: no uploaded file yet`);
         }
       }
       content.push({ type: "text", text: summaries.join("\n") });
     }
-    if (!document_id && !templateDocumentId && !sourceStandardIds.length) return json({ error: "Provide either a current document, a template, or at least one source standard/regulation." }, 400);
+    if (!document_id && !templateDocumentId && !standardVersionIds.length) return json({ error: "Provide either a current document, a template, or at least one source standard/regulation." }, 400);
 
     const system = `You are an expert compliance-document editor for Rushroom AB. Review the supplied source material and produce a practical next version draft. Keep it concise, professional, and suitable for compliance use. If the document contains outdated wording, add clear improvement suggestions. When reference standards/regulations are supplied, reflect their relevant requirements and terminology. Return a JSON object with:
 - summary: a short explanation of the proposed update
@@ -571,6 +665,8 @@ Deno.serve(async (req) => {
 
     const approvedChanges = Array.isArray(body.approvedChanges) ? body.approvedChanges : [];
     const noteText = [String(body.notes ?? "").slice(0, 1000), approvedChanges.length ? `Approved changes: ${approvedChanges.join(", ")}` : ""].filter(Boolean).join("\n");
+    const sourceStandardVersionIds = Array.isArray(body.sourceStandardVersionIds) ? body.sourceStandardVersionIds.filter((v: unknown) => String(v ?? "").trim()) : [];
+    let sourceDocumentVersionId = String(body.sourceDocumentVersionId ?? "").trim() || "";
 
     let targetDocumentId = document_id;
     if (!targetDocumentId) {
@@ -593,8 +689,16 @@ Deno.serve(async (req) => {
       }).select("id").maybeSingle();
       if (insertErr) return json({ error: insertErr.message }, 500);
       targetDocumentId = doc?.id || "";
+      if (!sourceDocumentVersionId && templateDocumentId) {
+        const { data: latestTemplateVersion } = await db.from("document_versions").select("id").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        sourceDocumentVersionId = latestTemplateVersion?.id || "";
+      }
     }
     if (!targetDocumentId) return json({ error: "documentId or newDocumentName required" }, 400);
+    if (!sourceDocumentVersionId && document_id) {
+      const { data: latestSourceVersion } = await db.from("document_versions").select("id").eq("document_id", document_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      sourceDocumentVersionId = latestSourceVersion?.id || "";
+    }
 
     const { error: insertErr } = await db.from("document_versions").insert({
       document_id: targetDocumentId,
@@ -603,6 +707,8 @@ Deno.serve(async (req) => {
       storage_path: path,
       notes: noteText.slice(0, 1000),
       uploaded_by: "rushroom",
+      source_document_version_id: sourceDocumentVersionId || null,
+      source_standard_version_ids: sourceStandardVersionIds.length ? sourceStandardVersionIds : [],
     });
     if (insertErr) return json({ error: insertErr.message }, 500);
     await db.from("documents").update({ storage_path: path }).eq("id", targetDocumentId);
@@ -614,11 +720,15 @@ Deno.serve(async (req) => {
     const document_id = String(body.documentId ?? "");
     const path = String(body.path ?? "");
     const fileName = String(body.fileName ?? "");
+    const sourceStandardVersionIds = Array.isArray(body.sourceStandardVersionIds) ? body.sourceStandardVersionIds.filter((v: unknown) => String(v ?? "").trim()) : [];
+    const sourceDocumentVersionId = String(body.sourceDocumentVersionId ?? "").trim() || null;
     if (!document_id || !path || !fileName) return json({ error: "documentId, path, fileName required" }, 400);
     const { error } = await db.from("document_versions").insert({
       document_id, version: String(body.version ?? "").slice(0, 80),
       file_name: fileName.slice(0, 200), storage_path: path,
       notes: String(body.notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
+      source_document_version_id: sourceDocumentVersionId,
+      source_standard_version_ids: sourceStandardVersionIds.length ? sourceStandardVersionIds : [],
     });
     if (error) return json({ error: error.message }, 500);
     await db.from("documents").update({ storage_path: path }).eq("id", document_id); // keep current pointer in sync
@@ -779,6 +889,64 @@ Deno.serve(async (req) => {
       effectiveDate: String(parsed.effective_date || ""),
       summary: String(parsed.summary || ""),
     });
+  }
+
+  if (action === "createGoogleDoc") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const draftText = String(body.draftText ?? "");
+    const documentName = (String(body.documentName ?? "").trim() || "Rushroom compliance draft").slice(0, 300);
+    try {
+      const gToken = await googleAccessToken([
+        "https://www.googleapis.com/auth/documents",
+        "https://www.googleapis.com/auth/drive",
+      ]);
+      // 1. create an empty document with the given title
+      const createRes = await fetch("https://docs.googleapis.com/v1/documents", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${gToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ title: documentName }),
+      });
+      const doc = await createRes.json();
+      if (!createRes.ok) return json({ error: `Google Docs create failed: ${doc.error?.message || createRes.status}` }, 502);
+      const googleDocId = doc.documentId as string;
+      // 2. insert the draft text at the start of the body
+      if (draftText.trim()) {
+        const upd = await fetch(`https://docs.googleapis.com/v1/documents/${googleDocId}:batchUpdate`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${gToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: draftText } }] }),
+        });
+        if (!upd.ok) { const e = await upd.json(); return json({ error: `Google Docs insert failed: ${e.error?.message || upd.status}` }, 502); }
+      }
+      // 3. share: anyone with the link can edit
+      const perm = await fetch(`https://www.googleapis.com/drive/v3/files/${googleDocId}/permissions?supportsAllDrives=true`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${gToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "writer", type: "anyone" }),
+      });
+      if (!perm.ok) { const e = await perm.json().catch(() => ({})); return json({ error: `Google Drive share failed: ${e.error?.message || perm.status}` }, 502); }
+      const editUrl = `https://docs.google.com/document/d/${googleDocId}/edit`;
+      return json({ ok: true, googleDocId, editUrl, webViewLink: editUrl });
+    } catch (e) {
+      return json({ error: `Google Docs error: ${(e as Error).message}` }, 502);
+    }
+  }
+
+  if (action === "fetchGoogleDocContent") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const googleDocId = String(body.googleDocId ?? "").trim();
+    if (!googleDocId) return json({ error: "googleDocId required" }, 400);
+    try {
+      const gToken = await googleAccessToken(["https://www.googleapis.com/auth/documents.readonly"]);
+      const res = await fetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(googleDocId)}`, {
+        headers: { Authorization: `Bearer ${gToken}` },
+      });
+      const doc = await res.json();
+      if (!res.ok) return json({ error: `Google Docs fetch failed: ${doc.error?.message || res.status}` }, 502);
+      return json({ ok: true, content: extractGoogleDocText(doc), lastModified: doc.revisionId || "" });
+    } catch (e) {
+      return json({ error: `Google Docs error: ${(e as Error).message}` }, 502);
+    }
   }
 
   if (action === "suggestFileMetadata") {

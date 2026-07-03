@@ -53,6 +53,9 @@ create table if not exists public.document_versions (
 );
 create index if not exists document_versions_doc_idx on public.document_versions (document_id);
 
+alter table if exists public.document_versions add column if not exists source_document_version_id uuid references public.document_versions(id) on delete set null;
+alter table if exists public.document_versions add column if not exists source_standard_version_ids jsonb not null default '[]'::jsonb;
+
 create table if not exists public.uploads (
   id             uuid primary key default gen_random_uuid(),
   step           integer references public.steps(step) on delete set null,

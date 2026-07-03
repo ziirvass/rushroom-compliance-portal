@@ -122,6 +122,13 @@
     recordUploadRecord: (token, { step, note, supplierLabel, path, fileName }) =>
       call({ action: "recordUpload", token, step, note, supplierLabel, path, fileName }),
 
+    // Google Docs round-trip for AI drafts: create a shared Doc from the draft
+    // text, then fetch the edited content back before publishing.
+    createGoogleDoc: (token, { draftText, documentName }) =>
+      call({ action: "createGoogleDoc", token, draftText, documentName }),
+    fetchGoogleDocContent: (token, { googleDocId }) =>
+      call({ action: "fetchGoogleDocContent", token, googleDocId }),
+
     /* Add a library document: upload the file to the documents bucket, then
      * register it in the documents table. Rushroom only (enforced server-side). */
     async uploadDocument(token, file, { category, name, audience, kind } = {}) {
