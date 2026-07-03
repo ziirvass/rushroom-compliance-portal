@@ -916,7 +916,11 @@
     const gdocEdit = el("button", { class: "btn btn-sm", type: "button" }, "📝 Edit in Google Docs");
     const gdocFetch = el("button", { class: "btn btn-sm", type: "button" }, "↓ Fetch edited version");
     const gdocLink = el("span", { style: "font-size:0.85rem" });
-    const gdocRow = el("div", { style: "display:none; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:0.6rem" }, [gdocEdit, gdocFetch, gdocLink]);
+    const gdocStatus = el("p", { class: "up-status", role: "status", "aria-live": "polite", style: "margin:0.4rem 0 0" }, "");
+    const gdocRow = el("div", { style: "display:none; margin-top:0.6rem" }, [
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [gdocEdit, gdocFetch, gdocLink]),
+      gdocStatus,
+    ]);
     gdocFetch.style.display = "none";
     let googleDocId = null;
     const gdocDocName = () => (isCreateMode ? name.value.trim() : (d ? d.name : "")) || "Rushroom compliance draft";
@@ -1056,7 +1060,7 @@
         status.className = "up-status ok"; status.textContent = draftResult.summary || "Draft ready for review.";
         publish.disabled = false;
         // fresh draft → reset any prior Google Doc round-trip
-        googleDocId = null; gdocRow.style.display = "flex"; gdocFetch.style.display = "none"; gdocLink.replaceChildren();
+        googleDocId = null; gdocRow.style.display = "block"; gdocFetch.style.display = "none"; gdocLink.replaceChildren(); gdocStatus.textContent = "";
       } catch (ex) {
         status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
       } finally {
@@ -1100,30 +1104,34 @@
 
     gdocEdit.addEventListener("click", async () => {
       const text = draft.value.trim();
-      if (!text) { status.className = "up-status warn"; status.textContent = "Generate or write a draft first."; return; }
-      gdocEdit.disabled = true; status.className = "up-status"; status.textContent = "Creating a Google Doc…";
+      if (!text) { gdocStatus.className = "up-status warn"; gdocStatus.textContent = "Generate or write a draft first."; return; }
+      // Open the tab synchronously (inside the click gesture) so the browser
+      // doesn't block it as a popup; we point it at the Doc once it's created.
+      const win = window.open("", "_blank");
+      gdocEdit.disabled = true; gdocStatus.className = "up-status"; gdocStatus.textContent = "Creating a Google Doc…";
       try {
         const res = await API.createGoogleDoc(API.getToken(role), { draftText: draft.value, documentName: gdocDocName() });
         googleDocId = res.googleDocId;
         if (draftResult) draftResult.googleDocId = googleDocId;
-        window.open(res.editUrl, "_blank", "noopener");
+        if (win && !win.closed) win.location.href = res.editUrl; else window.open(res.editUrl, "_blank", "noopener");
         gdocFetch.style.display = "inline-flex";
         gdocLink.replaceChildren(el("a", { href: res.editUrl, target: "_blank", rel: "noopener", class: "linklike" }, "Open Google Doc ↗"));
-        status.className = "up-status ok"; status.textContent = "Google Doc created and opened in a new tab. Edit there, then click “Fetch edited version”.";
+        gdocStatus.className = "up-status ok"; gdocStatus.textContent = "Google Doc created and opened in a new tab. Edit there, then click “Fetch edited version”.";
       } catch (ex) {
-        status.className = "up-status err"; status.textContent = `Couldn't create the Google Doc: ${ex.message}`;
+        if (win && !win.closed) win.close();
+        gdocStatus.className = "up-status err"; gdocStatus.textContent = `Couldn't create the Google Doc: ${ex.message}`;
       } finally { gdocEdit.disabled = false; }
     });
 
     gdocFetch.addEventListener("click", async () => {
-      if (!googleDocId) { status.className = "up-status warn"; status.textContent = "Create the Google Doc first."; return; }
-      gdocFetch.disabled = true; status.className = "up-status"; status.textContent = "Fetching the edited version…";
+      if (!googleDocId) { gdocStatus.className = "up-status warn"; gdocStatus.textContent = "Create the Google Doc first."; return; }
+      gdocFetch.disabled = true; gdocStatus.className = "up-status"; gdocStatus.textContent = "Fetching the edited version…";
       try {
         const res = await API.fetchGoogleDocContent(API.getToken(role), { googleDocId });
         draft.value = res.content || "";
-        status.className = "up-status ok"; status.textContent = "Fetched the edited version into the draft. Review and publish.";
+        gdocStatus.className = "up-status ok"; gdocStatus.textContent = "Fetched the edited version into the draft. Review and publish.";
       } catch (ex) {
-        status.className = "up-status err"; status.textContent = `Couldn't fetch the edited version: ${ex.message}`;
+        gdocStatus.className = "up-status err"; gdocStatus.textContent = `Couldn't fetch the edited version: ${ex.message}`;
       } finally { gdocFetch.disabled = false; }
     });
   }
