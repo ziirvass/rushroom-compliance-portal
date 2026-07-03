@@ -172,6 +172,20 @@ function extractGoogleDocText(doc: any): string {
 }
 
 // ---- AI deviation monitoring (Claude) ----
+// Insert a document_versions row, tolerating the optional provenance columns
+// (source_document_version_id / source_standard_version_ids) not existing yet —
+// if the DB doesn't have them, retry without them so publishing still works.
+async function insertDocumentVersion(row: Record<string, unknown>) {
+  let res = await db.from("document_versions").insert(row);
+  if (res.error && /source_(document|standard)_version_ids?/.test(res.error.message || "")) {
+    const clean = { ...row };
+    delete clean.source_document_version_id;
+    delete clean.source_standard_version_ids;
+    res = await db.from("document_versions").insert(clean);
+  }
+  return res;
+}
+
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const SCAN_MODEL = "claude-opus-4-8";
 const SEVERITIES = ["Critical", "High", "Medium", "Low", "Info"];
@@ -542,7 +556,7 @@ Deno.serve(async (req) => {
     const version = String(body.version ?? "v1").trim() || "v1";
     const notes = String(body.notes ?? "").slice(0, 1000);
     if (doc?.id && templateDoc.storage_path) {
-      await db.from("document_versions").insert({
+      await insertDocumentVersion({
         document_id: doc.id,
         version: version.slice(0, 80),
         file_name: String(templateDoc.name || "template").slice(0, 200),
@@ -706,7 +720,7 @@ Deno.serve(async (req) => {
       sourceDocumentVersionId = latestSourceVersion?.id || "";
     }
 
-    const { error: insertErr } = await db.from("document_versions").insert({
+    const { error: insertErr } = await insertDocumentVersion({
       document_id: targetDocumentId,
       version: String(body.version ?? "AI draft").slice(0, 80),
       file_name: fileName.slice(0, 200),
@@ -729,7 +743,7 @@ Deno.serve(async (req) => {
     const sourceStandardVersionIds = Array.isArray(body.sourceStandardVersionIds) ? body.sourceStandardVersionIds.filter((v: unknown) => String(v ?? "").trim()) : [];
     const sourceDocumentVersionId = String(body.sourceDocumentVersionId ?? "").trim() || null;
     if (!document_id || !path || !fileName) return json({ error: "documentId, path, fileName required" }, 400);
-    const { error } = await db.from("document_versions").insert({
+    const { error } = await insertDocumentVersion({
       document_id, version: String(body.version ?? "").slice(0, 80),
       file_name: fileName.slice(0, 200), storage_path: path,
       notes: String(body.notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
