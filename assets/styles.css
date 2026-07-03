@@ -451,6 +451,7 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 }
 .std-vlabel { font-weight: 600; }
 .std-view { margin-left: 0.6rem; }
+.view-open { display: inline-flex; gap: 0.5rem; align-items: center; }
 .std-del { margin-left: 0.6rem; color: var(--red); }
 .std-history { font-size: 0.88rem; }
 .std-history > summary { cursor: pointer; color: var(--muted); padding: 0.3rem 0; }
