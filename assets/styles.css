@@ -531,6 +531,12 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .doc-render td, .doc-render th { border: 1px solid #ccc; padding: 0.4rem 0.6rem; }
 .doc-render img { max-width: 100%; height: auto; }
 .doc-render a { color: #0b57d0; }
+.markdown-render th { background: #f2f4f8; text-align: left; }
+.markdown-render h1 { font-size: 1.7rem; } .markdown-render h2 { font-size: 1.35rem; } .markdown-render h3 { font-size: 1.12rem; }
+.markdown-render code { background: #f2f4f8; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.9em; }
+.markdown-render pre { background: #f2f4f8; padding: 0.8rem 1rem; border-radius: 6px; overflow: auto; }
+.markdown-render pre code { background: none; padding: 0; }
+.markdown-render blockquote { border-left: 3px solid #ccc; margin: 1rem 0; padding: 0.2rem 1rem; color: #444; }
 
 /* Rendered Excel workbook */
 .sheet-tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; padding: 0.6rem 0.8rem 0; background: var(--panel); position: sticky; top: 0; }

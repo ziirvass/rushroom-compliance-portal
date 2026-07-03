@@ -26,6 +26,9 @@
     return n;
   }
 
+  // Turn literal \uXXXX escapes (sometimes emitted in AI drafts) into real chars.
+  const unescapeUnicode = (s) => (s || "").replace(/\\u([0-9a-fA-F]{4})/g, (_, hx) => String.fromCharCode(parseInt(hx, 16)));
+
   /* ---------------- password gate ---------------- */
   async function portalHash(text) {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -946,14 +949,15 @@
     // Google Docs round-trip: edit the generated draft in Google Docs, then pull
     // the edited content back before publishing. Shown after a draft exists.
     const gdocEdit = el("button", { class: "btn btn-sm", type: "button" }, "📝 Edit in Google Docs");
-    const gdocFetch = el("button", { class: "btn btn-sm", type: "button" }, "↓ Fetch edited version");
+    const gdocPublish = el("button", { class: "btn btn-sm btn-primary", type: "button" }, "⬆ Publish from Google Docs (Word)");
+    const gdocFetch = el("button", { class: "btn btn-sm", type: "button" }, "↓ Fetch text back");
     const gdocLink = el("span", { style: "font-size:0.85rem" });
     const gdocStatus = el("p", { class: "up-status", role: "status", "aria-live": "polite", style: "margin:0.4rem 0 0" }, "");
     const gdocRow = el("div", { style: "display:none; margin-top:0.6rem" }, [
-      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [gdocEdit, gdocFetch, gdocLink]),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [gdocEdit, gdocPublish, gdocFetch, gdocLink]),
       gdocStatus,
     ]);
-    gdocFetch.style.display = "none";
+    gdocFetch.style.display = "none"; gdocPublish.style.display = "none";
     let googleDocId = null;
     const gdocDocName = () => (isCreateMode ? name.value.trim() : (d ? d.name : "")) || "Rushroom compliance draft";
 
@@ -1092,13 +1096,13 @@
         } else {
           changeList.appendChild(el("div", { class: "muted" }, "No specific change list was returned. You can still publish the draft as-is."));
         }
-        draft.value = draftResult.draftText || "";
+        draft.value = unescapeUnicode(draftResult.draftText || "");
         status.className = "up-status ok"; status.textContent = draftResult.summary || "Draft ready for review.";
         publish.disabled = false; publishBottom.disabled = false;
         // fresh draft → reset any prior Google Doc round-trip (only if configured)
         googleDocId = null;
         gdocRow.style.display = (window.PortalGDocs && window.PortalGDocs.configured()) ? "block" : "none";
-        gdocFetch.style.display = "none"; gdocLink.replaceChildren(); gdocStatus.textContent = "";
+        gdocFetch.style.display = "none"; gdocPublish.style.display = "none"; gdocLink.replaceChildren(); gdocStatus.textContent = "";
       } catch (ex) {
         status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
       } finally {
@@ -1106,34 +1110,29 @@
       }
     });
 
+    // Common publish parameters shared by the text and the Google-Docs-file paths.
+    const gatherPublish = () => {
+      const approved = Array.from(changeList.querySelectorAll("input[type='checkbox']")).filter((cb) => cb.checked).map((cb) => cb.dataset.title || "change").filter(Boolean);
+      const selectedStandardVersionIds = Array.from(standardsWrap.querySelectorAll("input[type='checkbox']")).filter((cb) => cb.checked).map((cb) => { const s = cb.closest("div")?.querySelector("select"); return s ? s.value : cb.value; }).filter(Boolean);
+      return {
+        documentId: d ? d.id : null,
+        newDocumentName: isCreateMode ? name.value.trim() : null,
+        templateDocumentId: selectedTemplateId() || null,
+        version: version.value.trim() || (draftResult && draftResult.versionHint) || "AI draft",
+        notes: `Approved changes: ${approved.join(", ") || "none"}\n${notes.value.trim()}`,
+        approvedChanges: approved,
+        sourceStandardVersionIds: selectedStandardVersionIds,
+      };
+    };
+    const baseFileName = () => ((isCreateMode ? name.value.trim() : (d ? d.name : "document")) || "document").replace(/[^a-z0-9._-]+/gi, "_") || "document";
+
     const doPublish = async (statusEl) => {
       if (!draftResult) { statusEl.className = "up-status warn"; statusEl.textContent = "Generate a draft first."; return; }
-      const approved = Array.from(changeList.querySelectorAll("input[type='checkbox']"))
-        .filter((cb) => cb.checked)
-        .map((cb) => cb.dataset.title || "change")
-        .filter(Boolean);
-      const selectedStandardVersionIds = Array.from(standardsWrap.querySelectorAll("input[type='checkbox']"))
-        .filter((cb) => cb.checked)
-        .map((cb) => {
-          const select = cb.closest("div")?.querySelector("select");
-          return select ? select.value : cb.value;
-        })
-        .filter(Boolean);
       const finalText = draft.value.trim();
       if (!finalText) { statusEl.className = "up-status warn"; statusEl.textContent = "The draft text is empty."; return; }
       publish.disabled = true; publishBottom.disabled = true; statusEl.className = "up-status"; statusEl.textContent = "Publishing draft…";
       try {
-        await API.publishDocumentDraft(API.getToken(role), {
-          documentId: d ? d.id : null,
-          newDocumentName: isCreateMode ? name.value.trim() : null,
-          templateDocumentId: selectedTemplateId() || null,
-          version: version.value.trim() || draftResult.versionHint || "AI draft",
-          notes: `Approved changes: ${approved.join(", ") || "none"}\n${notes.value.trim()}`,
-          draftText: finalText,
-          fileName: `${((isCreateMode ? name.value.trim() : (d ? d.name : "document")) || "document").replace(/[^a-z0-9._-]+/gi, "_") || "document"}.md`,
-          approvedChanges: approved,
-          sourceStandardVersionIds: selectedStandardVersionIds,
-        });
+        await API.publishDocumentDraft(API.getToken(role), { ...gatherPublish(), draftText: finalText, fileName: `${baseFileName()}.md` });
         close(); await reload();
       } catch (ex) {
         publish.disabled = false; publishBottom.disabled = false; statusEl.className = "up-status err"; statusEl.textContent = `Failed: ${ex.message}`;
@@ -1157,9 +1156,9 @@
         googleDocId = res.documentId;
         if (draftResult) draftResult.googleDocId = googleDocId;
         if (win && !win.closed) win.location.href = res.editUrl; else window.open(res.editUrl, "_blank", "noopener");
-        gdocFetch.style.display = "inline-flex";
+        gdocFetch.style.display = "inline-flex"; gdocPublish.style.display = "inline-flex";
         gdocLink.replaceChildren(el("a", { href: res.editUrl, target: "_blank", rel: "noopener", class: "linklike" }, "Open Google Doc ↗"));
-        gdocStatus.className = "up-status ok"; gdocStatus.textContent = "Google Doc created in your Drive and opened in a new tab. Edit there, then click “Fetch edited version”.";
+        gdocStatus.className = "up-status ok"; gdocStatus.textContent = "Google Doc created in your Drive and opened in a new tab. Edit there, then “Publish from Google Docs” to save it as a formatted Word document.";
       } catch (ex) {
         if (win && !win.closed) win.close();
         gdocStatus.className = "up-status err"; gdocStatus.textContent = `Couldn't create the Google Doc: ${ex.message}`;
@@ -1171,11 +1170,24 @@
       gdocFetch.disabled = true; gdocStatus.className = "up-status"; gdocStatus.textContent = "Fetching the edited version…";
       try {
         const content = await window.PortalGDocs.fetchDoc(googleDocId);
-        draft.value = content || "";
-        gdocStatus.className = "up-status ok"; gdocStatus.textContent = "Fetched the edited version into the draft. Review and publish.";
+        draft.value = unescapeUnicode(content || "");
+        gdocStatus.className = "up-status ok"; gdocStatus.textContent = "Fetched the edited text into the draft (plain text). To keep full formatting, use “Publish from Google Docs” instead.";
       } catch (ex) {
         gdocStatus.className = "up-status err"; gdocStatus.textContent = `Couldn't fetch the edited version: ${ex.message}`;
       } finally { gdocFetch.disabled = false; }
+    });
+
+    gdocPublish.addEventListener("click", async () => {
+      if (!googleDocId) { gdocStatus.className = "up-status warn"; gdocStatus.textContent = "Create the Google Doc first."; return; }
+      if (!draftResult) { gdocStatus.className = "up-status warn"; gdocStatus.textContent = "Generate a draft first."; return; }
+      gdocPublish.disabled = true; gdocStatus.className = "up-status"; gdocStatus.textContent = "Exporting the Google Doc as Word and publishing…";
+      try {
+        const blob = await window.PortalGDocs.exportDoc(googleDocId, "docx");
+        await API.publishDocumentFile(API.getToken(role), blob, { ...gatherPublish(), fileName: `${baseFileName()}.docx` });
+        close(); await reload();
+      } catch (ex) {
+        gdocPublish.disabled = false; gdocStatus.className = "up-status err"; gdocStatus.textContent = `Couldn't publish from Google Docs: ${ex.message}`;
+      }
     });
   }
 

@@ -13,7 +13,12 @@
 (function () {
   const CFG = (window.PORTAL_CONFIG && window.PORTAL_CONFIG.google) || {};
   const CLIENT_ID = CFG.oauthClientId || "";
-  const SCOPES = "https://www.googleapis.com/auth/documents";
+  // documents: create/read the Doc; drive.file: export the app-created Doc as a file.
+  const SCOPES = "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive.file";
+  const MIME = {
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    pdf: "application/pdf",
+  };
 
   let tokenClient = null;
   let accessToken = "";
@@ -95,5 +100,20 @@
     return extractText(doc);
   }
 
-  window.PortalGDocs = { configured, gisReady, getToken, createDoc, fetchDoc };
+  // Export the Doc as a real file (Word .docx or PDF), preserving formatting.
+  async function exportDoc(documentId, kind) {
+    const mimeType = MIME[kind] || MIME.docx;
+    const token = await getToken();
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(documentId)}/export?mimeType=${encodeURIComponent(mimeType)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { const j = await res.json(); msg = (j.error && j.error.message) || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    return res.blob();
+  }
+
+  window.PortalGDocs = { configured, gisReady, getToken, createDoc, fetchDoc, exportDoc };
 })();

@@ -160,12 +160,22 @@
       return call({ action: "suggestDocumentVersion", token, documentId, templateDocumentId, notes, preferredVersion, sourceStandardIds });
     },
 
-    async publishDocumentDraft(token, { documentId, newDocumentName, templateDocumentId, category, audience, version, notes, draftText, fileName, approvedChanges } = {}) {
+    async publishDocumentDraft(token, { documentId, newDocumentName, templateDocumentId, category, audience, version, notes, draftText, fileName, approvedChanges, sourceStandardVersionIds } = {}) {
       const { signedUrl, path } = await call({ action: "docUploadUrl", token, fileName: fileName || "draft.md" });
       const body = new Blob([draftText || ""], { type: "text/markdown;charset=utf-8" });
       const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": "text/markdown;charset=utf-8" }, body });
       if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
-      await call({ action: "publishDocumentDraft", token, documentId, newDocumentName, templateDocumentId, category, audience, version, notes, draftText, fileName, approvedChanges, path });
+      await call({ action: "publishDocumentDraft", token, documentId, newDocumentName, templateDocumentId, category, audience, version, notes, draftText, fileName, approvedChanges, sourceStandardVersionIds, path });
+      return path;
+    },
+
+    // Publish a binary file (e.g. a Google Doc exported as .docx/.pdf) as the
+    // document version, preserving its formatting.
+    async publishDocumentFile(token, blob, { documentId, newDocumentName, templateDocumentId, category, audience, version, notes, fileName, approvedChanges, sourceStandardVersionIds } = {}) {
+      const { signedUrl, path } = await call({ action: "docUploadUrl", token, fileName: fileName || "document.docx" });
+      const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: blob });
+      if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+      await call({ action: "publishDocumentDraft", token, documentId, newDocumentName, templateDocumentId, category, audience, version, notes, draftText: "(published from Google Docs)", fileName, approvedChanges, sourceStandardVersionIds, path });
       return path;
     },
   };

@@ -11,7 +11,10 @@
   const CDN = {
     mammoth: "https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js",
     xlsx: "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js",
+    marked: "https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js",
   };
+  // Some AI drafts contain literal \uXXXX escapes — turn them back into real chars.
+  const unescapeUnicode = (s) => (s || "").replace(/\\u([0-9a-fA-F]{4})/g, (_, hx) => String.fromCharCode(parseInt(hx, 16)));
   const scriptPromises = {};
   function loadScript(src) {
     if (!scriptPromises[src]) {
@@ -99,9 +102,15 @@
         await loadScript(CDN.mammoth);
         const result = await window.mammoth.convertToHtml({ arrayBuffer: buf });
         body.replaceChildren(h("div", { class: "doc-render", html: result.value || "<p>(empty document)</p>" }));
-      } else if (ext === "txt" || ext === "md" || ext === "markdown") {
+      } else if (ext === "md" || ext === "markdown") {
         const buf = await fetchBytes(url);
-        const text = new TextDecoder().decode(new Uint8Array(buf));
+        const text = unescapeUnicode(new TextDecoder().decode(new Uint8Array(buf)));
+        await loadScript(CDN.marked);
+        const html = window.marked.parse(text || "");
+        body.replaceChildren(h("div", { class: "doc-render markdown-render", html: html || "<p>(empty document)</p>" }));
+      } else if (ext === "txt") {
+        const buf = await fetchBytes(url);
+        const text = unescapeUnicode(new TextDecoder().decode(new Uint8Array(buf)));
         body.replaceChildren(h("pre", { class: "viewer-text", style: "white-space:pre-wrap; word-break:break-word; padding:1rem; background:#f7f9fc; border-radius:8px; max-height:70vh; overflow:auto;" }, text || "(empty document)"));
       } else if (ext === "xlsx" || ext === "xls" || ext === "csv") {
         const buf = await fetchBytes(url);
