@@ -40,7 +40,7 @@ window.PORTAL_CONFIG = {
    * paste the Client ID below. Leave "" to hide the Google Docs buttons.
    */
   google: {
-    oauthClientId: "",
+    oauthClientId: "362898915614-hee1mbekq75m27jvhen0jofsht7prufk.apps.googleusercontent.com",
   },
 
   /* ---- Live status source ------------------------------------------------
