@@ -31,6 +31,18 @@ window.PORTAL_CONFIG = {
     functionUrl: "https://iwoqujpwhsoywudjtsnj.supabase.co/functions/v1/portal-api",
   },
 
+  /* ---- Google Docs editing (in-browser OAuth) ---------------------------
+   * Lets Rushroom edit an AI draft in Google Docs before publishing. Because
+   * personal Google accounts can't use a service account for this, the user
+   * signs in with their own Google account and the Doc is created in their
+   * Drive. Create an OAuth 2.0 Client ID (type: Web application) in Google
+   * Cloud, add this site's origin as an authorised JavaScript origin, and
+   * paste the Client ID below. Leave "" to hide the Google Docs buttons.
+   */
+  google: {
+    oauthClientId: "",
+  },
+
   /* ---- Live status source ------------------------------------------------
    * Published CSV URL of the action-plan Google Sheet
    * ("00_ACTION_PLAN_Rushroom_Compliance_Step_by_Step").

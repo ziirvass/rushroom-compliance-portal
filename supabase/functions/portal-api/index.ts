@@ -110,6 +110,10 @@ const safeName = (n: string) => (n || "file").replace(/[^\w.\-]+/g, "_").slice(-
 
 // ---- Google Docs integration (service-account OAuth) ----------------------
 const GOOGLE_SERVICE_ACCOUNT = Deno.env.get("GOOGLE_SERVICE_ACCOUNT") ?? "";
+// A bare service account has no Drive storage, so it cannot own Docs. Set this
+// to a real user's email (with domain-wide delegation authorised in Google
+// Workspace) to impersonate them — the Doc is then created in THEIR Drive.
+const GOOGLE_IMPERSONATE_SUBJECT = Deno.env.get("GOOGLE_IMPERSONATE_SUBJECT") ?? "";
 
 function b64decode(s: string): Uint8Array {
   const bin = atob(s);
@@ -128,9 +132,11 @@ async function googleAccessToken(scopes: string[]): Promise<string> {
   if (!sa.client_email || !sa.private_key) throw new Error("GOOGLE_SERVICE_ACCOUNT is missing client_email or private_key");
   const now = Math.floor(Date.now() / 1000);
   const enc64 = (obj: unknown) => b64url(enc.encode(JSON.stringify(obj)));
-  const signingInput = `${enc64({ alg: "RS256", typ: "JWT" })}.${enc64({
+  const claim: Record<string, unknown> = {
     iss: sa.client_email, scope: scopes.join(" "), aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600,
-  })}`;
+  };
+  if (GOOGLE_IMPERSONATE_SUBJECT) claim.sub = GOOGLE_IMPERSONATE_SUBJECT; // domain-wide delegation
+  const signingInput = `${enc64({ alg: "RS256", typ: "JWT" })}.${enc64(claim)}`;
   const pem = String(sa.private_key).replace(/-----BEGIN PRIVATE KEY-----/, "").replace(/-----END PRIVATE KEY-----/, "").replace(/\s+/g, "");
   const key = await crypto.subtle.importKey("pkcs8", ab(b64decode(pem)), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, key, ab(enc.encode(signingInput))));

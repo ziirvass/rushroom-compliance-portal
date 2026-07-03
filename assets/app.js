@@ -1059,8 +1059,10 @@
         draft.value = draftResult.draftText || "";
         status.className = "up-status ok"; status.textContent = draftResult.summary || "Draft ready for review.";
         publish.disabled = false;
-        // fresh draft → reset any prior Google Doc round-trip
-        googleDocId = null; gdocRow.style.display = "block"; gdocFetch.style.display = "none"; gdocLink.replaceChildren(); gdocStatus.textContent = "";
+        // fresh draft → reset any prior Google Doc round-trip (only if configured)
+        googleDocId = null;
+        gdocRow.style.display = (window.PortalGDocs && window.PortalGDocs.configured()) ? "block" : "none";
+        gdocFetch.style.display = "none"; gdocLink.replaceChildren(); gdocStatus.textContent = "";
       } catch (ex) {
         status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
       } finally {
@@ -1107,16 +1109,19 @@
       if (!text) { gdocStatus.className = "up-status warn"; gdocStatus.textContent = "Generate or write a draft first."; return; }
       // Open the tab synchronously (inside the click gesture) so the browser
       // doesn't block it as a popup; we point it at the Doc once it's created.
+      if (!window.PortalGDocs || !window.PortalGDocs.configured()) { gdocStatus.className = "up-status err"; gdocStatus.textContent = "Google Docs isn't set up yet."; return; }
+      // Pre-open the tab inside the click gesture so it isn't popup-blocked.
       const win = window.open("", "_blank");
-      gdocEdit.disabled = true; gdocStatus.className = "up-status"; gdocStatus.textContent = "Creating a Google Doc…";
+      gdocEdit.disabled = true; gdocStatus.className = "up-status"; gdocStatus.textContent = "Opening Google — approve access if prompted…";
       try {
-        const res = await API.createGoogleDoc(API.getToken(role), { draftText: draft.value, documentName: gdocDocName() });
-        googleDocId = res.googleDocId;
+        await window.PortalGDocs.getToken(); // consent popup on first use (kept in the gesture)
+        const res = await window.PortalGDocs.createDoc(gdocDocName(), draft.value);
+        googleDocId = res.documentId;
         if (draftResult) draftResult.googleDocId = googleDocId;
         if (win && !win.closed) win.location.href = res.editUrl; else window.open(res.editUrl, "_blank", "noopener");
         gdocFetch.style.display = "inline-flex";
         gdocLink.replaceChildren(el("a", { href: res.editUrl, target: "_blank", rel: "noopener", class: "linklike" }, "Open Google Doc ↗"));
-        gdocStatus.className = "up-status ok"; gdocStatus.textContent = "Google Doc created and opened in a new tab. Edit there, then click “Fetch edited version”.";
+        gdocStatus.className = "up-status ok"; gdocStatus.textContent = "Google Doc created in your Drive and opened in a new tab. Edit there, then click “Fetch edited version”.";
       } catch (ex) {
         if (win && !win.closed) win.close();
         gdocStatus.className = "up-status err"; gdocStatus.textContent = `Couldn't create the Google Doc: ${ex.message}`;
@@ -1127,8 +1132,8 @@
       if (!googleDocId) { gdocStatus.className = "up-status warn"; gdocStatus.textContent = "Create the Google Doc first."; return; }
       gdocFetch.disabled = true; gdocStatus.className = "up-status"; gdocStatus.textContent = "Fetching the edited version…";
       try {
-        const res = await API.fetchGoogleDocContent(API.getToken(role), { googleDocId });
-        draft.value = res.content || "";
+        const content = await window.PortalGDocs.fetchDoc(googleDocId);
+        draft.value = content || "";
         gdocStatus.className = "up-status ok"; gdocStatus.textContent = "Fetched the edited version into the draft. Review and publish.";
       } catch (ex) {
         gdocStatus.className = "up-status err"; gdocStatus.textContent = `Couldn't fetch the edited version: ${ex.message}`;
