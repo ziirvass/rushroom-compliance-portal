@@ -909,6 +909,11 @@
     const draft = el("textarea", { rows: "12", style: "width:100%; margin-top:0.75rem", placeholder: "The AI-generated draft will appear here" });
     const standardsWrap = el("div", { style: "margin-top:0.4rem" });
     publish.disabled = true;
+    // A second Publish button at the bottom, so you can publish right after
+    // editing the draft / fetching from Google Docs without scrolling up.
+    const publishBottom = el("button", { class: "btn btn-primary", type: "button" }, "✓ Publish approved draft");
+    publishBottom.disabled = true;
+    const publishStatus = el("p", { class: "up-status", role: "status", "aria-live": "polite", style: "margin:0.5rem 0 0" }, "");
     let draftResult = null;
 
     // Google Docs round-trip: edit the generated draft in Google Docs, then pull
@@ -975,6 +980,10 @@
       el("div", { style: "margin-top:1rem" }, [el("strong", {}, "Suggested changes"), changeList]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Draft text"), draft]),
       gdocRow,
+      el("div", { style: "margin-top:1rem; border-top:1px solid var(--border); padding-top:0.85rem" }, [
+        el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [publishBottom]),
+        publishStatus,
+      ]),
     ].filter(Boolean));
 
     const close = openModal(options.title || (d ? `AI draft — ${d.name}` : "New As Operates document"), form);
@@ -1032,7 +1041,7 @@
       if (!context && !selectedStandardVersionIds.length && !tmplId && !d) {
         status.className = "up-status warn"; status.textContent = "Choose a template, select one or more standards/regulations, or add context first."; return;
       }
-      generate.disabled = true; publish.disabled = true; status.className = "up-status"; status.textContent = "Generating draft…";
+      generate.disabled = true; publish.disabled = true; publishBottom.disabled = true; status.className = "up-status"; status.textContent = "Generating draft…";
       try {
         draftResult = await API.suggestDocumentVersion(API.getToken(role), {
           documentId: d ? d.id : null,
@@ -1058,7 +1067,7 @@
         }
         draft.value = draftResult.draftText || "";
         status.className = "up-status ok"; status.textContent = draftResult.summary || "Draft ready for review.";
-        publish.disabled = false;
+        publish.disabled = false; publishBottom.disabled = false;
         // fresh draft → reset any prior Google Doc round-trip (only if configured)
         googleDocId = null;
         gdocRow.style.display = (window.PortalGDocs && window.PortalGDocs.configured()) ? "block" : "none";
@@ -1070,8 +1079,8 @@
       }
     });
 
-    publish.addEventListener("click", async () => {
-      if (!draftResult) { status.className = "up-status warn"; status.textContent = "Generate a draft first."; return; }
+    const doPublish = async (statusEl) => {
+      if (!draftResult) { statusEl.className = "up-status warn"; statusEl.textContent = "Generate a draft first."; return; }
       const approved = Array.from(changeList.querySelectorAll("input[type='checkbox']"))
         .filter((cb) => cb.checked)
         .map((cb) => cb.dataset.title || "change")
@@ -1084,8 +1093,8 @@
         })
         .filter(Boolean);
       const finalText = draft.value.trim();
-      if (!finalText) { status.className = "up-status warn"; status.textContent = "The draft text is empty."; return; }
-      publish.disabled = true; status.className = "up-status"; status.textContent = "Publishing draft…";
+      if (!finalText) { statusEl.className = "up-status warn"; statusEl.textContent = "The draft text is empty."; return; }
+      publish.disabled = true; publishBottom.disabled = true; statusEl.className = "up-status"; statusEl.textContent = "Publishing draft…";
       try {
         await API.publishDocumentDraft(API.getToken(role), {
           documentId: d ? d.id : null,
@@ -1100,9 +1109,11 @@
         });
         close(); await reload();
       } catch (ex) {
-        publish.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
+        publish.disabled = false; publishBottom.disabled = false; statusEl.className = "up-status err"; statusEl.textContent = `Failed: ${ex.message}`;
       }
-    });
+    };
+    publish.addEventListener("click", () => doPublish(status));
+    publishBottom.addEventListener("click", () => doPublish(publishStatus));
 
     gdocEdit.addEventListener("click", async () => {
       const text = draft.value.trim();
