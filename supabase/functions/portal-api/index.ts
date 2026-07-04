@@ -176,6 +176,11 @@ function extractGoogleDocText(doc: any): string {
 // (source_document_version_id / source_standard_version_ids) not existing yet —
 // if the DB doesn't have them, retry without them so publishing still works.
 async function insertDocumentVersion(row: Record<string, unknown>) {
+  // Auto-number the version (v1, v2, v3 …) when no label was supplied.
+  if (!String(row.version ?? "").trim() && row.document_id) {
+    const { count } = await db.from("document_versions").select("id", { count: "exact", head: true }).eq("document_id", row.document_id as string);
+    row.version = `v${(count ?? 0) + 1}`;
+  }
   let res = await db.from("document_versions").insert(row);
   if (res.error && /source_(document|standard)_version_ids?/.test(res.error.message || "")) {
     const clean = { ...row };
@@ -520,7 +525,7 @@ Deno.serve(async (req) => {
       const versionLabel = String(body.version ?? "").slice(0, 80);
       const fileName = String(body.fileName ?? "file").slice(0, 200);
       if (storagePath || versionLabel || fileName) {
-        await db.from("document_versions").insert({
+        await insertDocumentVersion({
           document_id: doc.id, version: versionLabel,
           file_name: fileName, storage_path: storagePath,
           notes: String(body.notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
@@ -845,9 +850,14 @@ Deno.serve(async (req) => {
     const path = String(body.path ?? "");
     const fileName = String(body.fileName ?? "");
     if (!standard_id || !path || !fileName) return json({ error: "standardId, path, fileName required" }, 400);
+    let versionLabel = String(body.version ?? "").slice(0, 80);
+    if (!versionLabel.trim()) {
+      const { count } = await db.from("standard_versions").select("id", { count: "exact", head: true }).eq("standard_id", standard_id);
+      versionLabel = `v${(count ?? 0) + 1}`;
+    }
     const { error } = await db.from("standard_versions").insert({
       standard_id,
-      version: String(body.version ?? "").slice(0, 80),
+      version: versionLabel,
       effective_date: String(body.effectiveDate ?? "").slice(0, 40),
       notes: String(body.notes ?? "").slice(0, 1000),
       storage_path: path, file_name: fileName.slice(0, 200), uploaded_by: "rushroom",

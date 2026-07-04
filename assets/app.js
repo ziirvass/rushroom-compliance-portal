@@ -526,7 +526,7 @@
       const current = versions[0];
       const currentRow = current
         ? el("div", { class: "std-current" }, [
-            el("span", { class: "std-vlabel" }, `Current${current.version ? `: ${current.version}` : ""}`),
+            el("span", { class: "std-vlabel" }, `Current: v${versions.length}`),
             el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
             current.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer({ ...d, open_url: current.open_url, storage_path: current.storage_path || d.storage_path }) }, "View") : null,
             openInAppLink(current.open_url, current.file_name || d.name, current.storage_path || d.storage_path),
@@ -535,7 +535,7 @@
       const history = versions.length
         ? el("details", { class: "std-history" }, [
             el("summary", {}, `Version history (${versions.length})`),
-            el("ul", { class: "std-versions" }, versions.map((v) => {
+            el("ul", { class: "std-versions" }, versions.map((v, vi) => {
               const sourceNotes = [];
               if (v.source_document_version) {
                 sourceNotes.push(`Based on document version ${v.source_document_version.version || "—"}`);
@@ -545,7 +545,7 @@
               }
               return el("li", {}, [
                 el("div", {}, [
-                  el("span", { class: "std-vlabel" }, v.version || "—"),
+                  el("span", { class: "std-vlabel" }, `v${versions.length - vi}`),
                   el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
                   v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer({ ...d, open_url: v.open_url, storage_path: v.storage_path || d.storage_path, name: v.file_name || d.name }) }, "View") : null,
                   openInAppLink(v.open_url, v.file_name || d.name, v.storage_path || d.storage_path),
@@ -933,7 +933,7 @@
     const gTool = isSheet ? "Google Sheets" : "Google Docs";
 
     // Shared version metadata (used by both the Google edit and the upload paths).
-    const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. 2026-07 or Rev B)" });
+    const version = el("input", { type: "text", placeholder: "Leave blank to auto-number (v2, v3…) — or type a custom label" });
     const notes = el("textarea", { rows: "2", placeholder: "What changed (optional)" });
 
     // ---- Path A: edit the current version in Google Docs/Sheets, save back as a new version ----
@@ -1047,7 +1047,7 @@
     // A generic default name may be auto-replaced when a template is picked.
     if (isCreateMode && !options.initialName) name.dataset.auto = "1";
     const notes = el("textarea", { rows: "3", placeholder: "e.g. reflect the latest requirements, tighten wording, add the sign-off section" });
-    const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. Rev C or 2026-08)" });
+    const version = el("input", { type: "text", placeholder: "Leave blank to auto-number (v2, v3…) — or type a custom label" });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const generate = el("button", { class: "btn btn-primary", type: "button" }, "Generate draft");
     const publish = el("button", { class: "btn btn-primary", type: "button" }, "Publish approved draft");
@@ -1528,7 +1528,8 @@
     ]);
     const currentEl = current
       ? el("div", { class: "std-current" }, [
-          el("span", { class: "std-vlabel" }, `Current: ${current.version || "—"}`),
+          el("span", { class: "std-vlabel" }, `Current: v${versions.length}`),
+          current.version ? el("span", { class: "muted" }, ` · ${current.version}`) : null,
           current.effective_date ? el("span", { class: "muted" }, ` · effective ${current.effective_date}`) : null,
           el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
           current.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => viewFile(current) }, "View") : null,
@@ -1541,9 +1542,10 @@
     const history = versions.length
       ? el("details", { class: "std-history" }, [
           el("summary", {}, `Revision history (${versions.length})`),
-          el("ul", { class: "std-versions" }, versions.map((v) => el("li", {}, [
+          el("ul", { class: "std-versions" }, versions.map((v, vi) => el("li", {}, [
             el("div", {}, [
-              el("span", { class: "std-vlabel" }, v.version || "—"),
+              el("span", { class: "std-vlabel" }, `v${versions.length - vi}`),
+              v.version ? el("span", { class: "muted" }, ` · ${v.version}`) : null,
               v.effective_date ? el("span", { class: "muted" }, ` · effective ${v.effective_date}`) : null,
               el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
               v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => viewFile(v) }, "View") : null,
