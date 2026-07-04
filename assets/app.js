@@ -568,7 +568,7 @@
 
   // Sub-tabs within a panel (e.g. Library vs Add). Remembers the active tab
   // per key so it survives re-renders (reload after an add).
-  const paneSubTab = { documents: "list", standards: "list" };
+  const paneSubTab = { documents: "list", standards: "list", level2: "clauses" };
   function subTabs(key, tabs) {
     const bar = el("div", { class: "subtabs", role: "tablist" });
     const body = el("div", { class: "subtab-body" });
@@ -1931,6 +1931,324 @@
     render();
   }
 
+  /* ================= Level 2: clauses · interpretations · matrix · passports ===========
+   * Structured, clause-level compliance. Rushroom-only. Backed by the Phase-5
+   * edge actions (extract/generate/save/getInterpretations, complianceMatrix,
+   * product-passport CRUD + DPP export). */
+  const L2_STATUS = [["compliant", "Compliant"], ["deviation", "Deviation"], ["not_applicable", "N/A"], ["pending", "Pending"]];
+  const l2StatusLabel = (st) => (L2_STATUS.find((s) => s[0] === st) || [, "—"])[1];
+  const l2StatusChip = (st) => el("span", { class: `l2-status l2-${st || "none"}` }, l2StatusLabel(st) || "—");
+  const l2CellGlyph = { compliant: "✓", deviation: "!", not_applicable: "–", pending: "…", none: "" };
+  const taField = (attrs, val) => { const t = el("textarea", attrs); t.value = val || ""; return t; };
+  function downloadBlob(text, filename, type) {
+    const blob = new Blob([text], { type: type || "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = el("a", { href: url, download: filename });
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+  function flattenStdVersions(standards) {
+    const out = [];
+    for (const s of standards || []) for (const v of (s.versions || [])) out.push({ id: v.id, label: `${s.code || s.title || "Standard"}${v.version ? " " + v.version : ""}`, std: s, v });
+    return out;
+  }
+  function flattenDocVersions(documents) {
+    const out = [];
+    for (const d of documents || []) { const vs = d.versions || []; vs.forEach((v, i) => out.push({ id: v.id, label: `${d.name} · v${vs.length - i}`, doc: d, v })); }
+    return out;
+  }
+
+  // 1) Clauses — extract and browse a standard version's clauses.
+  function l2ClausesView(ctx) {
+    const wrap = el("div");
+    const stdVers = flattenStdVersions(ctx.standards);
+    if (!stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "No standard versions yet — upload a standard file under “Standards & regulations” first.")); return wrap; }
+    const sel = el("select", { class: "up-text" }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
+    const out = el("div", { style: "margin-top:0.8rem" });
+    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const load = async () => {
+      out.replaceChildren(el("div", { class: "loading" }, "Loading clauses…"));
+      try {
+        const { clauses } = await API.getClausesForStandard(ctx.token, sel.value);
+        if (!clauses.length) { out.replaceChildren(el("div", { class: "empty" }, "No clauses yet. Use “Extract clauses (AI)” to read this standard.")); return; }
+        out.replaceChildren(el("table", { class: "l2-table" }, [
+          el("thead", {}, el("tr", {}, [el("th", {}, "Ref"), el("th", {}, "Title"), el("th", {}, "Type"), el("th", {}, "Requirement")])),
+          el("tbody", {}, clauses.map((c) => el("tr", {}, [
+            el("td", {}, el("strong", {}, c.clause_ref)),
+            el("td", {}, c.clause_title || "—"),
+            el("td", {}, el("span", { class: "pill-priority" }, c.requirement_type || "—")),
+            el("td", { class: "l2-clausetext" }, c.clause_text || ""),
+          ]))),
+        ]));
+      } catch (ex) { out.replaceChildren(el("div", { class: "error" }, ex.message)); }
+    };
+    const extract = actionBtn("Extract clauses (AI)", "sparkles", { primary: true, onClick: async () => {
+      status.className = "up-status"; status.textContent = "Reading the standard file with AI — this can take a minute…";
+      try { const r = await API.extractStandardClauses(ctx.token, { standardVersionId: sel.value }); status.className = "up-status ok"; status.textContent = `Extracted ${r.inserted} clause(s).`; await load(); }
+      catch (ex) { status.className = "up-status err"; status.textContent = ex.message; }
+    } });
+    sel.addEventListener("change", load);
+    wrap.append(
+      el("p", { class: "muted", style: "margin:0 0 0.6rem" }, "Decompose a standard into individual clauses. The AI reads the uploaded standard file and extracts each requirement so you can interpret them one by one."),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [el("span", { class: "form-label" }, "Standard"), sel, extract]),
+      status, out,
+    );
+    load();
+    return wrap;
+  }
+
+  // Editable interpretation card for one clause against one document version.
+  function l2InterpCard(ctx, clause, interp, docVersionId, reload) {
+    const text = taField({ rows: "2", class: "up-text", placeholder: "How the document implements this clause…" }, interp && interp.interpretation_text);
+    const statusSel = el("select", { class: "up-text" }, L2_STATUS.map(([v, l]) => el("option", { value: v, selected: (interp && interp.compliance_status || "pending") === v ? "selected" : null }, l)));
+    const rationale = taField({ rows: "1", class: "up-text", placeholder: "Rationale (optional)" }, interp && interp.rationale);
+    const note = el("span", { class: "up-status" }, "");
+    const genOne = actionBtn("Generate (AI)", "sparkles", { onClick: async () => {
+      note.className = "up-status"; note.textContent = "AI interpreting…";
+      try { await API.generateInterpretations(ctx.token, { documentVersionId: docVersionId, clauseIds: [clause.id] }); await reload(); }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    } });
+    const save = actionBtn("Save", "edit", { primary: true, onClick: async () => {
+      if (!interp || !interp.id) { note.className = "up-status warn"; note.textContent = "Generate first (creates the record), then edit."; return; }
+      note.className = "up-status"; note.textContent = "Saving…";
+      try { await API.saveInterpretation(ctx.token, interp.id, { interpretationText: text.value, complianceStatus: statusSel.value, rationale: rationale.value, reviewedBy: (API.session() && API.session().name) || "rushroom" }); note.className = "up-status ok"; note.textContent = "Saved."; }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    } });
+    return el("div", { class: "card l2-interp" }, [
+      el("div", { class: "l2-interp-head" }, [
+        el("div", {}, [el("strong", {}, clause.clause_ref), clause.clause_title ? el("span", { class: "muted" }, ` — ${clause.clause_title}`) : null]),
+        interp ? l2StatusChip(interp.compliance_status) : el("span", { class: "muted", style: "font-size:0.8rem" }, "no interpretation yet"),
+      ]),
+      clause.clause_text ? el("details", { class: "l2-clause-req" }, [el("summary", {}, "Requirement text"), el("p", { class: "muted" }, clause.clause_text)]) : null,
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Interpretation"), text]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Rationale"), rationale]),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [el("span", { class: "form-label" }, "Status"), statusSel, interp && interp.id ? save : genOne, note]),
+      interp && interp.reviewed_by ? el("div", { class: "muted", style: "font-size:0.8rem; margin-top:0.3rem" }, `Reviewed by ${interp.reviewed_by}${interp.reviewed_at ? " · " + fmtDate(interp.reviewed_at) : ""}${interp.ai_generated ? " · AI-drafted" : ""}`) : null,
+    ]);
+  }
+
+  // 2) Interpretations — a document version × a standard's clauses.
+  function l2InterpretationsView(ctx) {
+    const wrap = el("div");
+    const docVers = flattenDocVersions(ctx.documents);
+    const stdVers = flattenStdVersions(ctx.standards);
+    if (!docVers.length || !stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "Need at least one document version and one standard version. Add them in the Document library and Standards tabs.")); return wrap; }
+    const docSel = el("select", { class: "up-text" }, docVers.map((o) => el("option", { value: o.id }, o.label)));
+    const stdSel = el("select", { class: "up-text" }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
+    const out = el("div", { style: "margin-top:0.8rem" });
+    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    let clauses = [];
+    const load = async () => {
+      out.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+      try {
+        const [cRes, iRes] = await Promise.all([API.getClausesForStandard(ctx.token, stdSel.value), API.getInterpretations(ctx.token, docSel.value)]);
+        clauses = cRes.clauses || [];
+        const interps = {}; for (const i of (iRes.interpretations || [])) interps[i.clause_id] = i;
+        if (!clauses.length) { out.replaceChildren(el("div", { class: "empty" }, "This standard has no clauses yet — extract them in the Clauses tab first.")); return; }
+        out.replaceChildren(...clauses.map((c) => l2InterpCard(ctx, c, interps[c.id], docSel.value, load)));
+      } catch (ex) { out.replaceChildren(el("div", { class: "error" }, ex.message)); }
+    };
+    const gen = actionBtn("Generate all (AI)", "sparkles", { primary: true, onClick: async () => {
+      if (!clauses.length) { status.className = "up-status warn"; status.textContent = "Extract clauses for this standard first."; return; }
+      status.className = "up-status"; status.textContent = "AI is interpreting the document against each clause — this can take a minute…";
+      try { const r = await API.generateInterpretations(ctx.token, { documentVersionId: docSel.value, clauseIds: clauses.map((c) => c.id) }); status.className = "up-status ok"; status.textContent = `Generated ${r.generated} interpretation(s).`; await load(); }
+      catch (ex) { status.className = "up-status err"; status.textContent = ex.message; }
+    } });
+    docSel.addEventListener("change", load); stdSel.addEventListener("change", load);
+    wrap.append(
+      el("p", { class: "muted", style: "margin:0 0 0.6rem" }, "Interpret how a document version implements each clause of a standard. Generate a first pass with AI, then review and edit each one."),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [el("span", { class: "form-label" }, "Document"), docSel, el("span", { class: "form-label" }, "Standard"), stdSel, gen]),
+      status, out,
+    );
+    load();
+    return wrap;
+  }
+
+  // Edit a single matrix cell (fetches/creates the interpretation on demand).
+  async function l2EditCell(ctx, clause, docVer, reload) {
+    const body = el("div", { class: "step-form" }, el("div", { class: "loading" }, "Loading…"));
+    const close = openModal(`${clause.clause_ref} × ${docVer.document && docVer.document.name || "document"}`, body);
+    let interp = null;
+    try { const r = await API.getInterpretations(ctx.token, docVer.id); interp = (r.interpretations || []).find((i) => i.clause_id === clause.id) || null; } catch { /* ignore */ }
+    const card = l2InterpCard(ctx, clause, interp, docVer.id, async () => { close(); await reload(); });
+    body.replaceChildren(card);
+  }
+
+  // 3) Compliance matrix — documents × clauses.
+  function l2MatrixView(ctx) {
+    const wrap = el("div");
+    const docVers = flattenDocVersions(ctx.documents);
+    const stdVers = flattenStdVersions(ctx.standards);
+    if (!docVers.length || !stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "Need at least one document version and one standard version.")); return wrap; }
+    const docSel = el("select", { class: "up-text", multiple: "multiple", size: String(Math.min(6, Math.max(3, docVers.length))) }, docVers.map((o) => el("option", { value: o.id }, o.label)));
+    const stdSel = el("select", { class: "up-text", multiple: "multiple", size: String(Math.min(6, Math.max(3, stdVers.length))) }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
+    const out = el("div", { style: "margin-top:0.8rem" });
+    const build = async () => {
+      const docIds = [...docSel.selectedOptions].map((o) => o.value);
+      const stdIds = [...stdSel.selectedOptions].map((o) => o.value);
+      if (!docIds.length || !stdIds.length) { out.replaceChildren(el("div", { class: "empty" }, "Select at least one document and one standard, then Build matrix.")); return; }
+      out.replaceChildren(el("div", { class: "loading" }, "Building matrix…"));
+      try { const m = await API.complianceMatrix(ctx.token, { documentVersionIds: docIds, standardVersionIds: stdIds }); l2RenderMatrix(ctx, m, out, build); }
+      catch (ex) { out.replaceChildren(el("div", { class: "error" }, ex.message)); }
+    };
+    wrap.append(
+      el("p", { class: "muted", style: "margin:0 0 0.6rem" }, "Cross-reference document versions against standard clauses. Each cell shows the compliance status; click a cell to view or edit its interpretation. (Ctrl/Cmd-click to select several.)"),
+      el("div", { style: "display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-start" }, [
+        el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Documents"), docSel]),
+        el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Standards"), stdSel]),
+        actionBtn("Build matrix", "layers", { primary: true, onClick: build }),
+      ]),
+      out,
+    );
+    return wrap;
+  }
+  function l2RenderMatrix(ctx, m, mount, reload) {
+    const docs = m.docs || [], clauses = m.clauses || [], cells = m.matrix || [];
+    if (!docs.length || !clauses.length) { mount.replaceChildren(el("div", { class: "empty" }, "No data — the selected standards have no extracted clauses yet (extract them in the Clauses tab).")); return; }
+    const cellOf = (cid, did) => cells.find((x) => x.clause_id === cid && x.document_version_id === did);
+    const head = el("tr", {}, [el("th", { class: "l2-mx-corner" }, "Clause"), ...docs.map((d) => el("th", { class: "l2-mx-doc" }, `${d.document && d.document.name || "doc"}${d.version ? " " + d.version : ""}`))]);
+    const rows = clauses.map((c) => el("tr", {}, [
+      el("th", { class: "l2-mx-clause", title: c.clause_title || "" }, c.clause_ref),
+      ...docs.map((d) => {
+        const st = (cellOf(c.id, d.id) || {}).status || "none";
+        return el("td", { class: `l2-cell l2-${st}`, title: `${c.clause_ref} × ${d.document && d.document.name || ""}: ${l2StatusLabel(st) || "none"}`, onclick: () => l2EditCell(ctx, c, d, reload) }, l2CellGlyph[st] || "");
+      }),
+    ]));
+    const legend = el("div", { class: "l2-legend" }, [...L2_STATUS, ["none", "No interpretation"]].map(([v, l]) => el("span", { class: "l2-legend-item" }, [el("span", { class: `l2-swatch l2-${v}` }), " " + l])));
+    mount.replaceChildren(el("div", {}, [legend, el("div", { style: "overflow:auto; margin-top:0.5rem" }, el("table", { class: "l2-matrix" }, [el("thead", {}, head), el("tbody", {}, rows)]))]));
+  }
+
+  // 4) Passports — DPP records: create, link interpretations, export JSON-LD.
+  function l2PassportsView(ctx) {
+    const wrap = el("div");
+    const list = el("div", { style: "margin-top:0.6rem" });
+    const reload = async () => {
+      list.replaceChildren(el("div", { class: "loading" }, "Loading passports…"));
+      try {
+        const { passports } = await API.listProductPassports(ctx.token);
+        if (!passports.length) { list.replaceChildren(el("div", { class: "empty" }, "No passports yet. Create one above.")); return; }
+        list.replaceChildren(...passports.map((p) => l2PassportRow(ctx, p, reload)));
+      } catch (ex) { list.replaceChildren(el("div", { class: "error" }, ex.message)); }
+    };
+    wrap.append(
+      el("p", { class: "muted", style: "margin:0 0 0.6rem" }, "EU Digital Product Passport (DPP) records. Create a passport, link the compliance interpretations that back it, and export as JSON-LD (schema.org + ESPR) for ESPR 2027 readiness."),
+      actionBtn("New passport", "plus", { primary: true, onClick: () => l2PassportEditor(ctx, null, reload) }),
+      list,
+    );
+    reload();
+    return wrap;
+  }
+  function l2PassportRow(ctx, p, reload) {
+    const note = el("span", { class: "up-status" }, "");
+    const doExport = async (format) => {
+      note.className = "up-status"; note.textContent = "Exporting…";
+      try {
+        const r = await API.exportProductPassport(ctx.token, { passportId: p.id, format });
+        const fname = `${(p.product_name || "passport").replace(/[^a-z0-9._-]+/gi, "_")}.${format === "json-ld" ? "jsonld" : "json"}`;
+        downloadBlob(JSON.stringify(r.data || r, null, 2), fname, "application/json");
+        note.className = "up-status ok"; note.textContent = `Exported ${format}.`;
+      } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    };
+    return el("div", { class: "card l2-passport" }, [
+      el("div", { class: "acct-head" }, [
+        el("div", {}, [el("strong", {}, p.product_name), el("div", { class: "muted", style: "font-size:0.85rem" }, `${p.product_model ? p.product_model + " · " : ""}${p.manufacturer || ""}${p.gtin ? " · GTIN " + p.gtin : ""}`)]),
+        el("span", { class: `acct-badge acct-${p.passport_status === "active" ? "approved" : p.passport_status === "superseded" ? "disabled" : "pending"}` }, p.passport_status || "draft"),
+      ]),
+      el("div", { class: "muted", style: "font-size:0.85rem; margin-top:0.2rem" }, `${p.link_count || 0} linked interpretation${p.link_count === 1 ? "" : "s"}`),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:0.6rem" }, [
+        actionBtn("Open", "edit", { onClick: () => l2PassportEditor(ctx, p, reload) }),
+        actionBtn("Export JSON-LD", "external", { onClick: () => doExport("json-ld") }),
+        actionBtn("Export JSON", "external", { onClick: () => doExport("json") }),
+        actionBtn("Delete", "trash", { danger: true, onClick: async () => { if (confirm(`Delete passport “${p.product_name}”?`)) { try { await API.deleteProductPassport(ctx.token, p.id); await reload(); } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; } } } }),
+        note,
+      ]),
+    ]);
+  }
+  function l2PassportEditor(ctx, passport, reloadList) {
+    const f = passport || {};
+    const productName = el("input", { type: "text", class: "up-text", placeholder: "Product name", value: f.product_name || "" });
+    const productModel = el("input", { type: "text", class: "up-text", placeholder: "Model (optional)", value: f.product_model || "" });
+    const manufacturer = el("input", { type: "text", class: "up-text", placeholder: "Manufacturer", value: f.manufacturer || "Rushroom AB" });
+    const gtin = el("input", { type: "text", class: "up-text", placeholder: "GTIN (optional)", value: f.gtin || "" });
+    const docRef = el("input", { type: "text", class: "up-text", placeholder: "Declaration of Conformity ref (optional)", value: f.declaration_of_conformity_ref || "" });
+    const statusSel = el("select", { class: "up-text" }, ["draft", "active", "superseded"].map((s) => el("option", { value: s, selected: (f.passport_status || "draft") === s ? "selected" : null }, s)));
+    const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const linksBox = el("div", { class: "l2-links", style: "margin-top:0.6rem" });
+
+    const body = el("div", { class: "step-form" }, [
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Product"), productName]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Model"), productModel]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Manufacturer"), manufacturer]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "GTIN"), gtin]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "DoC ref"), docRef]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Status"), statusSel]),
+      el("div", { style: "margin-top:0.5rem" }, actionBtn(passport ? "Save passport" : "Create passport", "edit", { primary: true, cls: "l2-save-passport" })),
+      note,
+      passport ? el("h4", { style: "margin:1rem 0 0.3rem" }, "Linked interpretations") : null,
+      passport ? linksBox : null,
+    ].filter(Boolean));
+    const close = openModal(passport ? `Passport — ${f.product_name}` : "New product passport", body);
+    body.querySelector(".l2-save-passport").addEventListener("click", async () => {
+      if (!productName.value.trim()) { note.className = "up-status warn"; note.textContent = "Product name is required."; return; }
+      const fields = { productName: productName.value.trim(), productModel: productModel.value.trim(), manufacturer: manufacturer.value.trim(), gtin: gtin.value.trim(), declarationOfConformityRef: docRef.value.trim(), passportStatus: statusSel.value };
+      note.className = "up-status"; note.textContent = "Saving…";
+      try {
+        if (passport) { await API.updateProductPassport(ctx.token, passport.id, fields); note.className = "up-status ok"; note.textContent = "Saved."; }
+        else { await API.createProductPassport(ctx.token, fields); close(); }
+        await reloadList();
+      } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    });
+    if (passport) l2LoadPassportLinks(ctx, passport, linksBox);
+    return close;
+  }
+  async function l2LoadPassportLinks(ctx, passport, box) {
+    box.replaceChildren(el("div", { class: "loading" }, "Loading links…"));
+    let links = [];
+    try { const r = await API.getProductPassport(ctx.token, passport.id); links = r.links || []; } catch (ex) { box.replaceChildren(el("div", { class: "error" }, ex.message)); return; }
+    const reload = () => l2LoadPassportLinks(ctx, passport, box);
+    const linked = el("div", {}, links.length ? links.map((l) => {
+      const i = l.interpretation || {}; const c = i.clause || {};
+      return el("div", { class: "l2-link-row" }, [
+        el("span", {}, [el("strong", {}, c.clause_ref || "?"), c.clause_title ? el("span", { class: "muted" }, ` — ${c.clause_title}`) : null, " ", l2StatusChip(i.compliance_status)]),
+        actionBtn("Unlink", "trash", { danger: true, onClick: async () => { try { await API.unlinkPassportInterpretation(ctx.token, { passportId: passport.id, interpretationId: i.id }); await reload(); } catch (ex) { alert(ex.message); } } }),
+      ]);
+    }) : [el("div", { class: "muted", style: "font-size:0.85rem" }, "Nothing linked yet.")]);
+
+    // Add-links: pick a document version, list its interpretations, link them.
+    const docVers = flattenDocVersions(ctx.documents);
+    const docSel = el("select", { class: "up-text" }, [el("option", { value: "" }, "— pick a document to link its interpretations —"), ...docVers.map((o) => el("option", { value: o.id }, o.label))]);
+    const pickList = el("div", { style: "margin-top:0.4rem" });
+    const linkedIds = new Set(links.map((l) => l.interpretation && l.interpretation.id));
+    docSel.addEventListener("change", async () => {
+      if (!docSel.value) { pickList.replaceChildren(); return; }
+      pickList.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+      try {
+        const r = await API.getInterpretations(ctx.token, docSel.value);
+        const avail = (r.interpretations || []).filter((i) => !linkedIds.has(i.id));
+        pickList.replaceChildren(...(avail.length ? avail.map((i) => el("div", { class: "l2-link-row" }, [
+          el("span", {}, [el("strong", {}, i.clause && i.clause.clause_ref || "?"), " ", l2StatusChip(i.compliance_status)]),
+          actionBtn("Link", "plus", { onClick: async () => { try { await API.linkPassportInterpretation(ctx.token, { passportId: passport.id, interpretationId: i.id }); await reload(); } catch (ex) { alert(ex.message); } } }),
+        ])) : [el("div", { class: "muted", style: "font-size:0.85rem" }, "No unlinked interpretations for this document.")]));
+      } catch (ex) { pickList.replaceChildren(el("div", { class: "error" }, ex.message)); }
+    });
+    box.replaceChildren(linked, el("div", { style: "margin-top:0.6rem" }, [el("span", { class: "form-label" }, "Add from document"), docSel, pickList]));
+  }
+
+  async function renderLevel2(role, mount) {
+    mount.replaceChildren(el("div", { class: "loading" }, "Loading Level 2…"));
+    let standards = [], documents = [];
+    try {
+      const [s, d] = await Promise.all([API.standards(API.getToken()), API.data(API.getToken())]);
+      standards = s.standards || []; documents = d.documents || [];
+    } catch (ex) { mount.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`)); return; }
+    const ctx = { role, token: API.getToken(), standards, documents };
+    mount.replaceChildren(subTabs("level2", [
+      { id: "clauses", label: "Clauses", icon: "layers", build: () => l2ClausesView(ctx) },
+      { id: "interp", label: "Interpretations", icon: "edit", build: () => l2InterpretationsView(ctx) },
+      { id: "matrix", label: "Matrix", icon: "expand", build: () => l2MatrixView(ctx) },
+      { id: "passports", label: "Passports", icon: "sparkles", build: () => l2PassportsView(ctx) },
+    ]));
+  }
+
   // Full API render for a page: editable readiness + documents + uploads.
   async function renderApi(role, readinessMountId) {
     wireTabs($("#tablist"));
@@ -2010,6 +2328,8 @@
     if (devPanel && role === "rushroom") renderDeviations(role, devPanel);
     const acctPanel = $("#accounts-panel");
     if (acctPanel && API.isAdmin()) renderAccounts(role, acctPanel);
+    const l2Panel = $("#level2-panel");
+    if (l2Panel && role === "rushroom") renderLevel2(role, l2Panel);
   }
 
   // Hide tabs/panels the signed-in user isn't entitled to.
@@ -2020,6 +2340,7 @@
       if (!ok && p) p.hidden = true;
     };
     gate("tab-deviations", "deviations-panel", role === "rushroom");
+    gate("tab-level2", "level2-panel", role === "rushroom");
     gate("tab-accounts", "accounts-panel", !!admin);
   }
 
