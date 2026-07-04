@@ -609,6 +609,7 @@
             fileTypeChip(current.file_name || current.storage_path || d.name),
             el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
             versionFileActions(current.open_url, current.file_name || d.name, current.storage_path || d.storage_path, () => openViewer({ ...d, open_url: current.open_url, storage_path: current.storage_path || d.storage_path })),
+            opts.manage && opts.onEditVersion && d.id ? fileActionBtn("Edit", "edit", { onClick: () => opts.onEditVersion(d, current), title: "Edit this version → save as a new version" }) : null,
           ])
         : el("div", { class: "std-current muted" }, "No file uploaded yet.");
       const history = versions.length
@@ -628,6 +629,7 @@
                   fileTypeChip(v.file_name || v.storage_path || d.name),
                   el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
                   versionFileActions(v.open_url, v.file_name || d.name, v.storage_path || d.storage_path, () => openViewer({ ...d, open_url: v.open_url, storage_path: v.storage_path || d.storage_path, name: v.file_name || d.name })),
+                  opts.manage && opts.onEditVersion && d.id ? fileActionBtn("Edit", "edit", { onClick: () => opts.onEditVersion(d, v), title: "Edit this version → save as a new version" }) : null,
                 ]),
                 v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
                 sourceNotes.length ? el("div", { class: "std-notes" }, sourceNotes.join(" · ")) : null,
@@ -1000,16 +1002,34 @@
     });
   }
 
+  // Route the per-row "Edit" action by file type: editable Office/text formats
+  // go straight to the Google round-trip; PDFs (and other non-editable types)
+  // can't be edited in place, so we open the upload path with an explanation.
+  function editDocumentVersion(d, v, role, reload) {
+    const hint = (v && (v.file_name || v.storage_path)) || d.storage_path || d.name;
+    const ext = extOf(hint);
+    const editable = ["docx", "md", "markdown", "html", "htm", "txt", "xlsx", "xls", ""].includes(ext);
+    const gready = !!(window.PortalGDocs && window.PortalGDocs.configured());
+    if (editable && gready) documentVersionEditor(d, role, reload, { sourceVersion: v, focus: "google" });
+    else documentVersionEditor(d, role, reload, { sourceVersion: v, focus: "upload", reason: editable ? "google-off" : "pdf" });
+  }
+
   // Upload a new version of a document (previous versions kept).
-  function documentVersionEditor(d, role, reload) {
+  // opts: { sourceVersion, focus: "google"|"upload", reason } — used by the
+  // per-row Edit action; with no opts it's the full "New version" modal.
+  function documentVersionEditor(d, role, reload, opts = {}) {
     const current = (d.versions || [])[0];
-    const currentUrl = (current && current.open_url) || d.open_url;
-    const currentHint = (current && (current.file_name || current.storage_path)) || d.storage_path || d.name;
+    const src = opts.sourceVersion || current;   // the version being edited/replaced
+    const currentUrl = (src && src.open_url) || d.open_url;
+    const currentHint = (src && (src.file_name || src.storage_path)) || d.storage_path || d.name;
     const gdocsReady = !!(window.PortalGDocs && window.PortalGDocs.configured());
     const currentExt = extOf(currentHint);
     const isSheet = currentExt === "xlsx" || currentExt === "xls";
     const canGoogleEdit = ["docx", "md", "markdown", "html", "htm", "txt", "xlsx", "xls", ""].includes(currentExt);
     const gTool = isSheet ? "Google Sheets" : "Google Docs";
+    const focus = opts.focus; // "google" | "upload" | undefined (show both)
+    const showGoogle = gdocsReady && currentUrl && canGoogleEdit && focus !== "upload";
+    const showUpload = focus !== "google" || !showGoogle;
 
     // Shared version metadata (used by both the Google edit and the upload paths).
     const version = el("input", { type: "text", placeholder: "Leave blank to auto-number (v2, v3…) — or type a custom label" });
@@ -1022,9 +1042,9 @@
     const glink = el("span", { style: "font-size:0.85rem" });
     const gstatus = el("p", { class: "up-status", role: "status", "aria-live": "polite", style: "margin:0.4rem 0 0" }, "");
     gsave.disabled = true;
-    const gsection = (gdocsReady && currentUrl && canGoogleEdit) ? el("div", { class: "src-section" }, [
-      el("div", { class: "src-head" }, `Edit the current version in ${gTool}`),
-      el("p", { class: "muted", style: "margin:0.1rem 0 0.6rem" }, `Open the current file, edit it in ${gTool}, then save it back as a new version — same document and references, nothing else changes.`),
+    const gsection = showGoogle ? el("div", { class: "src-section" }, [
+      el("div", { class: "src-head" }, `Edit ${opts.sourceVersion ? "this version" : "the current version"} in ${gTool}`),
+      el("p", { class: "muted", style: "margin:0.1rem 0 0.6rem" }, `Open the file, edit it in ${gTool}, then save it back as a new version — same document and references, nothing else changes.`),
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [gopen, glink]),
       gstatus,
       el("div", { style: "margin-top:0.5rem" }, gsave),
@@ -1040,16 +1060,25 @@
     } });
     zone.register(af.btn); zone.register(save);
 
-    const form = el("div", { class: "step-form" }, [
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Notes"), notes]),
-      gsection,
-      gsection ? el("div", { class: "muted", style: "text-align:center; margin:0.4rem 0" }, "— or upload a replacement file —") : null,
+    const reasonNote = opts.reason === "pdf"
+      ? el("div", { class: "notice warn" }, `PDF files can't be edited in Google Docs. Upload a corrected file below${(d.kind || "template") === "operational" ? ", or close this and use “AI draft” to generate a new version." : "."}`)
+      : opts.reason === "google-off"
+        ? el("div", { class: "notice" }, "Google editing isn't set up, so upload a replacement file to create the new version.")
+        : null;
+    const uploadPath = showUpload ? [
+      showGoogle ? el("div", { class: "muted", style: "text-align:center; margin:0.4rem 0" }, "— or upload a replacement file —") : null,
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), zone.el]),
       el("div", {}, af.btn),
       note, el("div", { style: "margin-top:0.5rem" }, save),
+    ] : [];
+    const form = el("div", { class: "step-form" }, [
+      reasonNote,
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Notes"), notes]),
+      gsection,
+      ...uploadPath,
     ].filter(Boolean));
-    const close = openModal(`New version — ${d.name}`, form);
+    const close = openModal(`${focus ? "Edit" : "New version"} — ${d.name}`, form);
 
     save.addEventListener("click", async () => {
       const up = zone.getUploaded();
@@ -1107,7 +1136,7 @@
       try {
         const exportKind = gdocKind === "sheet" ? "xlsx" : "docx";
         const blob = await window.PortalGDocs.exportDoc(gdocId, exportKind);
-        const carried = (current && Array.isArray(current.source_standard_versions)) ? current.source_standard_versions.map((sv) => sv && sv.id).filter(Boolean) : [];
+        const carried = (src && Array.isArray(src.source_standard_versions)) ? src.source_standard_versions.map((sv) => sv && sv.id).filter(Boolean) : [];
         const fileName = `${(d.name || "document").replace(/[^a-z0-9._-]+/gi, "_") || "document"}.${exportKind}`;
         await API.addDocumentVersionFile(API.getToken(role), blob, { documentId: d.id, version: version.value, notes: notes.value, fileName, sourceStandardVersionIds: carried });
         flash(d.id); close(); await reload();
@@ -1958,13 +1987,14 @@
 
       const templatesOf = () => (payload.documents || []).filter((d) => (d.kind || "template") === "template" && d.id);
       const onNewVersion = (d) => documentVersionEditor(d, role, load);
+      const onEditVersion = (d, v) => editDocumentVersion(d, v, role, load);
       const onDraft = (d) => documentDraftAssistant(d, role, load, { templates: templatesOf() });
       const onCreateOperational = (d) => createOperationalFromTemplate(d, role, load, templatesOf());
       const onCreateNew = () => documentDraftAssistant(null, role, load, { mode: "create", templates: templatesOf() });
       const docsPanel = $("#documents-panel");
       const review = await uploadsReview(role, load);
       const listTab = () => el("div", {}, [
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onDraft, onCreateOperational, onCreateNew }),
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onEditVersion, onDraft, onCreateOperational, onCreateNew }),
         review,
       ].filter(Boolean));
       const addTab = () => (role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load));
