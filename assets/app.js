@@ -2063,7 +2063,7 @@
     const wrap = el("div");
     const docVers = flattenDocVersions(ctx.documents);
     const stdVers = flattenStdVersions(ctx.standards);
-    if (!docVers.length || !stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "Need at least one document version and one standard version. Add them in the Document library and Standards tabs.")); return wrap; }
+    if (!docVers.length || !stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "Need at least one document version and one standard version. Add them in the As Operates and Standards tabs.")); return wrap; }
     const docSel = el("select", { class: "up-text" }, docVers.map((o) => el("option", { value: o.id }, o.label)));
     const stdSel = el("select", { class: "up-text" }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
     const out = el("div", { style: "margin-top:0.8rem" });
