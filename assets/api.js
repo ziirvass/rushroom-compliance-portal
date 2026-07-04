@@ -227,6 +227,22 @@
       await call({ action: "publishDocumentDraft", token, documentId, newDocumentName, templateDocumentId, category, audience, version, notes, draftText: "(published from Google Docs)", fileName, approvedChanges, sourceStandardVersionIds, path });
       return path;
     },
+
+    // ---- LEVEL 2: Structured Clause-Level Interpretations (DPP & ESPR) ----
+    extractStandardClauses: (token, { standardVersionId, maxClauses }) =>
+      call({ action: "extractStandardClauses", token, standardVersionId, maxClauses }),
+    generateInterpretations: (token, { documentVersionId, clauseIds }) =>
+      call({ action: "generateInterpretations", token, documentVersionId, clauseIds }),
+    saveInterpretation: (token, id, fields) =>
+      call({ action: "saveInterpretation", token, id, ...fields }),
+    getInterpretations: (token, documentVersionId) =>
+      call({ action: "getInterpretations", token, documentVersionId }),
+    getClausesForStandard: (token, standardVersionId) =>
+      call({ action: "getClausesForStandard", token, standardVersionId }),
+    complianceMatrix: (token, { documentVersionIds, standardVersionIds }) =>
+      call({ action: "complianceMatrix", token, documentVersionIds, standardVersionIds }),
+    exportProductPassport: (token, { passportId, format }) =>
+      call({ action: "exportProductPassport", token, passportId, format }),
   };
 
   window.PortalAPI = API;
