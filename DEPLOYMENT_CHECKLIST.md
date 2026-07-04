@@ -2,38 +2,36 @@
 
 **Prepared for Claude Code transition**
 
+> ### ⚠️ Superseded (2026-07-04, Claude Code)
+> This checklist framed the Phase 5 UI as the remaining work and the backend as "ready to use." In reality the backend was undeployed and buggy (full correction in `README_HANDOFF.md`). It has since been **fixed, deployed, and the Phase 5 UI built and verified live**. The "what's left" below is now **done**. Process fix: `supabase db push` does **not** apply the schema here (no `migrations/` dir) — use the **SQL Editor**.
+
 ---
 
-## ✅ What's Already Done
+## ✅ What's Done (2026-07-04)
 
-### Database & Backend (Ready to Use)
-- [x] Schema deployed to Supabase (4 new tables, RLS enabled)
-- [x] Edge function deployed (7 new API actions live)
-- [x] API wrapper methods added (JavaScript client ready)
-- [x] System documentation updated
-- [x] All changes committed to git (on main branch)
+### Database & Backend
+- [x] Schema applied via the Supabase **SQL Editor** (4 tables, RLS, indexes) — *not* `db push`
+- [x] Edge function **fixed** (compile/auth/order bugs) and deployed; interpretations rewritten for PDFs + batching
+- [x] **Passport CRUD** actions added (were missing) + api.js wrappers
+- [x] All changes committed to `main`
+
+### Frontend UI — ✅ built + tested + live
+- [x] "Clauses & DPP" tab with 4 sub-views (Clauses, Interpretations, Matrix, Passports)
+- [x] 15/15 mock tests + full live end-to-end run passed
+
+### Not done
+- [ ] **Phase 3** structured deviation scan (`runDeviationScan` still always uses AI)
 
 ### Verification Commands
 ```bash
-# Check deployed tables
-supabase db list
-
-# Check deployed function
-supabase functions list
-
-# Test API from browser console
+supabase functions list        # confirm portal-api deployed
+# Test API from the browser console (authenticated Rushroom session):
 await PortalAPI.getClausesForStandard(token, "standard-version-uuid")
 ```
 
 ---
 
-## ⏳ What's Left to Do
-
-### Phase 5: Frontend UI Implementation
-
-**Effort:** ~4 hours  
-**Files to modify:** `assets/app.js`, optionally `index.html`  
-**No backend changes needed** — API is ready
+## Reference: the original Phase 5 UI plan (now implemented as described)
 
 ---
 
@@ -298,7 +296,7 @@ All code is version-controlled; nothing is permanent.
 Before marking "ready for production":
 
 **Backend:**
-- [ ] `supabase db push` completed without errors
+- [x] Schema applied via **SQL Editor** (not `db push` — no migrations dir)
 - [ ] `supabase functions deploy portal-api` completed without errors
 - [ ] All 4 new tables visible in Supabase dashboard
 - [ ] All 7 new actions return valid JSON responses
@@ -329,7 +327,7 @@ Before marking "ready for production":
 
 ```bash
 # Deploy
-supabase db push
+# schema: paste supabase/schema.sql into the Supabase SQL Editor (no `db push` here)
 supabase functions deploy portal-api --no-verify-jwt
 
 # View logs
