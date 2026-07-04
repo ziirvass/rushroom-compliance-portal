@@ -35,6 +35,14 @@
 
     data: (token) => call({ action: "data", token }),
 
+    // --- user accounts (public register/verify + admin management) ---
+    registerUser: (fields) => call({ action: "registerUser", ...fields }),
+    verifyUser: (verifyToken) => call({ action: "verifyUser", token: verifyToken }),
+    adminListUsers: (token) => call({ action: "adminListUsers", token }),
+    adminUpdateUser: (token, id, fields) => call({ action: "adminUpdateUser", token, id, ...fields }),
+    adminDeleteUser: (token, id) => call({ action: "adminDeleteUser", token, id }),
+    adminUserVerifyLink: (token, id) => call({ action: "adminUserVerifyLink", token, id }),
+
     setStatus: (token, step, status, supplierLabel) =>
       call({ action: "setStatus", token, step, status, supplierLabel }),
 

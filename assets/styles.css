@@ -453,6 +453,20 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .std-view { margin-left: 0.6rem; }
 .view-open { display: inline-flex; gap: 0.5rem; align-items: center; }
 
+/* register CTA under the access gate */
+.gate-register { margin-top: 1.25rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+
+/* admin account management */
+.acct-card { display: grid; gap: 0.25rem; }
+.acct-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.8rem; flex-wrap: wrap; }
+.acct-badge { font-size: 0.72rem; padding: 0.16rem 0.6rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.acct-pending { color: var(--amber); border-color: var(--amber); }
+.acct-verified { color: var(--accent); border-color: var(--accent); }
+.acct-approved { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.acct-rejected, .acct-disabled { color: var(--red); border-color: var(--red-bd); }
+.acct-card select { min-height: 38px; padding: 0.35rem 0.55rem; border-radius: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border); font: inherit; }
+.acct-card .form-label { align-self: center; }
+
 /* sub-tabs within a panel (Library vs Add) — segmented control */
 .subtabs { display: inline-flex; gap: 0.25rem; padding: 0.25rem; margin-bottom: 1.1rem; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
 .subtab {

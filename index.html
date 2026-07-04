@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Rushroom Compliance Portal</title>
   <meta name="description" content="Live compliance status and document library for Rushroom AB's LED system-furniture product." />
-  <link rel="stylesheet" href="./assets/styles.css?v=47" />
+  <link rel="stylesheet" href="./assets/styles.css?v=48" />
   <script>
     /* Keep the sticky tab bar pinned right below the sticky header, whatever
        height the header renders at (responsive / wrapped). */
@@ -66,6 +66,8 @@
                 aria-controls="standards-panel" tabindex="-1">Standards &amp; regulations</button>
         <button class="tab" id="tab-deviations" role="tab" aria-selected="false"
                 aria-controls="deviations-panel" tabindex="-1">Deviation monitoring</button>
+        <button class="tab" id="tab-accounts" role="tab" aria-selected="false"
+                aria-controls="accounts-panel" tabindex="-1">Accounts</button>
       </div>
 
       <section id="readiness-panel" role="tabpanel" aria-labelledby="tab-readiness" tabindex="0">
@@ -83,6 +85,10 @@
       <section id="deviations-panel" role="tabpanel" aria-labelledby="tab-deviations" tabindex="0" hidden>
         <div class="loading">Loading deviation monitoring…</div>
       </section>
+
+      <section id="accounts-panel" role="tabpanel" aria-labelledby="tab-accounts" tabindex="0" hidden>
+        <div class="loading">Loading accounts…</div>
+      </section>
     </div>
   </main>
 
@@ -93,10 +99,10 @@
   </footer>
 
   <script src="https://accounts.google.com/gsi/client" async></script>
-  <script src="./assets/config.js?v=47"></script>
-  <script src="./assets/api.js?v=47"></script>
-  <script src="./assets/gdocs.js?v=47"></script>
-  <script src="./assets/viewer.js?v=47"></script>
-  <script src="./assets/app.js?v=47"></script>
+  <script src="./assets/config.js?v=48"></script>
+  <script src="./assets/api.js?v=48"></script>
+  <script src="./assets/gdocs.js?v=48"></script>
+  <script src="./assets/viewer.js?v=48"></script>
+  <script src="./assets/app.js?v=48"></script>
 </body>
 </html>

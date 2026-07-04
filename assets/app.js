@@ -729,6 +729,7 @@
       const h = appEl.querySelector("h2, h3"); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); }
     };
     if (API.getToken(role)) { reveal(); return; }
+    addRegisterCta(gate);
     const form = $("#gate-form"), input = $("#portal-password"), err = $("#gate-error");
     input.focus();
     form.addEventListener("submit", async (e) => {
@@ -1727,6 +1728,106 @@
     mount.replaceChildren(el("div", {}, [head, body]));
   }
 
+  /* ---------------- user registration (public) ---------------- */
+  const USER_ROLE_OPTS = [["supplier", "Supplier"], ["reviewer", "Reviewer"], ["installer", "Installer"], ["internal", "Internal (Rushroom staff)"]];
+  function registerModal() {
+    const role = el("select", { class: "up-text" }, USER_ROLE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
+    const name = el("input", { type: "text", class: "up-text", placeholder: "Full name" });
+    const email = el("input", { type: "email", class: "up-text", placeholder: "you@company.com", autocomplete: "email" });
+    const phone = el("input", { type: "tel", class: "up-text", placeholder: "Phone (optional)" });
+    const whatsapp = el("input", { type: "tel", class: "up-text", placeholder: "WhatsApp (optional)" });
+    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const submit = el("button", { class: "btn btn-primary", type: "button" }, "Register");
+    const form = el("div", { class: "step-form" }, [
+      el("p", { class: "muted", style: "margin:0 0 0.4rem" }, "Request access to the Rushroom AB Compliance Portal. We'll email you a link to verify your address; an administrator then approves your access and sets your role."),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Role"), role]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Name"), name]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Email"), email]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Phone"), phone]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "WhatsApp"), whatsapp]),
+      el("div", { style: "margin-top:0.5rem" }, submit),
+      status,
+    ]);
+    openModal("Register for access", form);
+    name.focus();
+    submit.addEventListener("click", async () => {
+      const emailV = email.value.trim();
+      if (!name.value.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailV)) { status.className = "up-status warn"; status.textContent = "Please enter your name and a valid email."; return; }
+      submit.disabled = true; status.className = "up-status"; status.textContent = "Submitting…";
+      try {
+        const res = await API.registerUser({ role: role.value, name: name.value.trim(), email: emailV, phone: phone.value.trim(), whatsapp: whatsapp.value.trim() });
+        status.className = "up-status ok"; status.textContent = (res && res.message) || "Registered — check your email to verify.";
+        name.value = email.value = phone.value = whatsapp.value = "";
+      } catch (ex) { submit.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`; }
+    });
+  }
+  // Adds a "Register for access" call-to-action under an access gate card.
+  function addRegisterCta(gateEl) {
+    const card = gateEl && gateEl.querySelector(".gate-card");
+    if (!card || card.querySelector(".gate-register")) return;
+    card.appendChild(el("div", { class: "gate-register" }, [
+      el("p", { class: "muted", style: "margin:0 0 0.5rem; font-size:0.9rem" }, "Don't have access yet?"),
+      el("button", { class: "btn btn-sm", type: "button", onclick: registerModal }, "Register for access"),
+    ]));
+  }
+
+  /* ---------------- admin account management (Rushroom) ---------------- */
+  function accountCard(u, role, reload) {
+    const roleSel = el("select", { class: "up-text" }, [el("option", { value: "" }, "— set role —"), ...USER_ROLE_OPTS.map(([v, l]) => el("option", { value: v, selected: (u.role || "") === v ? "selected" : null }, l))]);
+    const statusSel = el("select", { class: "up-text" }, ["pending", "verified", "approved", "rejected", "disabled"].map((st) => el("option", { value: st, selected: u.status === st ? "selected" : null }, st)));
+    const note = el("span", { class: "up-status", style: "margin:0 0 0 0.2rem" }, "");
+    const run = async (fn) => { try { await fn(); await reload(); } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; } };
+    const approve = actionBtn("Approve", "plus", { primary: true, onClick: () => {
+      if (!roleSel.value) { note.className = "up-status warn"; note.textContent = "Set a role first."; return; }
+      run(() => API.adminUpdateUser(API.getToken(role), u.id, { role: roleSel.value, status: "approved" }));
+    } });
+    const save = actionBtn("Save", "edit", { onClick: () => run(() => API.adminUpdateUser(API.getToken(role), u.id, { role: roleSel.value || undefined, status: statusSel.value })) });
+    const link = actionBtn("Verify link", "external", { onClick: async () => {
+      try { const r = await API.adminUserVerifyLink(API.getToken(role), u.id); if (navigator.clipboard) await navigator.clipboard.writeText(r.verifyUrl); note.className = "up-status ok"; note.textContent = r.emailed ? "Emailed + link copied." : "Link copied to clipboard."; }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    } });
+    const del = actionBtn("Delete", "trash", { danger: true, onClick: () => { if (confirm(`Delete ${u.name} (${u.email})?`)) run(() => API.adminDeleteUser(API.getToken(role), u.id)); } });
+    return el("div", { class: "card acct-card" }, [
+      el("div", { class: "acct-head" }, [
+        el("div", {}, [el("strong", {}, u.name), el("div", { class: "muted", style: "font-size:0.85rem" }, u.email)]),
+        el("span", { class: `acct-badge acct-${u.status}` }, `${u.status}${u.email_verified ? " · verified" : " · unverified"}`),
+      ]),
+      el("div", { class: "muted", style: "font-size:0.85rem; margin-top:0.2rem" }, `${u.phone ? "☎ " + u.phone : "no phone"}${u.whatsapp ? "  ·  WhatsApp " + u.whatsapp : ""}  ·  requested: ${u.requested_role}`),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:0.6rem" }, [
+        el("span", { class: "form-label" }, "Role"), roleSel,
+        el("span", { class: "form-label" }, "Status"), statusSel,
+        approve, save, link, del,
+      ]),
+      note,
+    ]);
+  }
+  async function renderAccounts(role, mount) {
+    if (role !== "rushroom") { mount.replaceChildren(el("div", { class: "empty" }, "Administrators only.")); return; }
+    mount.replaceChildren(el("div", { class: "loading" }, "Loading accounts…"));
+    let payload;
+    try { payload = await API.adminListUsers(API.getToken(role)); }
+    catch (ex) { mount.replaceChildren(el("div", { class: "error" }, `Couldn't load accounts: ${ex.message}`)); return; }
+    const users = payload.users || [];
+    const reload = () => renderAccounts(role, mount);
+    const search = el("input", { type: "search", class: "browser-search-input", placeholder: "Search name, email, role, status…", style: "max-width:360px" });
+    const listWrap = el("div", { class: "standards", style: "margin-top:0.9rem" });
+    const render = () => {
+      const q = search.value.trim().toLowerCase();
+      const filtered = users.filter((u) => !q || `${u.name} ${u.email} ${u.role || ""} ${u.requested_role} ${u.status}`.toLowerCase().includes(q));
+      listWrap.replaceChildren(...(filtered.length ? filtered.map((u) => accountCard(u, role, reload)) : [el("div", { class: "empty" }, "No matching accounts.")]));
+    };
+    search.addEventListener("input", render);
+    const counts = users.reduce((m, u) => { m[u.status] = (m[u.status] || 0) + 1; return m; }, {});
+    const summary = el("div", { class: "sev-summary" }, ["pending", "verified", "approved", "rejected", "disabled"].map((st) => el("span", { class: "sev-chip" }, `${st}: ${counts[st] || 0}`)));
+    mount.replaceChildren(el("div", {}, [
+      el("div", { class: "notice" }, "User accounts — people register from the login page and verify their email; approve them and assign a role here. Registration only requests a role; you decide the actual access."),
+      summary,
+      el("div", { style: "margin-top:0.75rem" }, search),
+      users.length ? listWrap : el("div", { class: "empty", style: "margin-top:0.75rem" }, "No registrations yet."),
+    ]));
+    render();
+  }
+
   // Full API render for a page: editable readiness + documents + uploads.
   async function renderApi(role, readinessMountId) {
     wireTabs($("#tablist"));
@@ -1802,6 +1903,8 @@
     if (stdPanel) renderStandards(role, stdPanel);
     const devPanel = $("#deviations-panel");
     if (devPanel && role === "rushroom") renderDeviations(role, devPanel);
+    const acctPanel = $("#accounts-panel");
+    if (acctPanel && role === "rushroom") renderAccounts(role, acctPanel);
   }
 
   /* ---------------- expose shared API ---------------- */

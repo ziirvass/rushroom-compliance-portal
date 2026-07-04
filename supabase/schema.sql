@@ -192,3 +192,23 @@ insert into public.documents (category, name, url, audience) values
   ('Records & monitoring', 'Records Retention Log', 'https://docs.google.com/spreadsheets/d/1mKgXaBHHghEF3l-qR7tdDC5PnS5wpUEAkAWFqJb9kcM/edit', ARRAY['internal']::text[]),
   ('Records & monitoring', 'Regulatory Watch — 2026-06', 'https://docs.google.com/document/d/1MO246WfK9Fnc7Es7-WZwAWwVvJrWkECXpEIJmVnIuS8/edit', ARRAY['internal','reviewer']::text[])
 on conflict do nothing;
+-- ---------------------------------------------------------------------------
+-- User accounts: self-registration + email verification + admin management.
+-- Access is via the portal-api Edge Function (service role); RLS denies direct.
+-- ---------------------------------------------------------------------------
+create table if not exists public.users (
+  id             uuid primary key default gen_random_uuid(),
+  name           text not null,
+  email          text not null unique,
+  phone          text,
+  whatsapp       text,
+  requested_role text not null default 'supplier',
+  role           text,                                   -- assigned by an admin
+  status         text not null default 'pending',        -- pending|verified|approved|rejected|disabled
+  email_verified boolean not null default false,
+  notes          text,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+alter table public.users enable row level security;      -- deny-all; edge function uses service role
+create index if not exists users_status_idx on public.users (status);

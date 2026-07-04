@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Verify email · Rushroom Compliance Portal</title>
+  <meta name="robots" content="noindex" />
+  <link rel="stylesheet" href="./assets/styles.css?v=48" />
+</head>
+<body data-page="verify">
+  <header class="site-header">
+    <div class="wrap header-row">
+      <div>
+        <span class="badge">VALCYRA · Rushroom AB</span>
+        <h1>Compliance Portal</h1>
+        <p class="tagline">Email verification</p>
+      </div>
+      <nav aria-label="Views"><a class="btn btn-sm" href="./index.html">Back to portal →</a></nav>
+    </div>
+  </header>
+
+  <main id="main" class="wrap">
+    <section class="gate" aria-labelledby="v-title">
+      <div class="gate-card">
+        <h2 id="v-title">Verifying your email…</h2>
+        <p id="v-msg" class="muted">One moment.</p>
+        <div id="v-actions" style="margin-top:1rem"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><div class="wrap">Internal compliance overview for Rushroom AB ·</div></footer>
+
+  <script src="./assets/config.js?v=48"></script>
+  <script src="./assets/api.js?v=48"></script>
+  <script>
+    (function () {
+      var title = document.getElementById("v-title");
+      var msg = document.getElementById("v-msg");
+      var actions = document.getElementById("v-actions");
+      var token = new URLSearchParams(location.search).get("token");
+      function done(ok, heading, text) {
+        title.textContent = heading;
+        msg.textContent = text;
+        msg.className = ok ? "ok" : "form-error";
+        actions.innerHTML = '<a class="btn btn-primary" href="./index.html">Go to the portal</a>';
+      }
+      if (!token) { done(false, "Invalid link", "This verification link is missing its token."); return; }
+      if (!window.PortalAPI || !window.PortalAPI.configured()) { done(false, "Not available", "The portal backend isn't configured."); return; }
+      window.PortalAPI.verifyUser(token)
+        .then(function (res) {
+          done(true, "Email verified ✓", "Thanks" + (res && res.name ? ", " + res.name : "") + "! Your email is confirmed. An administrator will review your access and set your role.");
+        })
+        .catch(function (ex) { done(false, "Couldn't verify", ex.message || "This link is invalid or has expired."); });
+    })();
+  </script>
+</body>
+</html>

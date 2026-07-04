@@ -108,6 +108,49 @@ async function verifyToken(token: string | undefined): Promise<string | null> {
 const isSupplierStep = (audience: string[] | null) => Array.isArray(audience) && audience.includes("supplier");
 const safeName = (n: string) => (n || "file").replace(/[^\w.\-]+/g, "_").slice(-120);
 
+// ---- user accounts: registration, verification, admin --------------------
+const APP_BASE = (Deno.env.get("APP_BASE_URL") ?? "https://ziirvass.github.io/rushroom-compliance-portal").replace(/\/+$/, "");
+const USER_ROLES = ["supplier", "reviewer", "installer", "internal"]; // roles a user may hold
+const USER_STATUSES = ["pending", "verified", "approved", "rejected", "disabled"];
+const emailOk = (e: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
+
+// HMAC-sign an arbitrary payload (used for email-verification links).
+async function signData(obj: unknown): Promise<string> {
+  const payload = b64url(enc.encode(JSON.stringify(obj)));
+  const sig = b64url(new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(), ab(enc.encode(payload)))));
+  return `${payload}.${sig}`;
+}
+async function readSigned(token: string): Promise<any | null> {
+  if (!token || !token.includes(".")) return null;
+  const [payload, sig] = token.split(".");
+  try {
+    const ok = await crypto.subtle.verify("HMAC", await hmacKey(), ab(b64urlDecode(sig)), ab(enc.encode(payload)));
+    if (!ok) return null;
+    return JSON.parse(new TextDecoder().decode(b64urlDecode(payload)));
+  } catch { return null; }
+}
+const verifyLinkFor = async (uid: string) =>
+  `${APP_BASE}/verify.html?token=${encodeURIComponent(await signData({ uid, purpose: "verify", exp: Math.floor(Date.now() / 1000) + 7 * 24 * 3600 }))}`;
+
+// Best-effort verification email via Resend (optional — set RESEND_API_KEY).
+async function sendVerificationEmail(to: string, name: string, url: string): Promise<boolean> {
+  const key = Deno.env.get("RESEND_API_KEY");
+  if (!key) return false;
+  const from = Deno.env.get("MAIL_FROM") || "Rushroom Compliance <onboarding@resend.dev>";
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from, to,
+        subject: "Verify your Rushroom Compliance Portal registration",
+        html: `<p>Hi ${name || "there"},</p><p>Thanks for registering for the Rushroom AB Compliance Portal. Please confirm your email address:</p><p><a href="${url}">Verify my email</a></p><p>This link expires in 7 days. If you didn't request this, you can ignore it.</p>`,
+      }),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
 // ---- Google Docs integration (service-account OAuth) ----------------------
 const GOOGLE_SERVICE_ACCOUNT = Deno.env.get("GOOGLE_SERVICE_ACCOUNT") ?? "";
 // A bare service account has no Drive storage, so it cannot own Docs. Set this
@@ -352,9 +395,88 @@ Deno.serve(async (req) => {
     return json({ token: await issueToken(role), role });
   }
 
+  // --- public: self-registration (creates a pending user + emails a link) --
+  if (action === "registerUser") {
+    const name = String(body.name ?? "").trim().slice(0, 120);
+    const email = String(body.email ?? "").trim().toLowerCase().slice(0, 200);
+    const phone = String(body.phone ?? "").trim().slice(0, 40);
+    const whatsapp = String(body.whatsapp ?? "").trim().slice(0, 40);
+    const requested_role = USER_ROLES.includes(String(body.role)) ? String(body.role) : "supplier";
+    if (!name || !emailOk(email)) return json({ error: "Please provide your name and a valid email address." }, 400);
+    const { data: existing } = await db.from("users").select("id,status").eq("email", email).maybeSingle();
+    let uid = existing?.id as string | undefined;
+    if (existing) {
+      // refresh contact details; never downgrade an already-approved account
+      await db.from("users").update({ name, phone, whatsapp, requested_role, updated_at: new Date().toISOString() }).eq("id", uid);
+    } else {
+      const { data: inserted, error } = await db.from("users")
+        .insert({ name, email, phone, whatsapp, requested_role }).select("id").maybeSingle();
+      if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The users table isn't set up yet — run the account SQL first." : error.message }, 500);
+      uid = inserted?.id;
+    }
+    if (uid) { const url = await verifyLinkFor(uid); await sendVerificationEmail(email, name, url); }
+    // Generic response — never leak whether the email already existed or the link itself.
+    return json({ ok: true, message: "Thanks! If your details are valid, a verification link has been sent to your email. An administrator will review your access." });
+  }
+
+  // --- public: verify an email from the link ------------------------------
+  if (action === "verifyUser") {
+    const data = await readSigned(String(body.token ?? ""));
+    const now = Math.floor(Date.now() / 1000);
+    if (!data || data.purpose !== "verify" || (typeof data.exp === "number" && data.exp < now)) {
+      return json({ error: "This verification link is invalid or has expired." }, 400);
+    }
+    const { data: u } = await db.from("users").select("id,email,name,status").eq("id", data.uid).maybeSingle();
+    if (!u) return json({ error: "We couldn't find this registration." }, 404);
+    const status = u.status === "pending" ? "verified" : u.status;
+    await db.from("users").update({ email_verified: true, status, updated_at: new Date().toISOString() }).eq("id", u.id);
+    return json({ ok: true, name: u.name, email: u.email });
+  }
+
   // --- everything else requires a valid token -----------------------------
   const role = await verifyToken(body.token);
   if (!role) return json({ error: "Not authenticated" }, 401);
+
+  // --- admin (Rushroom) account management --------------------------------
+  if (action === "adminListUsers") {
+    if (role !== "rushroom") return json({ error: "Admin only" }, 403);
+    const { data, error } = await db.from("users").select("*").order("created_at", { ascending: false });
+    if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The users table isn't set up yet — run the account SQL first." : error.message }, 500);
+    return json({ users: data ?? [] });
+  }
+  if (action === "adminUpdateUser") {
+    if (role !== "rushroom") return json({ error: "Admin only" }, 403);
+    const id = String(body.id ?? "");
+    if (!id) return json({ error: "id required" }, 400);
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (body.role !== undefined) { if (!USER_ROLES.includes(String(body.role))) return json({ error: "Invalid role" }, 400); patch.role = String(body.role); }
+    if (body.status !== undefined) { if (!USER_STATUSES.includes(String(body.status))) return json({ error: "Invalid status" }, 400); patch.status = String(body.status); }
+    if (body.name !== undefined) patch.name = String(body.name).slice(0, 120);
+    if (body.phone !== undefined) patch.phone = String(body.phone).slice(0, 40);
+    if (body.whatsapp !== undefined) patch.whatsapp = String(body.whatsapp).slice(0, 40);
+    if (body.notes !== undefined) patch.notes = String(body.notes).slice(0, 1000);
+    const { error } = await db.from("users").update(patch).eq("id", id);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+  if (action === "adminDeleteUser") {
+    if (role !== "rushroom") return json({ error: "Admin only" }, 403);
+    const id = String(body.id ?? "");
+    if (!id) return json({ error: "id required" }, 400);
+    const { error } = await db.from("users").delete().eq("id", id);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+  if (action === "adminUserVerifyLink") {
+    if (role !== "rushroom") return json({ error: "Admin only" }, 403);
+    const id = String(body.id ?? "");
+    if (!id) return json({ error: "id required" }, 400);
+    const { data: u } = await db.from("users").select("id,email,name").eq("id", id).maybeSingle();
+    if (!u) return json({ error: "User not found" }, 404);
+    const url = await verifyLinkFor(u.id);
+    const emailed = await sendVerificationEmail(u.email, u.name, url);
+    return json({ ok: true, verifyUrl: url, emailed });
+  }
 
   if (action === "data") {
     const [{ data: steps }, { data: documents }] = await Promise.all([
