@@ -453,6 +453,18 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .std-view { margin-left: 0.6rem; }
 .view-open { display: inline-flex; gap: 0.5rem; align-items: center; }
 
+/* sub-tabs within a panel (Library vs Add) — segmented control */
+.subtabs { display: inline-flex; gap: 0.25rem; padding: 0.25rem; margin-bottom: 1.1rem; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+.subtab {
+  display: inline-flex; align-items: center; gap: 0.4rem; font: inherit; font-size: 0.88rem;
+  padding: 0.42rem 0.9rem; border-radius: 7px; background: none; border: none; color: var(--muted); cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.subtab:hover { color: var(--text); }
+.subtab.active { background: var(--panel-2); color: var(--text); }
+.subtab .btn-ico { margin-right: 0; opacity: 0.8; }
+.subtab.active .btn-ico { opacity: 1; color: var(--accent); }
+
 /* file action chips (View / Open) — consistent, subtle, icon + label */
 .file-actions { display: inline-flex; align-items: center; gap: 0.4rem; }
 .std-current .file-actions, .std-versions .file-actions { margin-left: 0.55rem; }

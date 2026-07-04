@@ -550,6 +550,30 @@
     ].filter(Boolean));
   }
 
+  // Sub-tabs within a panel (e.g. Library vs Add). Remembers the active tab
+  // per key so it survives re-renders (reload after an add).
+  const paneSubTab = { documents: "list", standards: "list" };
+  function subTabs(key, tabs) {
+    const bar = el("div", { class: "subtabs", role: "tablist" });
+    const body = el("div", { class: "subtab-body" });
+    const btns = {};
+    const show = (id) => {
+      paneSubTab[key] = id;
+      for (const k in btns) { const on = k === id; btns[k].classList.toggle("active", on); btns[k].setAttribute("aria-selected", on ? "true" : "false"); }
+      const t = tabs.find((x) => x.id === id) || tabs[0];
+      body.replaceChildren(t.build());
+    };
+    for (const t of tabs) {
+      const b = el("button", { class: "subtab", type: "button", role: "tab", onclick: () => show(t.id) }, [
+        t.icon ? el("span", { class: "btn-ico", html: ICONS[t.icon] || "" }) : null, el("span", {}, t.label),
+      ].filter(Boolean));
+      btns[t.id] = b; bar.appendChild(b);
+    }
+    const wrap = el("div", {}, [bar, body]);
+    show(tabs.some((t) => t.id === paneSubTab[key]) ? paneSubTab[key] : tabs[0].id);
+    return wrap;
+  }
+
   function documentLibrary(audienceFilter, docsInput, opts = {}) {
     const source = docsInput || CFG.documents || [];
     const docs = source.filter((d) => !audienceFilter || (d.audience || []).includes(audienceFilter));
@@ -928,6 +952,7 @@
         flash(res && res.id);
         status.className = "up-status ok"; status.textContent = `Added “${name.value || up.fileName}”.`;
         zone.reset(); name.value = ""; category.value = "";
+        paneSubTab.documents = "list"; // show the new doc (blinking) in the library
         await reload();
       } catch (ex) {
         btn.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`;
@@ -1493,6 +1518,7 @@
         }
         flash(id);
         code.value = title.value = category.value = version.value = eff.value = ""; zone.reset();
+        paneSubTab.standards = "list"; // show the new standard (blinking) in the register
         await reload();
       } catch (ex) { btn.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`; }
     });
@@ -1621,12 +1647,18 @@
     } else {
       browser = el("div", { class: "empty" }, role === "rushroom" ? "No standards yet — add one above." : "No standards shared with you yet.");
     }
-    const frag = el("div", {}, [
-      role === "rushroom" ? addStandardCard(role, reload) : null,
+    const registerTab = () => el("div", {}, [
       el("div", { class: "notice" }, "Version-controlled register of the standards and regulations this product must meet. Every uploaded revision is kept, so the history stays fully traceable."),
       browser,
-    ].filter(Boolean));
-    mount.replaceChildren(...frag.childNodes);
+    ]);
+    if (role === "rushroom") {
+      mount.replaceChildren(subTabs("standards", [
+        { id: "list", label: "Register", icon: "layers", build: registerTab },
+        { id: "add", label: "Add standard", icon: "plus", build: () => addStandardCard(role, reload) },
+      ]));
+    } else {
+      mount.replaceChildren(registerTab());
+    }
   }
 
   /* ---------------- AI Deviation Monitoring (Rushroom) ---------------- */
@@ -1754,12 +1786,16 @@
       const onCreateOperational = (d) => createOperationalFromTemplate(d, role, load, templatesOf());
       const onCreateNew = () => documentDraftAssistant(null, role, load, { mode: "create", templates: templatesOf() });
       const docsPanel = $("#documents-panel");
-      docsPanel.replaceChildren(el("div", {}, [
-        role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load),
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onDraft, onCreateOperational, onCreateNew }),
-      ].filter(Boolean)));
       const review = await uploadsReview(role, load);
-      if (review) docsPanel.appendChild(review);
+      const listTab = () => el("div", {}, [
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onDraft, onCreateOperational, onCreateNew }),
+        review,
+      ].filter(Boolean));
+      const addTab = () => (role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load));
+      docsPanel.replaceChildren(subTabs("documents", [
+        { id: "list", label: "Library", icon: "layers", build: listTab },
+        { id: "add", label: role === "supplier" ? "Upload a document" : "Add document", icon: "plus", build: addTab },
+      ]));
     };
     await load();
     const stdPanel = $("#standards-panel");
