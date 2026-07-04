@@ -116,8 +116,16 @@
     addDocumentRecord: (token, { category, name, audience, kind, path, fileName, version }) =>
       call({ action: "addDocument", token, category, name, audience, kind, storagePath: path, fileName, version }),
     // Add a version row to an existing document for an already-uploaded file.
-    addDocumentVersionRecord: (token, { documentId, version, notes, path, fileName }) =>
-      call({ action: "addDocumentVersion", token, documentId, version, notes, path, fileName }),
+    addDocumentVersionRecord: (token, { documentId, version, notes, path, fileName, sourceStandardVersionIds }) =>
+      call({ action: "addDocumentVersion", token, documentId, version, notes, path, fileName, sourceStandardVersionIds }),
+    // Add a NEW version from a binary blob (e.g. a Google Doc exported as .docx).
+    async addDocumentVersionFile(token, blob, { documentId, version, notes, fileName, sourceStandardVersionIds } = {}) {
+      const { signedUrl, path } = await call({ action: "docUploadUrl", token, fileName: fileName || "version.docx" });
+      const put = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: blob });
+      if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+      await call({ action: "addDocumentVersion", token, documentId, version, notes, sourceStandardVersionIds, path, fileName });
+      return path;
+    },
     // Register an already-uploaded supplier/technical-file upload.
     recordUploadRecord: (token, { step, note, supplierLabel, path, fileName }) =>
       call({ action: "recordUpload", token, step, note, supplierLabel, path, fileName }),

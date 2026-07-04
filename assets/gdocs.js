@@ -115,5 +115,21 @@
     return res.blob();
   }
 
-  window.PortalGDocs = { configured, gisReady, getToken, createDoc, fetchDoc, exportDoc };
+  // Import a file (Word/HTML/text blob) into a NEW editable Google Doc in the
+  // user's Drive, converting it. Returns { documentId, editUrl }.
+  async function importDoc(blob, name) {
+    const token = await getToken();
+    const boundary = "gdz" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const meta = JSON.stringify({ name: (name || "Document").slice(0, 300), mimeType: "application/vnd.google-apps.document" });
+    const head = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${blob.type || "application/octet-stream"}\r\n\r\n`;
+    const body = new Blob([head, blob, `\r\n--${boundary}--`], { type: `multipart/related; boundary=${boundary}` });
+    const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true", {
+      method: "POST", headers: { Authorization: `Bearer ${token}` }, body,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data.error && data.error.message) || `HTTP ${res.status}`);
+    return { documentId: data.id, editUrl: `https://docs.google.com/document/d/${data.id}/edit` };
+  }
+
+  window.PortalGDocs = { configured, gisReady, getToken, createDoc, fetchDoc, exportDoc, importDoc };
 })();
