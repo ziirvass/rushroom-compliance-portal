@@ -178,69 +178,6 @@ const sendPasswordEmail = (to: string, name: string, url: string) =>
   sendEmail(to, "Set your Rushroom Compliance Portal password",
     `<p>Hi ${name || "there"},</p><p>Use the link below to set a new password for the Rushroom AB Compliance Portal:</p><p><a href="${url}">Set my password</a></p><p>This link expires in 1 hour. If you didn't request this, you can ignore it.</p>`);
 
-// ---- Google Docs integration (service-account OAuth) ----------------------
-const GOOGLE_SERVICE_ACCOUNT = Deno.env.get("GOOGLE_SERVICE_ACCOUNT") ?? "";
-// A bare service account has no Drive storage, so it cannot own Docs. Set this
-// to a real user's email (with domain-wide delegation authorised in Google
-// Workspace) to impersonate them — the Doc is then created in THEIR Drive.
-const GOOGLE_IMPERSONATE_SUBJECT = Deno.env.get("GOOGLE_IMPERSONATE_SUBJECT") ?? "";
-
-function b64decode(s: string): Uint8Array {
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-// Mint a short-lived Google OAuth access token from the service-account JSON
-// (signs a JWT with the SA private key, then exchanges it at the token endpoint).
-async function googleAccessToken(scopes: string[]): Promise<string> {
-  if (!GOOGLE_SERVICE_ACCOUNT) throw new Error("GOOGLE_SERVICE_ACCOUNT secret is not set");
-  let sa: any;
-  try { sa = JSON.parse(GOOGLE_SERVICE_ACCOUNT); }
-  catch { throw new Error("GOOGLE_SERVICE_ACCOUNT is not valid JSON"); }
-  if (!sa.client_email || !sa.private_key) throw new Error("GOOGLE_SERVICE_ACCOUNT is missing client_email or private_key");
-  const now = Math.floor(Date.now() / 1000);
-  const enc64 = (obj: unknown) => b64url(enc.encode(JSON.stringify(obj)));
-  const claim: Record<string, unknown> = {
-    iss: sa.client_email, scope: scopes.join(" "), aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600,
-  };
-  if (GOOGLE_IMPERSONATE_SUBJECT) claim.sub = GOOGLE_IMPERSONATE_SUBJECT; // domain-wide delegation
-  const signingInput = `${enc64({ alg: "RS256", typ: "JWT" })}.${enc64(claim)}`;
-  const pem = String(sa.private_key).replace(/-----BEGIN PRIVATE KEY-----/, "").replace(/-----END PRIVATE KEY-----/, "").replace(/\s+/g, "");
-  const key = await crypto.subtle.importKey("pkcs8", ab(b64decode(pem)), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
-  const sig = new Uint8Array(await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, key, ab(enc.encode(signingInput))));
-  const jwt = `${signingInput}.${b64url(sig)}`;
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: jwt }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`Google auth failed: ${data.error_description || data.error || res.status}`);
-  return data.access_token as string;
-}
-
-// Flatten a Google Doc's structured body into plain text (paragraphs + tables).
-function extractGoogleDocText(doc: any): string {
-  const parts: string[] = [];
-  const runElements = (elements: any[]) => { for (const pe of elements || []) if (pe.textRun?.content) parts.push(pe.textRun.content); };
-  for (const el of doc.body?.content || []) {
-    if (el.paragraph) runElements(el.paragraph.elements);
-    else if (el.table) {
-      for (const row of el.table.tableRows || []) {
-        const cells = (row.tableCells || []).map((c: any) => {
-          const cp: string[] = [];
-          for (const cc of c.content || []) if (cc.paragraph) for (const pe of cc.paragraph.elements || []) if (pe.textRun?.content) cp.push(pe.textRun.content);
-          return cp.join("").trim();
-        });
-        parts.push(cells.join("\t") + "\n");
-      }
-    }
-  }
-  return parts.join("").replace(/\n{3,}/g, "\n\n").trim();
-}
-
 // ---- AI deviation monitoring (Claude) ----
 // Insert a document_versions row, tolerating the optional provenance columns
 // (source_document_version_id / source_standard_version_ids) not existing yet —
@@ -1146,64 +1083,6 @@ Deno.serve(async (req) => {
       effectiveDate: String(parsed.effective_date || ""),
       summary: String(parsed.summary || ""),
     });
-  }
-
-  if (action === "createGoogleDoc") {
-    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const draftText = String(body.draftText ?? "");
-    const documentName = (String(body.documentName ?? "").trim() || "Rushroom compliance draft").slice(0, 300);
-    try {
-      const gToken = await googleAccessToken([
-        "https://www.googleapis.com/auth/documents",
-        "https://www.googleapis.com/auth/drive",
-      ]);
-      // 1. create an empty document with the given title
-      const createRes = await fetch("https://docs.googleapis.com/v1/documents", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${gToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ title: documentName }),
-      });
-      const doc = await createRes.json();
-      if (!createRes.ok) return json({ error: `Google Docs create failed: ${doc.error?.message || createRes.status}` }, 502);
-      const googleDocId = doc.documentId as string;
-      // 2. insert the draft text at the start of the body
-      if (draftText.trim()) {
-        const upd = await fetch(`https://docs.googleapis.com/v1/documents/${googleDocId}:batchUpdate`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${gToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: draftText } }] }),
-        });
-        if (!upd.ok) { const e = await upd.json(); return json({ error: `Google Docs insert failed: ${e.error?.message || upd.status}` }, 502); }
-      }
-      // 3. share: anyone with the link can edit
-      const perm = await fetch(`https://www.googleapis.com/drive/v3/files/${googleDocId}/permissions?supportsAllDrives=true`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${gToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "writer", type: "anyone" }),
-      });
-      if (!perm.ok) { const e = await perm.json().catch(() => ({})); return json({ error: `Google Drive share failed: ${e.error?.message || perm.status}` }, 502); }
-      const editUrl = `https://docs.google.com/document/d/${googleDocId}/edit`;
-      return json({ ok: true, googleDocId, editUrl, webViewLink: editUrl });
-    } catch (e) {
-      return json({ error: `Google Docs error: ${(e as Error).message}` }, 502);
-    }
-  }
-
-  if (action === "fetchGoogleDocContent") {
-    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const googleDocId = String(body.googleDocId ?? "").trim();
-    if (!googleDocId) return json({ error: "googleDocId required" }, 400);
-    try {
-      const gToken = await googleAccessToken(["https://www.googleapis.com/auth/documents.readonly"]);
-      const res = await fetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(googleDocId)}`, {
-        headers: { Authorization: `Bearer ${gToken}` },
-      });
-      const doc = await res.json();
-      if (!res.ok) return json({ error: `Google Docs fetch failed: ${doc.error?.message || res.status}` }, 502);
-      return json({ ok: true, content: extractGoogleDocText(doc), lastModified: doc.revisionId || "" });
-    } catch (e) {
-      return json({ error: `Google Docs error: ${(e as Error).message}` }, 502);
-    }
   }
 
   if (action === "suggestFileMetadata") {
