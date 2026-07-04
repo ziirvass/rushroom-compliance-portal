@@ -452,6 +452,23 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .std-vlabel { font-weight: 600; }
 .std-view { margin-left: 0.6rem; }
 .view-open { display: inline-flex; gap: 0.5rem; align-items: center; }
+
+/* file action chips (View / Open) — consistent, subtle, icon + label */
+.file-actions { display: inline-flex; align-items: center; gap: 0.4rem; }
+.std-current .file-actions, .std-versions .file-actions { margin-left: 0.55rem; }
+.doc-actions .file-actions { margin-left: auto; }
+.file-action {
+  display: inline-flex; align-items: center; gap: 0.34rem;
+  font: inherit; font-size: 0.76rem; font-weight: 500; line-height: 1; white-space: nowrap;
+  padding: 0.32rem 0.64rem; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  cursor: pointer; text-decoration: none;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.file-action:hover, .file-action:focus-visible { background: var(--panel); border-color: var(--accent); color: var(--accent); outline: none; }
+.file-action .fa-ico { display: inline-flex; opacity: 0.85; }
+.file-action:hover .fa-ico { opacity: 1; }
+.file-action .fa-ico svg { display: block; }
 .std-del { margin-left: 0.6rem; color: var(--red); }
 .std-history { font-size: 0.88rem; }
 .std-history > summary { cursor: pointer; color: var(--muted); padding: 0.3rem 0; }

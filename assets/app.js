@@ -505,10 +505,29 @@
   function openHrefFor(url, name, hintPath) {
     return extOf(hintPath || name) === "pdf" ? url : withDownload(url, name); // PDF → inline; else → download
   }
+  // Small, consistent icon chips for file actions (View / Open).
+  const ICONS = {
+    eye: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>',
+    external: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+  };
+  function fileActionBtn(label, iconKey, opts = {}) {
+    const kids = [el("span", { class: "fa-ico", html: ICONS[iconKey] || "" }), el("span", {}, label)];
+    if (opts.href) return el("a", { class: "file-action", href: opts.href, target: "_blank", rel: "noopener", title: opts.title || label }, kids);
+    return el("button", { class: "file-action", type: "button", title: opts.title || label, onclick: opts.onClick }, kids);
+  }
+  const viewChip = (onClick) => fileActionBtn("View", "eye", { onClick, title: "Quick inline preview" });
   function openInAppLink(url, name, hintPath) {
     if (!url) return null;
     const isPdf = extOf(hintPath || name) === "pdf";
-    return el("a", { class: "linklike std-view", href: openHrefFor(url, name, hintPath), target: "_blank", rel: "noopener", title: isPdf ? "Open the PDF in a new tab" : "Open in the app for this file type (Word, Excel…)" }, "Open ↗");
+    return fileActionBtn("Open", "external", { href: openHrefFor(url, name, hintPath), title: isPdf ? "Open the PDF in a new tab" : "Open in the app for this file type (Word, Excel…)" });
+  }
+  // View + Open chips for a stored file, grouped with consistent spacing.
+  function versionFileActions(url, name, hintPath, onView) {
+    if (!url) return null;
+    return el("span", { class: "file-actions" }, [
+      window.PortalViewer && onView ? viewChip(onView) : null,
+      openInAppLink(url, name, hintPath),
+    ].filter(Boolean));
   }
 
   function documentLibrary(audienceFilter, docsInput, opts = {}) {
@@ -528,8 +547,7 @@
         ? el("div", { class: "std-current" }, [
             el("span", { class: "std-vlabel" }, `Current: v${versions.length}`),
             el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
-            current.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer({ ...d, open_url: current.open_url, storage_path: current.storage_path || d.storage_path }) }, "View") : null,
-            openInAppLink(current.open_url, current.file_name || d.name, current.storage_path || d.storage_path),
+            versionFileActions(current.open_url, current.file_name || d.name, current.storage_path || d.storage_path, () => openViewer({ ...d, open_url: current.open_url, storage_path: current.storage_path || d.storage_path })),
           ])
         : el("div", { class: "std-current muted" }, "No file uploaded yet.");
       const history = versions.length
@@ -547,8 +565,7 @@
                 el("div", {}, [
                   el("span", { class: "std-vlabel" }, `v${versions.length - vi}`),
                   el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
-                  v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => openViewer({ ...d, open_url: v.open_url, storage_path: v.storage_path || d.storage_path, name: v.file_name || d.name }) }, "View") : null,
-                  openInAppLink(v.open_url, v.file_name || d.name, v.storage_path || d.storage_path),
+                  versionFileActions(v.open_url, v.file_name || d.name, v.storage_path || d.storage_path, () => openViewer({ ...d, open_url: v.open_url, storage_path: v.storage_path || d.storage_path, name: v.file_name || d.name })),
                 ]),
                 v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
                 sourceNotes.length ? el("div", { class: "std-notes" }, sourceNotes.join(" · ")) : null,
@@ -557,14 +574,11 @@
           ])
         : null;
       const link = d.open_url || d.url;
-      const openHref = openHrefFor(link, d.name, d.storage_path || d.name);
       const viewAction = link
-        ? (window.PortalViewer
-          ? el("span", { class: "view-open" }, [
-              el("button", { class: "open", type: "button", onclick: () => openViewer(d) }, "View"),
-              el("a", { class: "open", href: openHref, target: "_blank", rel: "noopener", title: "Open in the app for this file type" }, "Open ↗"),
-            ])
-          : el("a", { class: "open", href: openHref, target: "_blank", rel: "noopener" }, "Open ↗"))
+        ? el("span", { class: "file-actions" }, [
+            window.PortalViewer ? viewChip(() => openViewer(d)) : null,
+            openInAppLink(link, d.name, d.storage_path || d.name),
+          ].filter(Boolean))
         : el("span", { class: "pending" }, "link pending");
       const actions = [
         opts.manage && opts.onNewVersion && d.id ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => opts.onNewVersion(d) }, "+ New version") : null,
@@ -1532,8 +1546,7 @@
           current.version ? el("span", { class: "muted" }, ` · ${current.version}`) : null,
           current.effective_date ? el("span", { class: "muted" }, ` · effective ${current.effective_date}`) : null,
           el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
-          current.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => viewFile(current) }, "View") : null,
-          openInAppLink(current.open_url, current.file_name || s.code || s.title, current.storage_path),
+          versionFileActions(current.open_url, current.file_name || s.code || s.title, current.storage_path, () => viewFile(current)),
         ])
       : el("div", { class: "std-current" }, [
           el("span", { class: "muted" }, "No file uploaded yet."),
@@ -1548,8 +1561,7 @@
               v.version ? el("span", { class: "muted" }, ` · ${v.version}`) : null,
               v.effective_date ? el("span", { class: "muted" }, ` · effective ${v.effective_date}`) : null,
               el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
-              v.open_url ? el("button", { class: "linklike std-view", type: "button", onclick: () => viewFile(v) }, "View") : null,
-              openInAppLink(v.open_url, v.file_name || s.code || s.title, v.storage_path),
+              versionFileActions(v.open_url, v.file_name || s.code || s.title, v.storage_path, () => viewFile(v)),
               manage ? el("button", { class: "linklike std-del", type: "button", onclick: () => deleteStandardVersion(v, role, reload) }, "delete") : null,
             ]),
             v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
