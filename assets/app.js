@@ -927,21 +927,25 @@
     const currentUrl = (current && current.open_url) || d.open_url;
     const currentHint = (current && (current.file_name || current.storage_path)) || d.storage_path || d.name;
     const gdocsReady = !!(window.PortalGDocs && window.PortalGDocs.configured());
+    const currentExt = extOf(currentHint);
+    const isSheet = currentExt === "xlsx" || currentExt === "xls";
+    const canGoogleEdit = ["docx", "md", "markdown", "html", "htm", "txt", "xlsx", "xls", ""].includes(currentExt);
+    const gTool = isSheet ? "Google Sheets" : "Google Docs";
 
-    // Shared version metadata (used by both the Google Docs edit and the upload paths).
+    // Shared version metadata (used by both the Google edit and the upload paths).
     const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. 2026-07 or Rev B)" });
     const notes = el("textarea", { rows: "2", placeholder: "What changed (optional)" });
 
-    // ---- Path A: edit the current version in Google Docs, save back as a new version ----
-    let gdocId = null;
-    const gopen = el("button", { class: "btn btn-sm btn-primary", type: "button" }, "📝 Open current version in Google Docs");
-    const gsave = el("button", { class: "btn btn-primary", type: "button" }, "⬆ Save Google Doc as new version");
+    // ---- Path A: edit the current version in Google Docs/Sheets, save back as a new version ----
+    let gdocId = null, gdocKind = "doc";
+    const gopen = el("button", { class: "btn btn-sm btn-primary", type: "button" }, `📝 Open current version in ${gTool}`);
+    const gsave = el("button", { class: "btn btn-primary", type: "button" }, `⬆ Save ${isSheet ? "Google Sheet" : "Google Doc"} as new version`);
     const glink = el("span", { style: "font-size:0.85rem" });
     const gstatus = el("p", { class: "up-status", role: "status", "aria-live": "polite", style: "margin:0.4rem 0 0" }, "");
     gsave.disabled = true;
-    const gsection = (gdocsReady && currentUrl) ? el("div", { class: "src-section" }, [
-      el("div", { class: "src-head" }, "Edit the current version in Google Docs"),
-      el("p", { class: "muted", style: "margin:0.1rem 0 0.6rem" }, "Open the current file, edit it in Google Docs, then save it back as a new version — same document and references, nothing else changes."),
+    const gsection = (gdocsReady && currentUrl && canGoogleEdit) ? el("div", { class: "src-section" }, [
+      el("div", { class: "src-head" }, `Edit the current version in ${gTool}`),
+      el("p", { class: "muted", style: "margin:0.1rem 0 0.6rem" }, `Open the current file, edit it in ${gTool}, then save it back as a new version — same document and references, nothing else changes.`),
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [gopen, glink]),
       gstatus,
       el("div", { style: "margin-top:0.5rem" }, gsave),
@@ -981,16 +985,18 @@
     gopen.addEventListener("click", async () => {
       if (!currentUrl) { gstatus.className = "up-status warn"; gstatus.textContent = "This document has no current file to edit."; return; }
       const win = window.open("", "_blank"); // opened in the gesture to avoid popup blocking
-      gopen.disabled = true; gstatus.className = "up-status"; gstatus.textContent = "Preparing the document in Google Docs…";
+      gopen.disabled = true; gstatus.className = "up-status"; gstatus.textContent = `Preparing the file in ${gTool}…`;
       try {
         await window.PortalGDocs.getToken();
         const resp = await fetch(currentUrl);
         if (!resp.ok) throw new Error(`couldn't read the current file (HTTP ${resp.status}) — reopen the library`);
         const buf = await resp.arrayBuffer();
         const ext = extOf(currentHint);
-        let blob;
+        let blob, kind = "doc";
         if (ext === "docx") {
           blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+        } else if (ext === "xlsx" || ext === "xls") {
+          blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }); kind = "sheet";
         } else if (ext === "md" || ext === "markdown") {
           const text = unescapeUnicode(new TextDecoder().decode(new Uint8Array(buf)));
           await loadScript(MARKED_CDN);
@@ -1000,29 +1006,30 @@
           blob = new Blob([text], { type: (ext === "html" || ext === "htm") ? "text/html" : "text/plain" });
         } else {
           if (win && !win.closed) win.close();
-          gstatus.className = "up-status err"; gstatus.textContent = `“.${ext}” can't be edited in Google Docs — upload a replacement below instead.`;
+          gstatus.className = "up-status err"; gstatus.textContent = `“.${ext}” can't be edited in Google — upload a replacement below instead.`;
           gopen.disabled = false; return;
         }
-        const res = await window.PortalGDocs.importDoc(blob, d.name);
-        gdocId = res.documentId;
+        const res = await window.PortalGDocs.importDoc(blob, d.name, kind);
+        gdocId = res.documentId; gdocKind = res.kind;
         if (win && !win.closed) win.location.href = res.editUrl; else window.open(res.editUrl, "_blank", "noopener");
-        glink.replaceChildren(el("a", { href: res.editUrl, target: "_blank", rel: "noopener", class: "linklike" }, "Open Google Doc ↗"));
+        glink.replaceChildren(el("a", { href: res.editUrl, target: "_blank", rel: "noopener", class: "linklike" }, `Open ${gTool} ↗`));
         gsave.disabled = false;
-        gstatus.className = "up-status ok"; gstatus.textContent = "Opened in Google Docs. Edit there, then Save as new version.";
+        gstatus.className = "up-status ok"; gstatus.textContent = `Opened in ${gTool}. Edit there, then Save as new version.`;
       } catch (ex) {
         if (win && !win.closed) win.close();
-        gstatus.className = "up-status err"; gstatus.textContent = `Couldn't open in Google Docs: ${ex.message}`;
+        gstatus.className = "up-status err"; gstatus.textContent = `Couldn't open in ${gTool}: ${ex.message}`;
         gopen.disabled = false;
       }
     });
 
     gsave.addEventListener("click", async () => {
-      if (!gdocId) { gstatus.className = "up-status warn"; gstatus.textContent = "Open the document in Google Docs first."; return; }
-      gsave.disabled = true; gstatus.className = "up-status"; gstatus.textContent = "Saving the edited document as a new version…";
+      if (!gdocId) { gstatus.className = "up-status warn"; gstatus.textContent = `Open the file in ${gTool} first.`; return; }
+      gsave.disabled = true; gstatus.className = "up-status"; gstatus.textContent = "Saving the edited file as a new version…";
       try {
-        const blob = await window.PortalGDocs.exportDoc(gdocId, "docx");
+        const exportKind = gdocKind === "sheet" ? "xlsx" : "docx";
+        const blob = await window.PortalGDocs.exportDoc(gdocId, exportKind);
         const carried = (current && Array.isArray(current.source_standard_versions)) ? current.source_standard_versions.map((sv) => sv && sv.id).filter(Boolean) : [];
-        const fileName = `${(d.name || "document").replace(/[^a-z0-9._-]+/gi, "_") || "document"}.docx`;
+        const fileName = `${(d.name || "document").replace(/[^a-z0-9._-]+/gi, "_") || "document"}.${exportKind}`;
         await API.addDocumentVersionFile(API.getToken(role), blob, { documentId: d.id, version: version.value, notes: notes.value, fileName, sourceStandardVersionIds: carried });
         flash(d.id); close(); await reload();
       } catch (ex) {

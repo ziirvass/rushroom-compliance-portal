@@ -18,6 +18,7 @@
   const MIME = {
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     pdf: "application/pdf",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   };
 
   let tokenClient = null;
@@ -115,12 +116,15 @@
     return res.blob();
   }
 
-  // Import a file (Word/HTML/text blob) into a NEW editable Google Doc in the
-  // user's Drive, converting it. Returns { documentId, editUrl }.
-  async function importDoc(blob, name) {
+  // Import a file into a NEW editable Google file, converting it: a Google Doc
+  // (kind "doc", from Word/HTML/text) or a Google Sheet (kind "sheet", from
+  // Excel). Returns { documentId, editUrl, kind }.
+  async function importDoc(blob, name, kind) {
+    const asSheet = kind === "sheet";
+    const targetMime = asSheet ? "application/vnd.google-apps.spreadsheet" : "application/vnd.google-apps.document";
     const token = await getToken();
     const boundary = "gdz" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    const meta = JSON.stringify({ name: (name || "Document").slice(0, 300), mimeType: "application/vnd.google-apps.document" });
+    const meta = JSON.stringify({ name: (name || "Document").slice(0, 300), mimeType: targetMime });
     const head = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${blob.type || "application/octet-stream"}\r\n\r\n`;
     const body = new Blob([head, blob, `\r\n--${boundary}--`], { type: `multipart/related; boundary=${boundary}` });
     const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true", {
@@ -128,7 +132,8 @@
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error((data.error && data.error.message) || `HTTP ${res.status}`);
-    return { documentId: data.id, editUrl: `https://docs.google.com/document/d/${data.id}/edit` };
+    const base = asSheet ? "spreadsheets" : "document";
+    return { documentId: data.id, editUrl: `https://docs.google.com/${base}/d/${data.id}/edit`, kind: asSheet ? "sheet" : "doc" };
   }
 
   window.PortalGDocs = { configured, gisReady, getToken, createDoc, fetchDoc, exportDoc, importDoc };
