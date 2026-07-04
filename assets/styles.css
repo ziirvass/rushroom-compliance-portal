@@ -92,8 +92,14 @@ main {
   /* WCAG 2.5.8 target size: keep interactive controls ≥ 44px tall */
   min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
   text-decoration: none;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.btn:hover { background: var(--panel); }
+/* Plain buttons pick up the same green-accent hover as the View/Open chips.
+   Primary (already accent-filled) and danger (red) variants keep their own. */
+.btn:not(.btn-primary):not(.doc-del):not(:disabled):hover,
+.btn:not(.btn-primary):not(.doc-del):not(:disabled):focus-visible {
+  background: var(--panel); border-color: var(--accent); color: var(--accent); outline: none;
+}
 .btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
 .btn-primary:hover { filter: brightness(1.05); background: var(--accent); }
 .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.85rem; }
