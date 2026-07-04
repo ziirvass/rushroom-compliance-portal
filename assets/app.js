@@ -566,10 +566,8 @@
             ])
           : el("a", { class: "open", href: openHref, target: "_blank", rel: "noopener" }, "Open ↗"))
         : el("span", { class: "pending" }, "link pending");
-      const canEditGDoc = opts.manage && opts.onEditGDoc && d.id && current && window.PortalGDocs && window.PortalGDocs.configured();
       const actions = [
         opts.manage && opts.onNewVersion && d.id ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => opts.onNewVersion(d) }, "+ New version") : null,
-        canEditGDoc ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onEditGDoc(d) }, "✎ Edit in Google Docs") : null,
         opts.manage && opts.onDraft && d.id && (d.kind || "template") === "operational" ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onDraft(d) }, "AI draft") : null,
         opts.manage && opts.onCreateOperational && d.id && (d.kind || "template") === "template" ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onCreateOperational(d) }, "Create as-operates") : null,
         viewAction,
@@ -925,9 +923,32 @@
 
   // Upload a new version of a document (previous versions kept).
   function documentVersionEditor(d, role, reload) {
-    const zone = uploadZone(role, "documents", { ariaLabel: "Choose the new version file" });
+    const current = (d.versions || [])[0];
+    const currentUrl = (current && current.open_url) || d.open_url;
+    const currentHint = (current && (current.file_name || current.storage_path)) || d.storage_path || d.name;
+    const gdocsReady = !!(window.PortalGDocs && window.PortalGDocs.configured());
+
+    // Shared version metadata (used by both the Google Docs edit and the upload paths).
     const version = el("input", { type: "text", placeholder: "Version label (optional, e.g. 2026-07 or Rev B)" });
     const notes = el("textarea", { rows: "2", placeholder: "What changed (optional)" });
+
+    // ---- Path A: edit the current version in Google Docs, save back as a new version ----
+    let gdocId = null;
+    const gopen = el("button", { class: "btn btn-sm btn-primary", type: "button" }, "📝 Open current version in Google Docs");
+    const gsave = el("button", { class: "btn btn-primary", type: "button" }, "⬆ Save Google Doc as new version");
+    const glink = el("span", { style: "font-size:0.85rem" });
+    const gstatus = el("p", { class: "up-status", role: "status", "aria-live": "polite", style: "margin:0.4rem 0 0" }, "");
+    gsave.disabled = true;
+    const gsection = (gdocsReady && currentUrl) ? el("div", { class: "src-section" }, [
+      el("div", { class: "src-head" }, "Edit the current version in Google Docs"),
+      el("p", { class: "muted", style: "margin:0.1rem 0 0.6rem" }, "Open the current file, edit it in Google Docs, then save it back as a new version — same document and references, nothing else changes."),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [gopen, glink]),
+      gstatus,
+      el("div", { style: "margin-top:0.5rem" }, gsave),
+    ]) : null;
+
+    // ---- Path B: upload a new file ----
+    const zone = uploadZone(role, "documents", { ariaLabel: "Choose the new version file" });
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload new version");
     const af = aiAutofill(role, { zone, statusEl: note, onFill: (meta) => {
@@ -935,14 +956,18 @@
       if (meta.summary && !notes.value.trim()) notes.value = meta.summary;
     } });
     zone.register(af.btn); zone.register(save);
+
     const form = el("div", { class: "step-form" }, [
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), zone.el]),
-      el("div", {}, af.btn),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version label"), version]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Notes"), notes]),
+      gsection,
+      gsection ? el("div", { class: "muted", style: "text-align:center; margin:0.4rem 0" }, "— or upload a replacement file —") : null,
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), zone.el]),
+      el("div", {}, af.btn),
       note, el("div", { style: "margin-top:0.5rem" }, save),
-    ]);
+    ].filter(Boolean));
     const close = openModal(`New version — ${d.name}`, form);
+
     save.addEventListener("click", async () => {
       const up = zone.getUploaded();
       if (!up) { note.className = "up-status warn"; note.textContent = "Add a file first."; return; }
@@ -952,41 +977,17 @@
         flash(d.id); close(); await reload();
       } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
     });
-  }
 
-  /* Edit the CURRENT version of a document in Google Docs, then save it back as a
-   * new version — same document, same standards references, no template/AI. */
-  function editInGoogleDocs(d, role, reload) {
-    const current = (d.versions || [])[0];
-    const version = el("input", { type: "text", placeholder: "New version label (optional, e.g. Rev C or 2026-08)" });
-    const notes = el("textarea", { rows: "2", placeholder: "What changed (optional)" });
-    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
-    const openBtn = el("button", { class: "btn btn-primary", type: "button" }, "📝 Open current version in Google Docs");
-    const saveBtn = el("button", { class: "btn btn-primary", type: "button" }, "⬆ Save as new version");
-    const linkWrap = el("span", { style: "font-size:0.85rem" });
-    saveBtn.disabled = true;
-    let gdocId = null;
-    const form = el("div", { class: "step-form" }, [
-      el("p", { class: "muted", style: "margin:0 0 0.3rem" }, `Opens the current version (${current && current.version ? current.version : "latest"}) in Google Docs. Edit it there, then save it back as a new version — same document and references, nothing else changes.`),
-      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [openBtn, linkWrap]),
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "New version label"), version]),
-      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Notes"), notes]),
-      status,
-      el("div", { style: "margin-top:0.5rem" }, saveBtn),
-    ]);
-    const close = openModal(`Edit in Google Docs — ${d.name}`, form);
-
-    openBtn.addEventListener("click", async () => {
-      if (!current || !current.open_url) { status.className = "up-status warn"; status.textContent = "This document has no file to edit yet."; return; }
-      if (!window.PortalGDocs || !window.PortalGDocs.configured()) { status.className = "up-status err"; status.textContent = "Google Docs isn't set up yet."; return; }
+    gopen.addEventListener("click", async () => {
+      if (!currentUrl) { gstatus.className = "up-status warn"; gstatus.textContent = "This document has no current file to edit."; return; }
       const win = window.open("", "_blank"); // opened in the gesture to avoid popup blocking
-      openBtn.disabled = true; status.className = "up-status"; status.textContent = "Preparing the document in Google Docs…";
+      gopen.disabled = true; gstatus.className = "up-status"; gstatus.textContent = "Preparing the document in Google Docs…";
       try {
         await window.PortalGDocs.getToken();
-        const resp = await fetch(current.open_url);
+        const resp = await fetch(currentUrl);
         if (!resp.ok) throw new Error(`couldn't read the current file (HTTP ${resp.status}) — reopen the library`);
         const buf = await resp.arrayBuffer();
-        const ext = extOf(current.file_name || current.storage_path || d.name);
+        const ext = extOf(currentHint);
         let blob;
         if (ext === "docx") {
           blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
@@ -994,30 +995,30 @@
           const text = unescapeUnicode(new TextDecoder().decode(new Uint8Array(buf)));
           await loadScript(MARKED_CDN);
           blob = new Blob([window.marked.parse(text || "")], { type: "text/html" });
-        } else if (ext === "txt" || ext === "html" || ext === "htm" || ext === "") {
+        } else if (ext === "html" || ext === "htm" || ext === "txt" || ext === "") {
           const text = unescapeUnicode(new TextDecoder().decode(new Uint8Array(buf)));
-          blob = new Blob([text], { type: ext === "html" || ext === "htm" ? "text/html" : "text/plain" });
+          blob = new Blob([text], { type: (ext === "html" || ext === "htm") ? "text/html" : "text/plain" });
         } else {
           if (win && !win.closed) win.close();
-          status.className = "up-status err"; status.textContent = `“.${ext}” files can't be edited in Google Docs. Use “+ New version” to upload a replacement.`;
-          openBtn.disabled = false; return;
+          gstatus.className = "up-status err"; gstatus.textContent = `“.${ext}” can't be edited in Google Docs — upload a replacement below instead.`;
+          gopen.disabled = false; return;
         }
         const res = await window.PortalGDocs.importDoc(blob, d.name);
         gdocId = res.documentId;
         if (win && !win.closed) win.location.href = res.editUrl; else window.open(res.editUrl, "_blank", "noopener");
-        linkWrap.replaceChildren(el("a", { href: res.editUrl, target: "_blank", rel: "noopener", class: "linklike" }, "Open Google Doc ↗"));
-        saveBtn.disabled = false;
-        status.className = "up-status ok"; status.textContent = "Opened in Google Docs. Edit there, then “Save as new version”.";
+        glink.replaceChildren(el("a", { href: res.editUrl, target: "_blank", rel: "noopener", class: "linklike" }, "Open Google Doc ↗"));
+        gsave.disabled = false;
+        gstatus.className = "up-status ok"; gstatus.textContent = "Opened in Google Docs. Edit there, then Save as new version.";
       } catch (ex) {
         if (win && !win.closed) win.close();
-        status.className = "up-status err"; status.textContent = `Couldn't open in Google Docs: ${ex.message}`;
-        openBtn.disabled = false;
+        gstatus.className = "up-status err"; gstatus.textContent = `Couldn't open in Google Docs: ${ex.message}`;
+        gopen.disabled = false;
       }
     });
 
-    saveBtn.addEventListener("click", async () => {
-      if (!gdocId) { status.className = "up-status warn"; status.textContent = "Open the document in Google Docs first."; return; }
-      saveBtn.disabled = true; status.className = "up-status"; status.textContent = "Saving the edited document as a new version…";
+    gsave.addEventListener("click", async () => {
+      if (!gdocId) { gstatus.className = "up-status warn"; gstatus.textContent = "Open the document in Google Docs first."; return; }
+      gsave.disabled = true; gstatus.className = "up-status"; gstatus.textContent = "Saving the edited document as a new version…";
       try {
         const blob = await window.PortalGDocs.exportDoc(gdocId, "docx");
         const carried = (current && Array.isArray(current.source_standard_versions)) ? current.source_standard_versions.map((sv) => sv && sv.id).filter(Boolean) : [];
@@ -1025,7 +1026,7 @@
         await API.addDocumentVersionFile(API.getToken(role), blob, { documentId: d.id, version: version.value, notes: notes.value, fileName, sourceStandardVersionIds: carried });
         flash(d.id); close(); await reload();
       } catch (ex) {
-        saveBtn.disabled = false; status.className = "up-status err"; status.textContent = `Couldn't save the new version: ${ex.message}`;
+        gsave.disabled = false; gstatus.className = "up-status err"; gstatus.textContent = `Couldn't save the new version: ${ex.message}`;
       }
     });
   }
@@ -1711,11 +1712,10 @@
       const onDraft = (d) => documentDraftAssistant(d, role, load, { templates: templatesOf() });
       const onCreateOperational = (d) => createOperationalFromTemplate(d, role, load, templatesOf());
       const onCreateNew = () => documentDraftAssistant(null, role, load, { mode: "create", templates: templatesOf() });
-      const onEditGDoc = (d) => editInGoogleDocs(d, role, load);
       const docsPanel = $("#documents-panel");
       docsPanel.replaceChildren(el("div", {}, [
         role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load),
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onDraft, onCreateOperational, onCreateNew, onEditGDoc }),
+        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onDraft, onCreateOperational, onCreateNew }),
       ].filter(Boolean)));
       const review = await uploadsReview(role, load);
       if (review) docsPanel.appendChild(review);
