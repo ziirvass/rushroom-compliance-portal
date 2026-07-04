@@ -2341,16 +2341,20 @@
       const onCreateOperational = (d) => createOperationalFromTemplate(d, role, load, templatesOf());
       const onCreateNew = () => documentDraftAssistant(null, role, load, { mode: "create", templates: templatesOf() });
       const docsPanel = $("#documents-panel");
-      const review = await uploadsReview(role, load);
-      const listTab = () => el("div", {}, [
-        documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onEditVersion, onDraft, onCreateOperational, onCreateNew }),
-        review,
-      ].filter(Boolean));
+      const listTab = () => documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onEditVersion, onDraft, onCreateOperational, onCreateNew });
       const addTab = () => (role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load));
-      docsPanel.replaceChildren(subTabs("documents", [
+      // Supplier uploads is its own sub-tab (Rushroom only), alongside Library / Add document.
+      const uploadsTab = () => {
+        const mount = el("div", {}, el("div", { class: "loading" }, "Loading supplier uploads…"));
+        uploadsReview(role, load).then((card) => mount.replaceChildren(card || el("div", { class: "empty" }, "No supplier uploads.")));
+        return mount;
+      };
+      const docTabs = [
         { id: "list", label: "Library", icon: "layers", build: listTab },
         { id: "add", label: role === "supplier" ? "Upload a document" : "Add document", icon: "plus", build: addTab },
-      ]));
+      ];
+      if (role === "rushroom") docTabs.push({ id: "uploads", label: "Supplier uploads", icon: "external", build: uploadsTab });
+      docsPanel.replaceChildren(subTabs("documents", docTabs));
     };
     await load();
     const stdPanel = $("#standards-panel");
