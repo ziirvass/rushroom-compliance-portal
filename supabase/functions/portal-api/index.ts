@@ -525,7 +525,19 @@ Deno.serve(async (req) => {
     if (!isAdmin) return json({ error: "Admin only" }, 403);
     const { data, error } = await db.from("users").select("*").order("created_at", { ascending: false });
     if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The users table isn't set up yet — run the account SQL first." : error.message }, 500);
-    return json({ users: data ?? [] });
+    // Strip the password hash before returning; surface email-delivery status.
+    const users = (data ?? []).map(({ password: _pw, ...u }) => u);
+    return json({ users, emailConfigured: !!Deno.env.get("RESEND_API_KEY"), mailFrom: Deno.env.get("MAIL_FROM") || "" });
+  }
+  if (action === "adminSendTestEmail") {
+    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    const to = String(body.to ?? session.email ?? "").trim().toLowerCase();
+    if (!emailOk(to)) return json({ error: "Enter a valid recipient email address." }, 400);
+    if (!Deno.env.get("RESEND_API_KEY")) return json({ error: "Email is not configured yet — set RESEND_API_KEY in the function secrets." }, 400);
+    const emailed = await sendEmail(to, "Rushroom Compliance Portal — test email",
+      `<p>This is a test email from the Rushroom AB Compliance Portal.</p><p>If you can read this, email delivery is working — verification and password links will now reach users automatically.</p>`);
+    if (!emailed) return json({ error: "Resend rejected the send — check the API key and that the MAIL_FROM domain is verified." }, 502);
+    return json({ ok: true, emailed: true, to });
   }
   if (action === "adminUpdateUser") {
     if (!isAdmin) return json({ error: "Admin only" }, 403);

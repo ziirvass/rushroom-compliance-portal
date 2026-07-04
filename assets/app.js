@@ -1841,6 +1841,24 @@
     catch (ex) { mount.replaceChildren(el("div", { class: "error" }, `Couldn't load accounts: ${ex.message}`)); return; }
     const users = payload.users || [];
     const reload = () => renderAccounts(role, mount);
+
+    // Email-delivery status + a test-send. When Resend isn't configured, links
+    // must be copied by hand; when it is, verification/reset links are emailed.
+    const mailNote = el("span", { class: "up-status", style: "margin-left:0.4rem" }, "");
+    const mailTo = el("input", { type: "email", class: "up-text", placeholder: (API.session() && API.session().email) || "you@company.com", style: "max-width:240px" });
+    const testBtn = actionBtn("Send test email", "external", { onClick: async () => {
+      mailNote.className = "up-status"; mailNote.textContent = "Sending…";
+      try { const r = await API.adminSendTestEmail(API.getToken(), mailTo.value.trim() || undefined); mailNote.className = "up-status ok"; mailNote.textContent = `Sent to ${r.to}.`; }
+      catch (ex) { mailNote.className = "up-status err"; mailNote.textContent = ex.message; }
+    } });
+    const emailBanner = payload.emailConfigured
+      ? el("div", { class: "notice ok" }, [
+          el("strong", {}, "Email delivery is on. "),
+          document.createTextNode(`Verification and password links are emailed automatically${payload.mailFrom ? " from " + payload.mailFrom : ""}. `),
+          el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:0.5rem" }, [mailTo, testBtn, mailNote]),
+        ])
+      : el("div", { class: "notice warn" }, "Email delivery is off — set RESEND_API_KEY + MAIL_FROM in the function secrets to email links automatically. Until then, use the Verify/Reset link buttons to copy a link and send it yourself.");
+
     const search = el("input", { type: "search", class: "browser-search-input", placeholder: "Search name, email, role, status…", style: "max-width:360px" });
     const listWrap = el("div", { class: "standards", style: "margin-top:0.9rem" });
     const render = () => {
@@ -1853,6 +1871,7 @@
     const summary = el("div", { class: "sev-summary" }, ["pending", "verified", "approved", "rejected", "disabled"].map((st) => el("span", { class: "sev-chip" }, `${st}: ${counts[st] || 0}`)));
     mount.replaceChildren(el("div", {}, [
       el("div", { class: "notice" }, "User accounts — people register from the login page and verify their email; approve them and assign a role here. Registration only requests a role; you decide the actual access."),
+      emailBanner,
       summary,
       el("div", { style: "margin-top:0.75rem" }, search),
       users.length ? listWrap : el("div", { class: "empty", style: "margin-top:0.75rem" }, "No registrations yet."),

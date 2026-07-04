@@ -74,6 +74,7 @@
     adminDeleteUser: (token, id) => call({ action: "adminDeleteUser", token, id }),
     adminUserVerifyLink: (token, id) => call({ action: "adminUserVerifyLink", token, id }),
     adminUserResetLink: (token, id) => call({ action: "adminUserResetLink", token, id }),
+    adminSendTestEmail: (token, to) => call({ action: "adminSendTestEmail", token, to }),
 
     setStatus: (token, step, status, supplierLabel) =>
       call({ action: "setStatus", token, step, status, supplierLabel }),
