@@ -379,7 +379,7 @@
   // Two top-level sections (the second dimension), each grouped by category.
   const DOC_KINDS = [
     ["template", "Templates & Requirements", "Reference inputs to the work — version-controlled and reusable as starting points."],
-    ["operational", "Company as Operates", "The actual operational documentation the AI deviation scan checks against the standards."],
+    ["operational", "Company as Operated", "The actual operational documentation the AI deviation scan checks against the standards."],
   ];
   /* Blink state + remembered selection for the two-pane browsers.
    * flash(id) marks a freshly uploaded item to blink for 30s. */
@@ -666,7 +666,7 @@
       const actions = [
         opts.manage && opts.onNewVersion && d.id ? actionBtn("New version", "plus", { primary: true, onClick: () => opts.onNewVersion(d) }) : null,
         opts.manage && opts.onDraft && d.id && (d.kind || "template") === "operational" ? actionBtn("AI draft", "sparkles", { onClick: () => opts.onDraft(d) }) : null,
-        opts.manage && opts.onCreateOperational && d.id && (d.kind || "template") === "template" ? actionBtn("Create as-operates", "layers", { onClick: () => opts.onCreateOperational(d) }) : null,
+        opts.manage && opts.onCreateOperational && d.id && (d.kind || "template") === "template" ? actionBtn("Create as-operated", "layers", { onClick: () => opts.onCreateOperational(d) }) : null,
         viewAction,
       ].filter(Boolean);
       return el("div", { class: "doc doc-op" }, [
@@ -695,7 +695,7 @@
         })),
       }));
       const action = (opts.manage && opts.onCreateNew && kind === "operational")
-        ? actionBtn("New As Operates", "plus", { primary: true, cls: "doc-kind-new", onClick: () => opts.onCreateNew() })
+        ? actionBtn("New As Operated", "plus", { primary: true, cls: "doc-kind-new", onClick: () => opts.onCreateNew() })
         : null;
       tree.push({ heading: label, count: kdocs.length, action, hint, categories });
     }
@@ -968,7 +968,7 @@
     const category = el("input", { type: "text", class: "up-text", placeholder: "Category (e.g. Test reports)", "aria-label": "Category" });
     const kind = el("select", { class: "up-text", "aria-label": "Section" }, [
       el("option", { value: "template" }, "Templates & Requirements"),
-      el("option", { value: "operational" }, "Company as Operates (AI-audited)"),
+      el("option", { value: "operational" }, "Company as Operated (AI-audited)"),
     ]);
     const auds = ["internal", "supplier", "reviewer", "installer"].map((a) => {
       const cb = el("input", { type: "checkbox", value: a, checked: a === "internal" ? "checked" : null });
@@ -1001,7 +1001,7 @@
     });
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Manage documents"),
-      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file — the AI reads its name, category and section for you. Review, then add. Templates can later become As Operates documents without deleting anything."),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file — the AI reads its name, category and section for you. Review, then add. Templates can later become As Operated documents without deleting anything."),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document file"), zone.el]),
       el("div", { style: "margin:0.5rem 0 0.9rem" }, af.btn),
       el("div", { class: "upload-fields" }, [name, category, kind]),
@@ -1015,8 +1015,8 @@
     documentDraftAssistant(null, role, reload, {
       templateDoc,
       templates: templates || [],
-      title: `Create As Operates — ${templateDoc.name || "template"}`,
-      initialName: `${templateDoc.name || "Template"} — As Operates`,
+      title: `Create As Operated — ${templateDoc.name || "template"}`,
+      initialName: `${templateDoc.name || "Template"} — As Operated`,
       mode: "create",
     });
   }
@@ -1169,8 +1169,8 @@
     const templateDoc = options.templateDoc || null;
     const templates = options.templates || [];
     const isCreateMode = options.mode === "create" || !d;
-    const defaultName = options.initialName || (d ? d.name : "New As Operates");
-    const name = el("input", { type: "text", class: "up-text", value: defaultName, placeholder: "Name of the As Operates document", "aria-label": "As Operates document name" });
+    const defaultName = options.initialName || (d ? d.name : "New As Operated");
+    const name = el("input", { type: "text", class: "up-text", value: defaultName, placeholder: "Name of the As Operated document", "aria-label": "As Operated document name" });
     // A generic default name may be auto-replaced when a template is picked.
     if (isCreateMode && !options.initialName) name.dataset.auto = "1";
     const notes = el("textarea", { rows: "3", placeholder: "e.g. reflect the latest requirements, tighten wording, add the sign-off section" });
@@ -1213,8 +1213,8 @@
       if (templateDoc && templateDoc.id) templateSelect.value = templateDoc.id;
       templateSelect.addEventListener("change", () => {
         const t = templates.find((x) => x.id === templateSelect.value);
-        if (t && (!name.value.trim() || name.dataset.auto === "1")) { name.value = `${t.name} — As Operates`; name.dataset.auto = "1"; }
-        else if (!templateSelect.value && name.dataset.auto === "1") { name.value = "New As Operates"; }
+        if (t && (!name.value.trim() || name.dataset.auto === "1")) { name.value = `${t.name} — As Operated`; name.dataset.auto = "1"; }
+        else if (!templateSelect.value && name.dataset.auto === "1") { name.value = "New As Operated"; }
       });
     }
     const selectedTemplateId = () => (templateSelect ? (templateSelect.value || "") : "");
@@ -1240,7 +1240,7 @@
     const sourceSection = el("div", { class: "src-section" }, [
       el("div", { class: "src-head" }, "Source material — combine any of these"),
       el("p", { class: "muted", style: "margin:0.1rem 0 0.7rem" }, isCreateMode
-        ? "Build a new As Operates document from a template, from one or more standards/regulations, or from both — plus optional context."
+        ? "Build a new As Operated document from a template, from one or more standards/regulations, or from both — plus optional context."
         : "Update this document from its current version, optionally guided by standards/regulations and your change notes."),
       source1, source2, source3,
     ]);
@@ -1260,7 +1260,7 @@
       ]),
     ].filter(Boolean));
 
-    const close = openModal(options.title || (d ? `AI draft — ${d.name}` : "New As Operates document"), form);
+    const close = openModal(options.title || (d ? `AI draft — ${d.name}` : "New As Operated document"), form);
     (isCreateMode ? name : notes).focus();
 
     const loadStandards = async () => {
@@ -2063,7 +2063,7 @@
     const wrap = el("div");
     const docVers = flattenDocVersions(ctx.documents);
     const stdVers = flattenStdVersions(ctx.standards);
-    if (!docVers.length || !stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "Need at least one document version and one standard version. Add them in the As Operates and Standards tabs.")); return wrap; }
+    if (!docVers.length || !stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "Need at least one document version and one standard version. Add them in the As Operated and Standards tabs.")); return wrap; }
     const docSel = el("select", { class: "up-text" }, docVers.map((o) => el("option", { value: o.id }, o.label)));
     const stdSel = el("select", { class: "up-text" }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
     const out = el("div", { style: "margin-top:0.8rem" });

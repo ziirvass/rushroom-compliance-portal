@@ -724,7 +724,7 @@ Deno.serve(async (req) => {
     const { data: latestTemplateVersion } = await db.from("document_versions").select("id").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
     const sourceDocumentVersionId = latestTemplateVersion?.id || null;
 
-    const name = String(body.name ?? "").trim() || `${templateDoc.name || "Template"} — As Operates`;
+    const name = String(body.name ?? "").trim() || `${templateDoc.name || "Template"} — As Operated`;
     const audience = Array.isArray(templateDoc.audience) && templateDoc.audience.length ? templateDoc.audience : ["internal"];
     const { data: doc, error } = await db.from("documents").insert({
       category: String(templateDoc.category ?? "Uncategorised").slice(0, 80),
@@ -874,7 +874,7 @@ Deno.serve(async (req) => {
 
     let targetDocumentId = document_id;
     if (!targetDocumentId) {
-      const name = String(body.newDocumentName ?? "").trim() || "New As Operates";
+      const name = String(body.newDocumentName ?? "").trim() || "New As Operated";
       const templateDocumentId = String(body.templateDocumentId ?? "").trim();
       const category = String(body.category ?? "").trim() || (templateDocumentId ? "Uncategorised" : "Uncategorised");
       const audience = Array.isArray(body.audience) && body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
@@ -1184,7 +1184,7 @@ Deno.serve(async (req) => {
   if (action === "runDeviationScan") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
 
-    // Operational ("Company as Operates") documents are the evidence being audited.
+    // Operational ("Company as Operated") documents are the evidence being audited.
     const { data: docs } = await db.from("documents").select("id,name,storage_path").eq("kind", "operational").neq("storage_path", "");
     const storedDocs = (docs ?? []).filter((d) => d.storage_path);
 
@@ -1239,7 +1239,7 @@ Deno.serve(async (req) => {
     const willRunAI = uncoveredDocs.length > 0 && standards.length > 0;
 
     // Guardrails: only bail when there is genuinely nothing to do.
-    if (!storedDocs.length && !interpList.length) return json({ error: "No operational documents to check — mark documents as “Company as Operates” in the Document library first." }, 400);
+    if (!storedDocs.length && !interpList.length) return json({ error: "No operational documents to check — mark documents as “Company as Operated” in the Document library first." }, 400);
     if (!structuredFindings.length && coveredDocIds.size === 0 && !willRunAI) {
       if (!standards.length) return json({ error: "No standards with an uploaded version yet — add standards and upload files first." }, 400);
       return json({ error: "Nothing to scan — add clause interpretations or operational documents first." }, 400);
