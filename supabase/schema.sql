@@ -203,12 +203,15 @@ create table if not exists public.users (
   phone          text,
   whatsapp       text,
   requested_role text not null default 'supplier',
-  role           text,                                   -- assigned by an admin
+  role           text,                                   -- assigned by an admin: admin|internal|reviewer|supplier|installer
   status         text not null default 'pending',        -- pending|verified|approved|rejected|disabled
   email_verified boolean not null default false,
+  password       text,                                   -- PBKDF2 hash (pbkdf2$iter$salt$hash); never plaintext
   notes          text,
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
 alter table public.users enable row level security;      -- deny-all; edge function uses service role
 create index if not exists users_status_idx on public.users (status);
+-- If the table already exists from an earlier version, add the password column:
+alter table public.users add column if not exists password text;

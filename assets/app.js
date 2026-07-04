@@ -1730,21 +1730,27 @@
 
   /* ---------------- user registration (public) ---------------- */
   const USER_ROLE_OPTS = [["supplier", "Supplier"], ["reviewer", "Reviewer"], ["installer", "Installer"], ["internal", "Internal (Rushroom staff)"]];
+  // Roles an admin may assign (adds Admin, which is never self-requestable).
+  const ASSIGN_ROLE_OPTS = [["admin", "Admin"], ...USER_ROLE_OPTS];
   function registerModal() {
     const role = el("select", { class: "up-text" }, USER_ROLE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
     const name = el("input", { type: "text", class: "up-text", placeholder: "Full name" });
     const email = el("input", { type: "email", class: "up-text", placeholder: "you@company.com", autocomplete: "email" });
     const phone = el("input", { type: "tel", class: "up-text", placeholder: "Phone (optional)" });
     const whatsapp = el("input", { type: "tel", class: "up-text", placeholder: "WhatsApp (optional)" });
+    const pass = el("input", { type: "password", class: "up-text", placeholder: "At least 8 characters", autocomplete: "new-password" });
+    const pass2 = el("input", { type: "password", class: "up-text", placeholder: "Repeat password", autocomplete: "new-password" });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const submit = el("button", { class: "btn btn-primary", type: "button" }, "Register");
     const form = el("div", { class: "step-form" }, [
-      el("p", { class: "muted", style: "margin:0 0 0.4rem" }, "Request access to the Rushroom AB Compliance Portal. We'll email you a link to verify your address; an administrator then approves your access and sets your role."),
+      el("p", { class: "muted", style: "margin:0 0 0.4rem" }, "Request access to the Rushroom AB Compliance Portal. We'll email you a link to verify your address; an administrator then approves your access and sets your role. You'll sign in with this email and password once approved."),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Role"), role]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Name"), name]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Email"), email]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Phone"), phone]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "WhatsApp"), whatsapp]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Password"), pass]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Confirm"), pass2]),
       el("div", { style: "margin-top:0.5rem" }, submit),
       status,
     ]);
@@ -1753,12 +1759,35 @@
     submit.addEventListener("click", async () => {
       const emailV = email.value.trim();
       if (!name.value.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailV)) { status.className = "up-status warn"; status.textContent = "Please enter your name and a valid email."; return; }
+      if (pass.value.length < 8) { status.className = "up-status warn"; status.textContent = "Choose a password of at least 8 characters."; return; }
+      if (pass.value !== pass2.value) { status.className = "up-status warn"; status.textContent = "The two passwords don't match."; return; }
       submit.disabled = true; status.className = "up-status"; status.textContent = "Submitting…";
       try {
-        const res = await API.registerUser({ role: role.value, name: name.value.trim(), email: emailV, phone: phone.value.trim(), whatsapp: whatsapp.value.trim() });
+        const res = await API.registerUser({ role: role.value, name: name.value.trim(), email: emailV, phone: phone.value.trim(), whatsapp: whatsapp.value.trim(), password: pass.value });
         status.className = "up-status ok"; status.textContent = (res && res.message) || "Registered — check your email to verify.";
-        name.value = email.value = phone.value = whatsapp.value = "";
+        name.value = email.value = phone.value = whatsapp.value = pass.value = pass2.value = "";
       } catch (ex) { submit.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`; }
+    });
+  }
+
+  // "Forgot password" flow — emails a set-password link.
+  function forgotPasswordModal(prefill) {
+    const email = el("input", { type: "email", class: "up-text", placeholder: "you@company.com", value: prefill || "" });
+    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const submit = el("button", { class: "btn btn-primary", type: "button" }, "Send reset link");
+    const form = el("div", { class: "step-form" }, [
+      el("p", { class: "muted", style: "margin:0 0 0.4rem" }, "Enter your email and we'll send a link to set a new password. The link expires in 1 hour."),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Email"), email]),
+      el("div", { style: "margin-top:0.5rem" }, submit), status,
+    ]);
+    openModal("Reset your password", form);
+    email.focus();
+    submit.addEventListener("click", async () => {
+      const v = email.value.trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { status.className = "up-status warn"; status.textContent = "Enter a valid email."; return; }
+      submit.disabled = true; status.className = "up-status"; status.textContent = "Sending…";
+      try { const r = await API.requestPasswordReset(v); status.className = "up-status ok"; status.textContent = (r && r.message) || "If that email is registered, a link has been sent."; }
+      catch (ex) { submit.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`; }
     });
   }
   // Adds a "Register for access" call-to-action under an access gate card.
@@ -1773,20 +1802,23 @@
 
   /* ---------------- admin account management (Rushroom) ---------------- */
   function accountCard(u, role, reload) {
-    const roleSel = el("select", { class: "up-text" }, [el("option", { value: "" }, "— set role —"), ...USER_ROLE_OPTS.map(([v, l]) => el("option", { value: v, selected: (u.role || "") === v ? "selected" : null }, l))]);
+    const roleSel = el("select", { class: "up-text" }, [el("option", { value: "" }, "— set role —"), ...ASSIGN_ROLE_OPTS.map(([v, l]) => el("option", { value: v, selected: (u.role || "") === v ? "selected" : null }, l))]);
     const statusSel = el("select", { class: "up-text" }, ["pending", "verified", "approved", "rejected", "disabled"].map((st) => el("option", { value: st, selected: u.status === st ? "selected" : null }, st)));
     const note = el("span", { class: "up-status", style: "margin:0 0 0 0.2rem" }, "");
+    const tok = () => API.getToken();
     const run = async (fn) => { try { await fn(); await reload(); } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; } };
+    const copyLink = async (getter, label) => {
+      try { const r = await getter(); const url = r.verifyUrl || r.resetUrl; if (navigator.clipboard && url) await navigator.clipboard.writeText(url); note.className = "up-status ok"; note.textContent = r.emailed ? `Emailed + ${label} copied.` : `${label} copied to clipboard.`; }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    };
     const approve = actionBtn("Approve", "plus", { primary: true, onClick: () => {
       if (!roleSel.value) { note.className = "up-status warn"; note.textContent = "Set a role first."; return; }
-      run(() => API.adminUpdateUser(API.getToken(role), u.id, { role: roleSel.value, status: "approved" }));
+      run(() => API.adminUpdateUser(tok(), u.id, { role: roleSel.value, status: "approved" }));
     } });
-    const save = actionBtn("Save", "edit", { onClick: () => run(() => API.adminUpdateUser(API.getToken(role), u.id, { role: roleSel.value || undefined, status: statusSel.value })) });
-    const link = actionBtn("Verify link", "external", { onClick: async () => {
-      try { const r = await API.adminUserVerifyLink(API.getToken(role), u.id); if (navigator.clipboard) await navigator.clipboard.writeText(r.verifyUrl); note.className = "up-status ok"; note.textContent = r.emailed ? "Emailed + link copied." : "Link copied to clipboard."; }
-      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
-    } });
-    const del = actionBtn("Delete", "trash", { danger: true, onClick: () => { if (confirm(`Delete ${u.name} (${u.email})?`)) run(() => API.adminDeleteUser(API.getToken(role), u.id)); } });
+    const save = actionBtn("Save", "edit", { onClick: () => run(() => API.adminUpdateUser(tok(), u.id, { role: roleSel.value || undefined, status: statusSel.value })) });
+    const vlink = actionBtn("Verify link", "external", { onClick: () => copyLink(() => API.adminUserVerifyLink(tok(), u.id), "Verify link") });
+    const rlink = actionBtn("Reset link", "refresh", { onClick: () => copyLink(() => API.adminUserResetLink(tok(), u.id), "Reset link") });
+    const del = actionBtn("Delete", "trash", { danger: true, onClick: () => { if (confirm(`Delete ${u.name} (${u.email})?`)) run(() => API.adminDeleteUser(tok(), u.id)); } });
     return el("div", { class: "card acct-card" }, [
       el("div", { class: "acct-head" }, [
         el("div", {}, [el("strong", {}, u.name), el("div", { class: "muted", style: "font-size:0.85rem" }, u.email)]),
@@ -1796,13 +1828,13 @@
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:0.6rem" }, [
         el("span", { class: "form-label" }, "Role"), roleSel,
         el("span", { class: "form-label" }, "Status"), statusSel,
-        approve, save, link, del,
+        approve, save, vlink, rlink, del,
       ]),
       note,
     ]);
   }
   async function renderAccounts(role, mount) {
-    if (role !== "rushroom") { mount.replaceChildren(el("div", { class: "empty" }, "Administrators only.")); return; }
+    if (!API.isAdmin()) { mount.replaceChildren(el("div", { class: "empty" }, "Administrators only.")); return; }
     mount.replaceChildren(el("div", { class: "loading" }, "Loading accounts…"));
     let payload;
     try { payload = await API.adminListUsers(API.getToken(role)); }
@@ -1863,7 +1895,8 @@
         role === "rushroom" ? actionBtn("Add step", "plus", { primary: true, onClick: () => saveStep(null) }) : null,
         actionBtn("Print / Save PDF", "printer", { onClick: () => window.print() }),
         el("span", { class: "spacer" }),
-        el("span", { class: "updated" }, `Live · signed in as ${role} · ${new Date().toLocaleTimeString("en-GB")}`),
+        actionBtn("Sign out", "external", { onClick: () => { API.clearToken(); location.reload(); } }),
+        el("span", { class: "updated" }, `Live · ${(API.session() && (API.session().name || API.session().urole)) || role} · ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
       const frag = el("div", {}, [
         el("div", { class: "notice ok" }, role === "rushroom"
@@ -1904,7 +1937,77 @@
     const devPanel = $("#deviations-panel");
     if (devPanel && role === "rushroom") renderDeviations(role, devPanel);
     const acctPanel = $("#accounts-panel");
-    if (acctPanel && role === "rushroom") renderAccounts(role, acctPanel);
+    if (acctPanel && API.isAdmin()) renderAccounts(role, acctPanel);
+  }
+
+  // Hide tabs/panels the signed-in user isn't entitled to.
+  function applyAccess(role, admin) {
+    const gate = (tabId, panelId, ok) => {
+      const t = $("#" + tabId), p = $("#" + panelId);
+      if (t) t.hidden = !ok;
+      if (!ok && p) p.hidden = true;
+    };
+    gate("tab-deviations", "deviations-panel", role === "rushroom");
+    gate("tab-accounts", "accounts-panel", !!admin);
+  }
+
+  // Individual email+password login gate (with forgot-password, self-register,
+  // and a shared-password fallback for the bootstrap administrator).
+  function setupLoginGate(onUnlock) {
+    const gate = $("#gate"), appEl = $("#portal-app");
+    const reveal = () => {
+      const s = API.session() || {};
+      applyAccess(s.role, s.admin);
+      gate.hidden = true; appEl.hidden = false;
+      onUnlock(s);
+      const h = appEl.querySelector("h2, h3"); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); }
+    };
+    if (API.getToken()) { reveal(); return; }
+
+    const email = el("input", { type: "email", id: "login-email", class: "up-text", autocomplete: "username", placeholder: "you@company.com", required: "" });
+    const pass = el("input", { type: "password", id: "login-password", class: "up-text", autocomplete: "current-password", placeholder: "Your password", required: "" });
+    const err = el("p", { class: "form-error", role: "alert", "aria-live": "assertive" }, "");
+    const btn = el("button", { class: "btn btn-primary", type: "submit" }, "Sign in");
+    const form = el("form", { novalidate: "" }, [
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Email"), email]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Password"), pass]),
+      el("div", { style: "margin-top:0.6rem" }, btn), err,
+    ]);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault(); err.textContent = ""; btn.disabled = true;
+      try { await API.loginUser(email.value.trim(), pass.value); reveal(); }
+      catch (ex) { err.textContent = ex.message || "Sign in failed."; pass.select(); }
+      finally { btn.disabled = false; }
+    });
+
+    // Shared-password fallback (bootstrap admin / legacy).
+    const sharedPass = el("input", { type: "password", class: "up-text", autocomplete: "off", placeholder: "Shared password" });
+    const sharedErr = el("p", { class: "form-error" }, "");
+    const sharedBtn = el("button", { class: "btn btn-sm", type: "button" }, "Unlock");
+    sharedBtn.addEventListener("click", async () => {
+      sharedErr.textContent = ""; sharedBtn.disabled = true;
+      try { await API.login("rushroom", sharedPass.value); reveal(); }
+      catch (ex) { sharedErr.textContent = ex.message || "Incorrect password."; }
+      finally { sharedBtn.disabled = false; }
+    });
+
+    const card = gate.querySelector(".gate-card");
+    card.replaceChildren(
+      el("h2", { id: "gate-title" }, "Sign in"),
+      el("p", { class: "muted" }, "Sign in with your email and password to view the portal."),
+      form,
+      el("div", { class: "gate-links" }, el("button", { class: "linklike", type: "button", onclick: () => forgotPasswordModal(email.value.trim()) }, "Forgot password?")),
+      el("div", { class: "gate-register" }, [
+        el("p", { class: "muted", style: "margin:0 0 0.5rem; font-size:0.9rem" }, "Don't have access yet?"),
+        el("button", { class: "btn btn-sm", type: "button", onclick: registerModal }, "Register for access"),
+      ]),
+      el("details", { class: "gate-fallback" }, [
+        el("summary", {}, "Administrator? Use the shared password"),
+        el("div", { class: "form-row", style: "margin-top:0.5rem" }, [sharedPass, sharedBtn]),
+        sharedErr,
+      ]),
+    );
+    email.focus();
   }
 
   /* ---------------- expose shared API ---------------- */
@@ -1917,7 +2020,7 @@
 
   /* ---------------- full-portal page init ---------------- */
   function initFullPortal() {
-    if (apiEnabled()) setupApiGate("rushroom", () => renderApi("rushroom", "#readiness-panel"));
+    if (apiEnabled()) setupLoginGate((s) => renderApi(s.role || "rushroom", "#readiness-panel"));
     else setupGate(renderPortal); // read-only fallback
   }
 

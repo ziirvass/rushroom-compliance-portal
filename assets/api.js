@@ -7,7 +7,25 @@
   "use strict";
   const CFG = (window.PORTAL_CONFIG && window.PORTAL_CONFIG.api) || {};
   const URL_ = (CFG.functionUrl || "").replace(/\/+$/, "");
-  const tokenKey = (role) => `rushroom_portal_token_${role}`;
+
+  // A single active session: { token, role, admin, name, urole }. Stored under
+  // one key so an individual email/password login and the shared-role login
+  // share the same plumbing (role is decided by the server, not the page).
+  const SESSION_KEY = "rushroom_portal_session";
+  const LEGACY_KEYS = ["rushroom_portal_token_rushroom", "rushroom_portal_token_supplier"];
+  function saveSession(s) { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* ignore */ } }
+  function getSession() {
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      if (raw) return JSON.parse(raw);
+      // Migrate a legacy per-role token if one is still around.
+      for (const k of LEGACY_KEYS) {
+        const t = sessionStorage.getItem(k);
+        if (t) { const role = k.endsWith("supplier") ? "supplier" : "rushroom"; return { token: t, role, admin: role === "rushroom" }; }
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
 
   async function call(payload) {
     const res = await fetch(URL_, {
@@ -24,24 +42,38 @@
   const API = {
     configured: () => !!URL_,
 
-    getToken: (role) => sessionStorage.getItem(tokenKey(role)) || "",
-    clearToken: (role) => sessionStorage.removeItem(tokenKey(role)),
+    // The role argument is ignored (kept for call-site compatibility) — the
+    // active session's token is returned regardless.
+    getToken: () => { const s = getSession(); return s ? s.token : ""; },
+    clearToken: () => { try { sessionStorage.removeItem(SESSION_KEY); LEGACY_KEYS.forEach((k) => sessionStorage.removeItem(k)); } catch { /* ignore */ } },
+    session: () => getSession(),
+    isAdmin: () => { const s = getSession(); return !!(s && s.admin); },
 
+    // Shared-role login (bootstrap admin + legacy supplier password).
     async login(role, password) {
-      const { token } = await call({ action: "login", role, password });
-      sessionStorage.setItem(tokenKey(role), token);
-      return token;
+      const r = await call({ action: "login", role, password });
+      saveSession({ token: r.token, role: r.role, admin: r.role === "rushroom", name: role });
+      return r.token;
+    },
+    // Individual email + password login. Returns the full session.
+    async loginUser(email, password) {
+      const r = await call({ action: "loginUser", email, password });
+      saveSession({ token: r.token, role: r.role, admin: !!r.admin, name: r.name, urole: r.urole, email });
+      return r;
     },
 
     data: (token) => call({ action: "data", token }),
 
-    // --- user accounts (public register/verify + admin management) ---
+    // --- user accounts (public register/verify/reset + admin management) ---
     registerUser: (fields) => call({ action: "registerUser", ...fields }),
     verifyUser: (verifyToken) => call({ action: "verifyUser", token: verifyToken }),
+    requestPasswordReset: (email) => call({ action: "requestPasswordReset", email }),
+    setPassword: (resetToken, password) => call({ action: "setPassword", token: resetToken, password }),
     adminListUsers: (token) => call({ action: "adminListUsers", token }),
     adminUpdateUser: (token, id, fields) => call({ action: "adminUpdateUser", token, id, ...fields }),
     adminDeleteUser: (token, id) => call({ action: "adminDeleteUser", token, id }),
     adminUserVerifyLink: (token, id) => call({ action: "adminUserVerifyLink", token, id }),
+    adminUserResetLink: (token, id) => call({ action: "adminUserResetLink", token, id }),
 
     setStatus: (token, step, status, supplierLabel) =>
       call({ action: "setStatus", token, step, status, supplierLabel }),

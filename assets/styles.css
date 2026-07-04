@@ -455,6 +455,13 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 
 /* register CTA under the access gate */
 .gate-register { margin-top: 1.25rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+.gate-links { margin-top: 0.6rem; }
+.linklike { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+.linklike:hover { opacity: 0.85; }
+.gate-fallback { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.gate-fallback summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+.gate-fallback .form-row { display: flex; gap: 0.5rem; align-items: center; }
+.gate-card form .form-row { margin-bottom: 0.6rem; }
 
 /* admin account management */
 .acct-card { display: grid; gap: 0.25rem; }
