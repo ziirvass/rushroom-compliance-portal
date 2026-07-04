@@ -243,6 +243,16 @@
       call({ action: "complianceMatrix", token, documentVersionIds, standardVersionIds }),
     exportProductPassport: (token, { passportId, format }) =>
       call({ action: "exportProductPassport", token, passportId, format }),
+    // Product passport management
+    listProductPassports: (token) => call({ action: "listProductPassports", token }),
+    getProductPassport: (token, id) => call({ action: "getProductPassport", token, id }),
+    createProductPassport: (token, fields) => call({ action: "createProductPassport", token, ...fields }),
+    updateProductPassport: (token, id, fields) => call({ action: "updateProductPassport", token, id, ...fields }),
+    deleteProductPassport: (token, id) => call({ action: "deleteProductPassport", token, id }),
+    linkPassportInterpretation: (token, { passportId, interpretationId, relevanceNote }) =>
+      call({ action: "linkPassportInterpretation", token, passportId, interpretationId, relevanceNote }),
+    unlinkPassportInterpretation: (token, { passportId, interpretationId }) =>
+      call({ action: "unlinkPassportInterpretation", token, passportId, interpretationId }),
   };
 
   window.PortalAPI = API;

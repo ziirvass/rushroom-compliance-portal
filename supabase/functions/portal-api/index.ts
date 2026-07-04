@@ -1501,7 +1501,7 @@ Be specific: name the exact document and the exact standard (and clause where po
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured" }, 400);
     const documentVersionId = String(body.documentVersionId ?? "").trim();
-    const clauseIds = Array.isArray(body.clauseIds) ? body.clauseIds.filter((v: unknown) => String(v ?? "").trim()) : [];
+    const clauseIds = (Array.isArray(body.clauseIds) ? body.clauseIds.filter((v: unknown) => String(v ?? "").trim()) : []).slice(0, 60);
     if (!documentVersionId || !clauseIds.length) return json({ error: "documentVersionId and clauseIds required" }, 400);
 
     // Fetch the document version
@@ -1513,50 +1513,70 @@ Be specific: name the exact document and the exact standard (and clause where po
     const { data: clauses } = await db.from("standard_clauses").select("*").in("id", clauseIds);
     if (!clauses || !clauses.length) return json({ error: "No clauses found" }, 404);
 
+    // Send the actual document FILE to Claude (so PDFs work — not just text),
+    // and interpret clauses in BATCHES (one call per ~10 clauses, not per clause).
     const docBlock = await fileBlock(DOC_BUCKET, docVer.storage_path, docVer.file_name || docVer.document?.name || "document");
-    const docContent = typeof docBlock === "object" && "text" in docBlock ? String(docBlock.text || "") : "";
+    const INTERP_SCHEMA = {
+      type: "object", additionalProperties: false,
+      required: ["interpretations"],
+      properties: {
+        interpretations: {
+          type: "array",
+          items: {
+            type: "object", additionalProperties: false,
+            required: ["index", "interpretation_text", "compliance_status", "rationale"],
+            properties: {
+              index: { type: "integer" },
+              interpretation_text: { type: "string" },
+              compliance_status: { type: "string", enum: ["compliant", "deviation", "not_applicable", "pending"] },
+              rationale: { type: "string" },
+            },
+          },
+        },
+      },
+    };
+    const interpSystem = "You are a meticulous EU product-compliance auditor. For each requirement clause, read the attached company operational document and state how the document implements that clause. Base every interpretation strictly on the document — never invent implementation details. If the document does not address a clause, mark it 'pending' (unclear) or 'not_applicable', and say so in the rationale. Echo each clause's [index] exactly.";
 
-    // For each clause, call Claude to generate interpretation
     const results: any[] = [];
-    for (const clause of clauses) {
-      if (!docContent.trim()) {
-        results.push({ clause_id: clause.id, interpretation_text: "", compliance_status: "pending", ai_generated: false });
-        continue;
-      }
-
-      const prompt = `Review this compliance requirement and the company's operational document. Generate a brief interpretation statement showing how the company implements this requirement.\n\nClause ref: ${clause.clause_ref}\nClause text: ${clause.clause_text}\n\n--- Company Document ---\n${docContent.slice(0, 8000)}\n\n--- Generate ---\nProvide a JSON object: { "interpretation_text": "how we implement this", "compliance_status": "compliant|deviation|not_applicable|pending", "rationale": "why" }`;
-
+    const batchSize = 10;
+    for (let i = 0; i < clauses.length; i += batchSize) {
+      const batch = clauses.slice(i, i + batchSize);
+      const list = batch.map((c, j) => `[${j + 1}] Clause ${c.clause_ref}${c.clause_title ? ` — ${c.clause_title}` : ""}\nRequirement: ${String(c.clause_text || "").slice(0, 1500)}`).join("\n\n");
+      const content: any[] = [
+        { type: "text", text: `Interpret how the ATTACHED company operational document implements each of the following ${batch.length} requirement clause(s). Return exactly one interpretation per clause, echoing its [index].\n\n${list}` },
+        docBlock,
+      ];
+      const markPending = () => batch.forEach((c) => results.push({ clause_id: c.id, interpretation_text: "", compliance_status: "pending", rationale: "", ai_generated: false }));
       try {
         const res = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
           body: JSON.stringify({
-            model: SCAN_MODEL, max_tokens: 2000,
-            system: "You are a compliance auditor. Read the requirement and document, then provide a concise interpretation. Be factual.",
-            messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+            model: SCAN_MODEL, max_tokens: 12000,
+            thinking: { type: "adaptive" },
+            output_config: { effort: "low", format: { type: "json_schema", schema: INTERP_SCHEMA } },
+            system: interpSystem,
+            messages: [{ role: "user", content }],
           }),
         });
         const apiJson = await res.json();
-        if (!res.ok) {
-          results.push({ clause_id: clause.id, interpretation_text: "", compliance_status: "pending", ai_generated: false });
-          continue;
-        }
-
+        if (!res.ok || apiJson.stop_reason === "refusal") { markPending(); continue; }
         const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
-        const jsonStr = (textBlock?.text || "").match(/\{[\s\S]*\}/) ?.[0] || "{}";
-        const parsed = JSON.parse(jsonStr);
-
-        results.push({
-          clause_id: clause.id,
-          interpretation_text: String(parsed.interpretation_text ?? "").slice(0, 4000),
-          compliance_status: ["compliant", "deviation", "not_applicable", "pending"].includes(String(parsed.compliance_status))
-            ? parsed.compliance_status : "pending",
-          rationale: String(parsed.rationale ?? "").slice(0, 2000),
-          ai_generated: true,
+        const parsed = JSON.parse(textBlock?.text || "{}");
+        const arr: any[] = Array.isArray(parsed.interpretations) ? parsed.interpretations : [];
+        const byIdx = new Map(arr.map((o) => [Number(o.index), o]));
+        batch.forEach((c, j) => {
+          const o = byIdx.get(j + 1) || {};
+          const text = String(o.interpretation_text ?? "").slice(0, 4000);
+          results.push({
+            clause_id: c.id,
+            interpretation_text: text,
+            compliance_status: ["compliant", "deviation", "not_applicable", "pending"].includes(String(o.compliance_status)) ? o.compliance_status : "pending",
+            rationale: String(o.rationale ?? "").slice(0, 2000),
+            ai_generated: !!text,
+          });
         });
-      } catch {
-        results.push({ clause_id: clause.id, interpretation_text: "", compliance_status: "pending", ai_generated: false });
-      }
+      } catch { markPending(); }
     }
 
     // Insert interpretations (skip duplicates)
@@ -1569,8 +1589,10 @@ Be specific: name the exact document and the exact standard (and clause where po
       ai_generated: r.ai_generated,
     }));
 
+    // Insert new interpretations, ignoring any that already exist for the same
+    // (clause, document version) pair — the table has a unique constraint on it.
     const { data: inserted, error: insertErr } = await db.from("as_operates_interpretations")
-      .insert(toInsert).select("id").on("conflict", { ignoreDuplicates: true });
+      .upsert(toInsert, { onConflict: "clause_id,document_version_id", ignoreDuplicates: true }).select("id");
     if (insertErr && insertErr.code !== "23505") {
       return json({ error: `Insert error: ${insertErr.message}` }, 500);
     }
@@ -1609,6 +1631,7 @@ Be specific: name the exact document and the exact standard (and clause where po
   }
 
   if (action === "getInterpretations") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const documentVersionId = String(body.documentVersionId ?? "").trim();
     if (!documentVersionId) return json({ error: "documentVersionId required" }, 400);
 
@@ -1625,17 +1648,19 @@ Be specific: name the exact document and the exact standard (and clause where po
   }
 
   if (action === "getClausesForStandard") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const standardVersionId = String(body.standardVersionId ?? "").trim();
     if (!standardVersionId) return json({ error: "standardVersionId required" }, 400);
 
     const { data: clauses, error } = await db.from("standard_clauses")
-      .select("*").eq("standard_version_id", standardVersionId).order("sort_order,clause_ref");
+      .select("*").eq("standard_version_id", standardVersionId).order("sort_order").order("clause_ref");
 
     if (error) return json({ error: error.message }, 500);
     return json({ clauses: clauses ?? [] });
   }
 
   if (action === "complianceMatrix") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     // Returns: [document_version rows] × [clause rows] with interpretation status cells
     const documentVersionIds = Array.isArray(body.documentVersionIds) ? body.documentVersionIds.filter((v: unknown) => String(v ?? "").trim()) : [];
     const standardVersionIds = Array.isArray(body.standardVersionIds) ? body.standardVersionIds.filter((v: unknown) => String(v ?? "").trim()) : [];
@@ -1658,7 +1683,7 @@ Be specific: name the exact document and the exact standard (and clause where po
     } else {
       clausesQ = clausesQ.limit(100); // default limit
     }
-    const { data: clauses } = await clausesQ.order("sort_order,clause_ref");
+    const { data: clauses } = await clausesQ.order("sort_order").order("clause_ref");
 
     const docIds = (docs ?? []).map((d) => d.id);
     const clauseIds = (clauses ?? []).map((c) => c.id);
@@ -1787,6 +1812,96 @@ Be specific: name the exact document and the exact standard (and clause where po
         };
       }) : "No interpretations linked",
     });
+  }
+
+  // --- Product passports: management (Rushroom only) ----------------------
+  if (action === "listProductPassports") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const { data, error } = await db.from("product_passports").select("*").order("created_at", { ascending: false });
+    if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The Level 2 tables aren't set up yet — run the account/Level-2 SQL first." : error.message }, 500);
+    // Attach a link count so the list can show how many interpretations each carries.
+    const ids = (data ?? []).map((p) => p.id);
+    const counts: Record<string, number> = {};
+    if (ids.length) {
+      const { data: links } = await db.from("passport_interpretation_links").select("passport_id").in("passport_id", ids);
+      for (const l of links ?? []) counts[l.passport_id] = (counts[l.passport_id] || 0) + 1;
+    }
+    return json({ passports: (data ?? []).map((p) => ({ ...p, link_count: counts[p.id] || 0 })) });
+  }
+  if (action === "getProductPassport") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const id = String(body.id ?? "").trim();
+    if (!id) return json({ error: "id required" }, 400);
+    const { data: passport } = await db.from("product_passports").select("*").eq("id", id).maybeSingle();
+    if (!passport) return json({ error: "Passport not found" }, 404);
+    const { data: links } = await db.from("passport_interpretation_links")
+      .select("id, relevance_note, interpretation:interpretation_id(id, compliance_status, interpretation_text, document_version_id, clause:clause_id(clause_ref, clause_title, standard:standard_version_id(standard:standard_id(code,title))))")
+      .eq("passport_id", id);
+    return json({ passport, links: links ?? [] });
+  }
+  if (action === "createProductPassport") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const product_name = String(body.productName ?? "").trim();
+    if (!product_name) return json({ error: "productName required" }, 400);
+    const row: Record<string, unknown> = {
+      product_name: product_name.slice(0, 300),
+      product_model: String(body.productModel ?? "").slice(0, 200),
+      manufacturer: (String(body.manufacturer ?? "").trim() || "Rushroom AB").slice(0, 200),
+      gtin: String(body.gtin ?? "").slice(0, 60),
+      declaration_of_conformity_ref: String(body.declarationOfConformityRef ?? "").slice(0, 300),
+    };
+    const { data, error } = await db.from("product_passports").insert(row).select("id").maybeSingle();
+    if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The Level 2 tables aren't set up yet — run the SQL first." : error.message }, 500);
+    return json({ ok: true, id: data?.id });
+  }
+  if (action === "updateProductPassport") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const id = String(body.id ?? "").trim();
+    if (!id) return json({ error: "id required" }, 400);
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (body.productName !== undefined) patch.product_name = String(body.productName).slice(0, 300);
+    if (body.productModel !== undefined) patch.product_model = String(body.productModel).slice(0, 200);
+    if (body.manufacturer !== undefined) patch.manufacturer = String(body.manufacturer).slice(0, 200);
+    if (body.gtin !== undefined) patch.gtin = String(body.gtin).slice(0, 60);
+    if (body.declarationOfConformityRef !== undefined) patch.declaration_of_conformity_ref = String(body.declarationOfConformityRef).slice(0, 300);
+    if (body.passportStatus !== undefined) {
+      if (!["draft", "active", "superseded"].includes(String(body.passportStatus))) return json({ error: "Invalid passportStatus" }, 400);
+      patch.passport_status = String(body.passportStatus);
+    }
+    if (body.validFrom !== undefined) patch.valid_from = String(body.validFrom).slice(0, 40) || null;
+    if (body.validTo !== undefined) patch.valid_to = String(body.validTo).slice(0, 40) || null;
+    if (body.sustainabilityData !== undefined && typeof body.sustainabilityData === "object") patch.sustainability_data = body.sustainabilityData;
+    if (body.applicableStandards !== undefined && Array.isArray(body.applicableStandards)) patch.applicable_standards = body.applicableStandards;
+    const { error } = await db.from("product_passports").update(patch).eq("id", id);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+  if (action === "deleteProductPassport") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const id = String(body.id ?? "").trim();
+    if (!id) return json({ error: "id required" }, 400);
+    const { error } = await db.from("product_passports").delete().eq("id", id);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+  if (action === "linkPassportInterpretation") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const passport_id = String(body.passportId ?? "").trim();
+    const interpretation_id = String(body.interpretationId ?? "").trim();
+    if (!passport_id || !interpretation_id) return json({ error: "passportId and interpretationId required" }, 400);
+    const { error } = await db.from("passport_interpretation_links")
+      .upsert({ passport_id, interpretation_id, relevance_note: String(body.relevanceNote ?? "").slice(0, 500) }, { onConflict: "passport_id,interpretation_id", ignoreDuplicates: true });
+    if (error && error.code !== "23505") return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+  if (action === "unlinkPassportInterpretation") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const passport_id = String(body.passportId ?? "").trim();
+    const interpretation_id = String(body.interpretationId ?? "").trim();
+    if (!passport_id || !interpretation_id) return json({ error: "passportId and interpretationId required" }, 400);
+    const { error } = await db.from("passport_interpretation_links").delete().eq("passport_id", passport_id).eq("interpretation_id", interpretation_id);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
   }
 
   return json({ error: `Unknown action: ${action}` }, 400);
