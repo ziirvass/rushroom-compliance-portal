@@ -17,3 +17,6 @@ node_modules/
 # Supabase CLI local state
 supabase/.temp/
 supabase/.branches/
+
+# Stray Google service-account key dir (unused, must never be committed)
+Compliance Portal/
