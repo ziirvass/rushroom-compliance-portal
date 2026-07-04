@@ -706,3 +706,9 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .l2-passport { margin-bottom: 0.7rem; }
 .l2-link-row { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
 .l2-links select { width: 100%; margin-top: 0.2rem; }
+
+/* deviation finding source badge (structured vs AI) */
+.finding-title { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.finding-src { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.02em; padding: 0.12rem 0.4rem; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+.finding-src-structured { color: #37b26b; border-color: rgba(55,178,107,0.45); background: rgba(55,178,107,0.12); }
+.finding-src-ai { color: #a06be0; border-color: rgba(160,107,224,0.45); background: rgba(160,107,224,0.12); }

@@ -1741,7 +1741,7 @@
     const head = el("div", { class: "card upload-card" }, [
       el("h3", {}, "AI deviation monitoring"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" },
-        "Uses the Claude API to compare every document in the library against the standards register and lists deviations by severity. Uploads and scans are manual — a human decides when to run it."),
+        "Checks reviewed clause interpretations first (instant, no AI), then uses the Claude API only for documents that have no interpretations yet. Lists deviations by severity; scans are manual."),
       el("div", {}, runBtn),
       statusEl,
       scan ? el("div", { class: "scan-meta muted" }, `Last scan: ${fmtDateTime(scan.created_at)} · ${scan.model || ""} · ${scan.docs_scanned} documents vs ${scan.standards_scanned} standards`) : null,
@@ -1766,7 +1766,11 @@
           const group = el("div", { class: "sev-group" }, el("h3", { class: `sev-head sev-${sev.toLowerCase()}` }, `${sev} (${items.length})`));
           for (const f of items) {
             group.appendChild(el("div", { class: `finding sev-border-${sev.toLowerCase()}` }, [
-              el("div", { class: "finding-title" }, f.title || "(untitled)"),
+              el("div", { class: "finding-title" }, [
+                el("span", {}, f.title || "(untitled)"),
+                el("span", { class: `finding-src finding-src-${f.source === "structured" ? "structured" : "ai"}`, title: f.source === "structured" ? "From a reviewed clause interpretation (no AI)" : "Inferred by the AI scan" },
+                  f.source === "structured" ? "⚙ structured" : "✨ AI"),
+              ]),
               (f.document || f.standard) ? el("div", { class: "finding-refs muted" },
                 `${f.document ? `Document: ${f.document}` : ""}${f.document && f.standard ? "   ·   " : ""}${f.standard ? `Standard: ${f.standard}` : ""}`) : null,
               f.description ? el("div", { class: "finding-desc" }, f.description) : null,

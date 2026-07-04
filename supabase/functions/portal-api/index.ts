@@ -1166,35 +1166,85 @@ Deno.serve(async (req) => {
 
   if (action === "runDeviationScan") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY in the function secrets." }, 400);
 
-    // Standards: latest version of each.
+    // Operational ("Company as Operates") documents are the evidence being audited.
+    const { data: docs } = await db.from("documents").select("id,name,storage_path").eq("kind", "operational").neq("storage_path", "");
+    const storedDocs = (docs ?? []).filter((d) => d.storage_path);
+
+    // ---- Phase A: structured findings from clause-level interpretations ----
+    // Instant, no LLM. A document with any interpretations is "covered" and is
+    // NOT sent to the AI — its deviations/pending items come from here instead.
+    const { data: interps } = await db.from("as_operates_interpretations").select(
+      "compliance_status, interpretation_text, rationale, deviation_description, deviation_accepted_by, document_version_id, clause:clause_id(clause_ref, clause_title, standard:standard_version_id(standard:standard_id(code,title)))",
+    );
+    const interpList = interps ?? [];
+    const docNameByVersion: Record<string, string> = {};
+    const coveredDocIds = new Set<string>();
+    const interpVersionIds = [...new Set(interpList.map((i) => i.document_version_id))];
+    if (interpVersionIds.length) {
+      const { data: vers } = await db.from("document_versions").select("id, file_name, document_id, document:document_id(name, kind)").in("id", interpVersionIds);
+      for (const v of vers ?? []) {
+        docNameByVersion[v.id] = (v as any).document?.name || v.file_name || "document";
+        if (((v as any).document?.kind || "template") === "operational") coveredDocIds.add(v.document_id);
+      }
+    }
+    const sevForInterp = (i: any): string | null => {
+      if (i.compliance_status === "deviation") return i.deviation_accepted_by ? "Info" : "High";
+      if (i.compliance_status === "pending") return "Medium";
+      return null; // compliant / not_applicable → no finding
+    };
+    const structuredFindings = interpList.map((i: any) => {
+      const sev = sevForInterp(i);
+      if (!sev) return null;
+      const c = i.clause || {};
+      const stdCode = c.standard?.standard?.code || "";
+      const isDev = i.compliance_status === "deviation";
+      return {
+        severity: sev,
+        title: (isDev ? `Deviation on clause ${c.clause_ref || "?"}${i.deviation_accepted_by ? " (accepted)" : ""}` : `Interpretation pending review — clause ${c.clause_ref || "?"}`).slice(0, 300),
+        description: String(i.deviation_description || i.interpretation_text || i.rationale || "").slice(0, 4000),
+        document: String(docNameByVersion[i.document_version_id] || "document").slice(0, 300),
+        standard: `${stdCode}${c.clause_ref ? " " + c.clause_ref : ""}`.trim().slice(0, 300),
+        recommendation: (isDev ? (i.deviation_accepted_by ? `Accepted by ${i.deviation_accepted_by} — keep documented.` : "Close this deviation, or document an accepted-deviation rationale and approver.") : "Review this clause and set a compliance status.").slice(0, 2000),
+        source: "structured",
+      };
+    }).filter(Boolean) as any[];
+
+    // ---- Phase B: AI fallback for operational docs WITHOUT interpretations ----
+    const uncoveredDocs = storedDocs.filter((d) => !coveredDocIds.has(d.id));
+    // Latest uploaded version of each standard (needed for the AI comparison).
     const { data: stds } = await db.from("standards").select("id,code,title,category").order("code");
     const standards: any[] = [];
     for (const s of stds ?? []) {
       const { data: v } = await db.from("standard_versions").select("*").eq("standard_id", s.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (v?.storage_path) standards.push({ ...s, version: v.version, storage_path: v.storage_path, file_name: v.file_name });
     }
-    // Only the operational ("Company as Operates") documents are audited — the
-    // templates/requirements are the inputs, not the evidence being checked.
-    const { data: docs } = await db.from("documents").select("name,storage_path").eq("kind", "operational").neq("storage_path", "");
-    const storedDocs = (docs ?? []).filter((d) => d.storage_path);
-    if (!standards.length) return json({ error: "No standards with an uploaded version yet — add standards and upload files first." }, 400);
-    if (!storedDocs.length) return json({ error: "No operational documents to check — mark documents as “Company as Operates” in the Document library first." }, 400);
+    const willRunAI = uncoveredDocs.length > 0 && standards.length > 0;
 
-    const content: any[] = [{ type: "text", text: "=== STANDARDS & REGULATIONS (the requirements) ===" }];
-    for (const s of standards) {
-      content.push({ type: "text", text: `\n--- STANDARD: ${s.code}${s.title ? ` — ${s.title}` : ""}${s.category ? ` [${s.category}]` : ""} (version ${s.version || "?"}) ---` });
-      content.push(await fileBlock(STD_BUCKET, s.storage_path, s.file_name));
+    // Guardrails: only bail when there is genuinely nothing to do.
+    if (!storedDocs.length && !interpList.length) return json({ error: "No operational documents to check — mark documents as “Company as Operates” in the Document library first." }, 400);
+    if (!structuredFindings.length && coveredDocIds.size === 0 && !willRunAI) {
+      if (!standards.length) return json({ error: "No standards with an uploaded version yet — add standards and upload files first." }, 400);
+      return json({ error: "Nothing to scan — add clause interpretations or operational documents first." }, 400);
     }
-    content.push({ type: "text", text: "\n\n=== COMPLIANCE DOCUMENTS (what Rushroom has produced) ===" });
-    for (const d of storedDocs) {
-      content.push({ type: "text", text: `\n--- DOCUMENT: ${d.name} ---` });
-      content.push(await fileBlock(DOC_BUCKET, d.storage_path, d.storage_path));
-    }
-    content.push({ type: "text", text: "\nAnalyse the compliance DOCUMENTS against the STANDARDS & REGULATIONS above. Report deviations, gaps, missing evidence, outdated references, and unmet requirements. Only report genuine issues grounded in the supplied material; do not invent requirements that were not provided." });
+    if (willRunAI && !ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY in the function secrets (or add interpretations so the scan can run structured-only)." }, 400);
 
-    const system = `You are a meticulous EU product-compliance auditor for Rushroom AB (LED system-furniture). Compare the company's compliance DOCUMENTS against the provided STANDARDS & REGULATIONS and surface where the documents deviate from, or fall short of, the standards.
+    let aiFindings: any[] = [];
+    let aiModel = ""; let aiSummary = ""; let aiNote = "";
+    if (willRunAI) {
+      const content: any[] = [{ type: "text", text: "=== STANDARDS & REGULATIONS (the requirements) ===" }];
+      for (const s of standards) {
+        content.push({ type: "text", text: `\n--- STANDARD: ${s.code}${s.title ? ` — ${s.title}` : ""}${s.category ? ` [${s.category}]` : ""} (version ${s.version || "?"}) ---` });
+        content.push(await fileBlock(STD_BUCKET, s.storage_path, s.file_name));
+      }
+      content.push({ type: "text", text: "\n\n=== COMPLIANCE DOCUMENTS (what Rushroom has produced) ===" });
+      for (const d of uncoveredDocs) {
+        content.push({ type: "text", text: `\n--- DOCUMENT: ${d.name} ---` });
+        content.push(await fileBlock(DOC_BUCKET, d.storage_path, d.storage_path));
+      }
+      content.push({ type: "text", text: "\nAnalyse the compliance DOCUMENTS against the STANDARDS & REGULATIONS above. Report deviations, gaps, missing evidence, outdated references, and unmet requirements. Only report genuine issues grounded in the supplied material; do not invent requirements that were not provided." });
+
+      const system = `You are a meticulous EU product-compliance auditor for Rushroom AB (LED system-furniture). Compare the company's compliance DOCUMENTS against the provided STANDARDS & REGULATIONS and surface where the documents deviate from, or fall short of, the standards.
 
 Assign each finding a severity:
 - Critical: a legal blocker to selling or CE-marking (missing Declaration of Conformity, an unmet mandatory requirement, a safety/EMC/energy non-conformity).
@@ -1205,56 +1255,62 @@ Assign each finding a severity:
 
 Be specific: name the exact document and the exact standard (and clause where possible) each finding relates to, and give a concrete recommendation. If everything aligns, return an empty findings array and say so in the summary.`;
 
-    let apiJson: any;
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-        body: JSON.stringify({
-          model: SCAN_MODEL,
-          max_tokens: 16000,
-          thinking: { type: "adaptive" },
-          output_config: { effort: "medium", format: { type: "json_schema", schema: FINDINGS_SCHEMA } },
-          system,
-          messages: [{ role: "user", content }],
-        }),
-      });
-      apiJson = await res.json();
-      if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
-    } catch (e) {
-      return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
+      try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+          body: JSON.stringify({
+            model: SCAN_MODEL, max_tokens: 16000, thinking: { type: "adaptive" },
+            output_config: { effort: "medium", format: { type: "json_schema", schema: FINDINGS_SCHEMA } },
+            system, messages: [{ role: "user", content }],
+          }),
+        });
+        const apiJson = await res.json();
+        if (!res.ok) throw new Error(`Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}`);
+        if (apiJson.stop_reason === "refusal") throw new Error("the AI declined to complete the analysis (refusal)");
+        const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
+        const parsed = JSON.parse(textBlock?.text || "{}");
+        aiFindings = (Array.isArray(parsed.findings) ? parsed.findings : []).map((f: any) => ({
+          severity: SEVERITIES.includes(f.severity) ? f.severity : "Info",
+          title: String(f.title || "").slice(0, 300),
+          description: String(f.description || "").slice(0, 4000),
+          document: String(f.document || "").slice(0, 300),
+          standard: String(f.standard || "").slice(0, 300),
+          recommendation: String(f.recommendation || "").slice(0, 2000),
+          source: "ai_inference",
+        }));
+        aiModel = apiJson.model || SCAN_MODEL;
+        aiSummary = String(parsed.summary || "");
+      } catch (e) {
+        // AI failure is non-fatal when we still have structured findings.
+        if (!structuredFindings.length && !coveredDocIds.size) return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
+        aiNote = ` (AI analysis of ${uncoveredDocs.length} uncovered document(s) failed: ${(e as Error).message})`;
+      }
     }
-    if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to complete the analysis (refusal)." }, 502);
-    const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
-    let parsed: any;
-    try { parsed = JSON.parse(textBlock?.text || "{}"); }
-    catch { return json({ error: "The AI response could not be parsed (it may have been truncated). Try again." }, 502); }
 
-    const findings = Array.isArray(parsed.findings) ? parsed.findings : [];
+    // ---- Combine, count, persist ----
+    const allFindings = [...structuredFindings, ...aiFindings];
     const counts: Record<string, number> = {};
-    for (const f of findings) counts[f.severity] = (counts[f.severity] || 0) + 1;
+    for (const f of allFindings) counts[f.severity] = (counts[f.severity] || 0) + 1;
+
+    const summaryParts: string[] = [];
+    if (coveredDocIds.size) summaryParts.push(`${coveredDocIds.size} document(s) checked via structured interpretations — ${structuredFindings.length} finding(s), no AI needed.`);
+    if (willRunAI && !aiNote) summaryParts.push(aiSummary || `${uncoveredDocs.length} document(s) analysed with AI.`);
+    if (aiNote) summaryParts.push(aiNote.trim());
+    if (!summaryParts.length) summaryParts.push(allFindings.length ? `${allFindings.length} finding(s).` : "No issues found.");
 
     const { data: scan, error: scanErr } = await db.from("deviation_scans").insert({
-      model: apiJson.model || SCAN_MODEL, status: "ok", summary: String(parsed.summary || "").slice(0, 4000),
-      counts, docs_scanned: storedDocs.length, standards_scanned: standards.length,
+      model: aiModel || "structured", status: "ok", summary: summaryParts.join(" ").slice(0, 4000),
+      counts, docs_scanned: coveredDocIds.size + (willRunAI && !aiNote ? uncoveredDocs.length : 0), standards_scanned: standards.length,
     }).select("*").maybeSingle();
     if (scanErr || !scan) return json({ error: `Could not save scan: ${scanErr?.message}` }, 500);
 
-    if (findings.length) {
-      const rows = findings.slice(0, 200).map((f: any) => ({
-        scan_id: scan.id,
-        severity: SEVERITIES.includes(f.severity) ? f.severity : "Info",
-        title: String(f.title || "").slice(0, 300),
-        description: String(f.description || "").slice(0, 4000),
-        document: String(f.document || "").slice(0, 300),
-        standard: String(f.standard || "").slice(0, 300),
-        recommendation: String(f.recommendation || "").slice(0, 2000),
-        source: "ai_inference",
-      }));
+    if (allFindings.length) {
+      const rows = allFindings.slice(0, 300).map((f: any) => ({ scan_id: scan.id, ...f }));
       const { error: fErr } = await db.from("deviation_findings").insert(rows);
       if (fErr) return json({ error: `Could not save findings: ${fErr.message}` }, 500);
     }
-    return json({ ok: true, scan, findings });
+    return json({ ok: true, scan, findings: allFindings, structuredCount: structuredFindings.length, aiCount: aiFindings.length });
   }
 
   if (action === "deleteUpload") {
