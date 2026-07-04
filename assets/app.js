@@ -465,6 +465,7 @@
           items.push(item);
           const row = el("button", { class: "browser-row", type: "button", "data-id": item.id, title: item.name, "data-search": `${item.name} ${item.sub || ""} ${item.keywords || ""}`.toLowerCase() }, [
             el("span", { class: "browser-row-name" }, item.name),
+            item.ftypeHint ? fileTypeChip(item.ftypeHint) : null,
             item.sub ? el("span", { class: "browser-row-sub muted" }, item.sub) : null,
           ].filter(Boolean));
           rowById.set(item.id, row);
@@ -504,6 +505,21 @@
   const withDownload = (url, name) => (url ? `${url}${url.includes("?") ? "&" : "?"}download=${encodeURIComponent(name || "document")}` : url);
   function openHrefFor(url, name, hintPath) {
     return extOf(hintPath || name) === "pdf" ? url : withDownload(url, name); // PDF → inline; else → download
+  }
+  // A small file-type badge (PDF, DOCX, XLSX…) shown wherever files are listed,
+  // so the user can see at a glance how a file opens before clicking. Colour
+  // groups related formats; returns null when the type can't be determined.
+  const FTYPE_CAT = { pdf: "pdf", doc: "doc", docx: "doc", rtf: "doc", odt: "doc", md: "text", txt: "text", csv: "sheet", xls: "sheet", xlsx: "sheet", ods: "sheet", ppt: "slide", pptx: "slide", png: "img", jpg: "img", jpeg: "img", gif: "img", webp: "img", svg: "img", heic: "img", zip: "zip" };
+  function fileTypeOf(nameOrPath) {
+    const base = String(nameOrPath || "").split("?")[0].split("#")[0].split("/").pop();
+    if (!base || !base.includes(".")) return "";
+    const ext = base.split(".").pop().toLowerCase();
+    return ext && ext.length <= 5 ? ext : "";
+  }
+  function fileTypeChip(nameOrPath) {
+    const ext = fileTypeOf(nameOrPath);
+    if (!ext) return null;
+    return el("span", { class: `ftype ftype-${FTYPE_CAT[ext] || "other"}`, title: `${ext.toUpperCase()} file` }, ext.toUpperCase());
   }
   // Consistent inline SVG icons (feather-style, stroke = currentColor).
   const svg = (inner) => `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
@@ -590,6 +606,7 @@
       const currentRow = current
         ? el("div", { class: "std-current" }, [
             el("span", { class: "std-vlabel" }, `Current: v${versions.length}`),
+            fileTypeChip(current.file_name || current.storage_path || d.name),
             el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
             versionFileActions(current.open_url, current.file_name || d.name, current.storage_path || d.storage_path, () => openViewer({ ...d, open_url: current.open_url, storage_path: current.storage_path || d.storage_path })),
           ])
@@ -608,6 +625,7 @@
               return el("li", {}, [
                 el("div", {}, [
                   el("span", { class: "std-vlabel" }, `v${versions.length - vi}`),
+                  fileTypeChip(v.file_name || v.storage_path || d.name),
                   el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
                   versionFileActions(v.open_url, v.file_name || d.name, v.storage_path || d.storage_path, () => openViewer({ ...d, open_url: v.open_url, storage_path: v.storage_path || d.storage_path, name: v.file_name || d.name })),
                 ]),
@@ -631,7 +649,7 @@
         viewAction,
       ].filter(Boolean);
       return el("div", { class: "doc doc-op" }, [
-        el("div", {}, [el("div", { class: "name" }, d.name), el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`)]),
+        el("div", {}, [el("div", { class: "name" }, [el("span", {}, d.name), fileTypeChip((current && (current.file_name || current.storage_path)) || d.storage_path || d.url || d.name)]), el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`)]),
         currentRow,
         history,
         el("div", { class: "doc-actions" }, actions),
@@ -649,6 +667,7 @@
         items: list.map((d) => ({
           id: d.id || d.name,
           name: d.name,
+          ftypeHint: (d.versions && d.versions[0] && d.versions[0].file_name) || d.storage_path || d.url || d.name,
           sub: `${(d.versions || []).length} version${(d.versions || []).length === 1 ? "" : "s"}`,
           keywords: `${d.category || ""} ${(d.audience || []).join(" ")}`,
           data: d,
@@ -1446,6 +1465,7 @@
           canView
             ? el("button", { class: "linklike", type: "button", onclick: () => window.PortalViewer.open({ name: u.file_name, open_url: u.download_url, storage_path: u.file_name }) }, u.file_name)
             : (u.download_url ? el("a", { href: u.download_url, target: "_blank", rel: "noopener" }, u.file_name) : el("span", {}, u.file_name)),
+          fileTypeChip(u.file_name),
           el("span", { class: "muted" }, ` — ${u.supplier_label || u.uploaded_role}${u.step ? ` · step #${u.step}` : ""}${u.note ? ` · ${u.note}` : ""}`),
           canView ? el("span", { class: "muted" }, [" · ", el("a", { href: u.download_url, target: "_blank", rel: "noopener" }, "download")]) : null,
           u.id ? el("span", {}, [" · ", el("button", { class: "linklike std-del", type: "button", onclick: () => onDelete(u) }, "delete")]) : null,
@@ -1590,6 +1610,7 @@
     const currentEl = current
       ? el("div", { class: "std-current" }, [
           el("span", { class: "std-vlabel" }, `Current: v${versions.length}`),
+          fileTypeChip(current.file_name || current.storage_path),
           current.version ? el("span", { class: "muted" }, ` · ${current.version}`) : null,
           current.effective_date ? el("span", { class: "muted" }, ` · effective ${current.effective_date}`) : null,
           el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
@@ -1605,6 +1626,7 @@
           el("ul", { class: "std-versions" }, versions.map((v, vi) => el("li", {}, [
             el("div", {}, [
               el("span", { class: "std-vlabel" }, `v${versions.length - vi}`),
+              fileTypeChip(v.file_name || v.storage_path),
               v.version ? el("span", { class: "muted" }, ` · ${v.version}`) : null,
               v.effective_date ? el("span", { class: "muted" }, ` · effective ${v.effective_date}`) : null,
               el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
@@ -1637,6 +1659,7 @@
         items: list.map((s) => ({
           id: s.id,
           name: s.code || s.title || "Standard",
+          ftypeHint: (s.versions && s.versions[0] && (s.versions[0].file_name || s.versions[0].storage_path)) || "",
           sub: s.title && s.code ? s.title : `${(s.versions || []).length} version${(s.versions || []).length === 1 ? "" : "s"}`,
           keywords: `${s.code || ""} ${s.title || ""} ${s.category || ""}`,
           data: s,

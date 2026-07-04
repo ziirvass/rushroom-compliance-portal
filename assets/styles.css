@@ -469,6 +469,26 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .gate-fallback .form-row { display: flex; gap: 0.5rem; align-items: center; }
 .gate-card form .form-row { margin-bottom: 0.6rem; }
 
+/* File-type badges — shown wherever files/documents are listed so the user can
+   see the format (and how it'll open) at a glance. */
+.ftype {
+  display: inline-flex; align-items: center; vertical-align: middle;
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.03em; line-height: 1;
+  padding: 0.16rem 0.36rem; border-radius: 5px; margin: 0 0.15rem; white-space: nowrap;
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+}
+.ftype-pdf   { color: #e5544b; border-color: rgba(229,84,75,0.45);  background: rgba(229,84,75,0.12); }
+.ftype-doc   { color: #4b83e5; border-color: rgba(75,131,229,0.45); background: rgba(75,131,229,0.12); }
+.ftype-sheet { color: #37b26b; border-color: rgba(55,178,107,0.45); background: rgba(55,178,107,0.12); }
+.ftype-slide { color: #e58b3b; border-color: rgba(229,139,59,0.45); background: rgba(229,139,59,0.12); }
+.ftype-img   { color: #a06be0; border-color: rgba(160,107,224,0.45); background: rgba(160,107,224,0.12); }
+.ftype-zip   { color: #d1a33a; border-color: rgba(209,163,58,0.45); background: rgba(209,163,58,0.12); }
+/* In the left-hand file list, pin the badge to the row's right edge. */
+.browser-row { position: relative; }
+.browser-row .browser-row-name { padding-right: 3.1rem; }
+.browser-row .ftype { position: absolute; top: 0.5rem; right: 0.5rem; margin: 0; }
+.browser-row.active .ftype { background: rgba(0,0,0,0.22); border-color: rgba(0,0,0,0.18); color: var(--accent-ink); }
+
 /* admin account management */
 .acct-card { display: grid; gap: 0.25rem; }
 .acct-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.8rem; flex-wrap: wrap; }
