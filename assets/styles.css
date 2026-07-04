@@ -96,8 +96,8 @@ main {
 }
 /* Plain buttons pick up the same green-accent hover as the View/Open chips.
    Primary (already accent-filled) and danger (red) variants keep their own. */
-.btn:not(.btn-primary):not(.doc-del):not(:disabled):hover,
-.btn:not(.btn-primary):not(.doc-del):not(:disabled):focus-visible {
+.btn:not(.btn-primary):not(.doc-del):not(.btn-admin-link):not(:disabled):hover,
+.btn:not(.btn-primary):not(.doc-del):not(.btn-admin-link):not(:disabled):focus-visible {
   background: var(--panel); border-color: var(--accent); color: var(--accent); outline: none;
 }
 .btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
@@ -727,3 +727,8 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .gate-fallback summary::marker { color: var(--red); }
 /* red "super admin" badge shown in the toolbar when signed in via shared password */
 .superadmin-badge { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--red); background: var(--red-bg); border: 1px solid var(--red-bd); border-radius: 999px; padding: 0.14rem 0.55rem; }
+
+/* Header session cluster (badge · admin Supplier-view link · Sign out) */
+.session-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.btn-admin-link { color: var(--red); border-color: var(--red-bd); }
+.btn-admin-link:hover, .btn-admin-link:focus-visible { color: var(--red); border-color: var(--red); background: var(--red-bg); }

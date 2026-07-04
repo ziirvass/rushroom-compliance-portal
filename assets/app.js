@@ -2316,11 +2316,6 @@
         role === "rushroom" ? actionBtn("Add step", "plus", { primary: true, onClick: () => saveStep(null) }) : null,
         actionBtn("Print / Save PDF", "printer", { onClick: () => window.print() }),
         el("span", { class: "spacer" }),
-        (API.session() && API.session().admin)
-          ? el("span", { class: "superadmin-badge", title: (API.session().urole ? "Signed in as an administrator" : "Signed in with the shared super-admin password") },
-              API.session().urole ? "● Admin" : "● Super admin")
-          : null,
-        actionBtn("Sign out", "external", { onClick: () => { API.clearToken(); location.reload(); } }),
         el("span", { class: "updated" }, `Live · ${(API.session() && (API.session().name || API.session().urole)) || role} · ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
       const frag = el("div", {}, [
@@ -2380,6 +2375,23 @@
     gate("tab-accounts", "accounts-panel", !!admin);
   }
 
+  // Header session cluster: an admin/super-admin badge, the (admin-only)
+  // Supplier-view link, and Sign out — grouped so they read as one identity.
+  function renderSessionActions() {
+    const nav = $("#session-actions");
+    if (!nav) return;
+    const s = API.session();
+    if (!s) { nav.replaceChildren(); return; }
+    const kids = [];
+    if (s.admin) {
+      kids.push(el("span", { class: "superadmin-badge", title: s.urole ? "Signed in as an administrator" : "Signed in with the shared super-admin password" }, s.urole ? "● Admin" : "● Super admin"));
+      // Supplier view is an admin/super-admin capability (preview the supplier portal).
+      kids.push(el("a", { class: "btn btn-sm btn-admin-link", href: "./supplier.html", title: "Open the supplier portal (admin)" }, "Supplier view →"));
+    }
+    kids.push(el("button", { class: "btn btn-sm", type: "button", onclick: () => { API.clearToken(); location.reload(); } }, "Sign out"));
+    nav.replaceChildren(...kids);
+  }
+
   // Individual email+password login gate (with forgot-password, self-register,
   // and a shared-password fallback for the bootstrap administrator).
   function setupLoginGate(onUnlock) {
@@ -2388,6 +2400,7 @@
       const s = API.session() || {};
       applyAccess(s.role, s.admin);
       gate.hidden = true; appEl.hidden = false;
+      renderSessionActions();
       onUnlock(s);
       const h = appEl.querySelector("h2, h3"); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); }
     };
