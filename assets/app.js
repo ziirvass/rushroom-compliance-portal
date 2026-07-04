@@ -285,8 +285,8 @@
       cells.push(el("td", {}, editable && onStatus ? statusSelect(s, onStatus) : statusBadge(s)));
       cells.push(el("td", {}, priorityPill(s)));
       if (manage) cells.push(el("td", { class: "step-actions" }, [
-        onEditStep ? el("button", { class: "btn btn-sm", type: "button", onclick: () => onEditStep(s) }, "Edit") : null,
-        onDeleteStep ? el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => onDeleteStep(s) }, "Delete") : null,
+        onEditStep ? actionBtn("Edit", "edit", { onClick: () => onEditStep(s) }) : null,
+        onDeleteStep ? actionBtn("Delete", "trash", { danger: true, onClick: () => onDeleteStep(s) }) : null,
       ]));
       tbody.appendChild(el("tr", {}, cells));
     }
@@ -347,8 +347,8 @@
 
   function phaseToolbar() {
     return el("div", { class: "phase-tools" }, [
-      el("button", { class: "btn btn-sm", type: "button", onclick: () => setAllPhases(true) }, "⊞ Expand all"),
-      el("button", { class: "btn btn-sm", type: "button", onclick: () => setAllPhases(false) }, "⊟ Collapse all"),
+      actionBtn("Expand all", "expand", { onClick: () => setAllPhases(true) }),
+      actionBtn("Collapse all", "collapse", { onClick: () => setAllPhases(false) }),
     ]);
   }
 
@@ -442,8 +442,8 @@
     nav.appendChild(el("div", { class: "browser-top" }, [
       search,
       el("div", { class: "browser-tools" }, [
-        el("button", { class: "btn btn-sm", type: "button", onclick: () => setAll(true) }, "⊞ Expand all"),
-        el("button", { class: "btn btn-sm", type: "button", onclick: () => setAll(false) }, "⊟ Collapse all"),
+        actionBtn("Expand all", "expand", { onClick: () => setAll(true) }),
+        actionBtn("Collapse all", "collapse", { onClick: () => setAll(false) }),
       ]),
     ]));
 
@@ -514,6 +514,11 @@
     sparkles: svg('<path d="M12 2l1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6z"/>'),
     layers: svg('<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>'),
     trash: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
+    refresh: svg('<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>'),
+    printer: svg('<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>'),
+    edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
+    expand: svg('<polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/>'),
+    collapse: svg('<polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/>'),
   };
   // File action chip (View / Open) — subtle pill; label hides on narrow screens.
   function fileActionBtn(label, iconKey, opts = {}) {
@@ -527,10 +532,9 @@
   // Action button (New version / AI draft / …) — icon + label, primary/danger variants.
   function actionBtn(label, iconKey, opts = {}) {
     const cls = ["btn", "btn-sm", opts.primary ? "btn-primary" : "", opts.danger ? "doc-del" : "", opts.cls || ""].filter(Boolean).join(" ");
-    return el("button", { class: cls, type: "button", title: opts.title || label, onclick: opts.onClick }, [
-      iconKey ? el("span", { class: "btn-ico", html: ICONS[iconKey] || "" }) : null,
-      el("span", {}, label),
-    ].filter(Boolean));
+    const kids = [iconKey ? el("span", { class: "btn-ico", html: ICONS[iconKey] || "" }) : null, el("span", {}, label)].filter(Boolean);
+    if (opts.href) return el("a", { class: cls, href: opts.href, target: opts.target || "_blank", rel: "noopener", title: opts.title || label }, kids);
+    return el("button", { class: cls, type: "button", title: opts.title || label, onclick: opts.onClick }, kids);
   }
   function openInAppLink(url, name, hintPath) {
     if (!url) return null;
@@ -1641,7 +1645,7 @@
     const findings = payload.findings || [];
 
     const statusEl = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
-    const runBtn = el("button", { class: "btn btn-primary", type: "button" }, "⟳ Run AI scan");
+    const runBtn = actionBtn("Run AI scan", "sparkles", { primary: true });
     runBtn.addEventListener("click", async () => {
       runBtn.disabled = true; statusEl.className = "up-status";
       statusEl.textContent = "Analysing documents against standards with Claude — this can take up to a minute, please wait…";
@@ -1722,9 +1726,9 @@
         catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
       };
       const tools = el("div", { class: "row-tools" }, [
-        el("button", { class: "btn btn-sm", type: "button", onclick: load }, "↻ Refresh"),
-        role === "rushroom" ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => saveStep(null) }, "+ Add step") : null,
-        el("button", { class: "btn btn-sm", type: "button", onclick: () => window.print() }, "🖨 Print / Save PDF"),
+        actionBtn("Refresh", "refresh", { onClick: load }),
+        role === "rushroom" ? actionBtn("Add step", "plus", { primary: true, onClick: () => saveStep(null) }) : null,
+        actionBtn("Print / Save PDF", "printer", { onClick: () => window.print() }),
         el("span", { class: "spacer" }),
         el("span", { class: "updated" }, `Live · signed in as ${role} · ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
@@ -1790,9 +1794,9 @@
     try {
       const { steps, source } = await loadSteps();
       const tools = el("div", { class: "row-tools" }, [
-        el("button", { class: "btn btn-sm", type: "button", onclick: refreshReadiness }, "↻ Reload status"),
-        el("button", { class: "btn btn-sm", type: "button", onclick: () => window.print() }, "🖨 Print / Save PDF"),
-        CFG.statusSheetViewUrl ? el("a", { class: "btn btn-sm", href: CFG.statusSheetViewUrl, target: "_blank", rel: "noopener" }, "Open the plan ↗") : null,
+        actionBtn("Reload status", "refresh", { onClick: refreshReadiness }),
+        actionBtn("Print / Save PDF", "printer", { onClick: () => window.print() }),
+        CFG.statusSheetViewUrl ? actionBtn("Open the plan", "external", { href: CFG.statusSheetViewUrl }) : null,
         el("span", { class: "spacer" }),
         el("span", { class: "updated" }, `${source === "live" ? "Live" : "Snapshot"} · loaded ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
