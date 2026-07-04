@@ -505,17 +505,33 @@
   function openHrefFor(url, name, hintPath) {
     return extOf(hintPath || name) === "pdf" ? url : withDownload(url, name); // PDF → inline; else → download
   }
-  // Small, consistent icon chips for file actions (View / Open).
+  // Consistent inline SVG icons (feather-style, stroke = currentColor).
+  const svg = (inner) => `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
   const ICONS = {
-    eye: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>',
-    external: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+    eye: svg('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>'),
+    external: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
+    plus: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
+    sparkles: svg('<path d="M12 2l1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6z"/>'),
+    layers: svg('<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>'),
+    trash: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
   };
+  // File action chip (View / Open) — subtle pill; label hides on narrow screens.
   function fileActionBtn(label, iconKey, opts = {}) {
-    const kids = [el("span", { class: "fa-ico", html: ICONS[iconKey] || "" }), el("span", {}, label)];
-    if (opts.href) return el("a", { class: "file-action", href: opts.href, target: "_blank", rel: "noopener", title: opts.title || label }, kids);
-    return el("button", { class: "file-action", type: "button", title: opts.title || label, onclick: opts.onClick }, kids);
+    const cls = "file-action" + (opts.danger ? " file-action-danger" : "");
+    const kids = [el("span", { class: "fa-ico", html: ICONS[iconKey] || "" }), el("span", { class: "fa-label" }, label)];
+    if (opts.href) return el("a", { class: cls, href: opts.href, target: "_blank", rel: "noopener", title: opts.title || label }, kids);
+    return el("button", { class: cls, type: "button", title: opts.title || label, onclick: opts.onClick }, kids);
   }
   const viewChip = (onClick) => fileActionBtn("View", "eye", { onClick, title: "Quick inline preview" });
+  const deleteChip = (onClick, title) => fileActionBtn("Delete", "trash", { onClick, danger: true, title: title || "Delete" });
+  // Action button (New version / AI draft / …) — icon + label, primary/danger variants.
+  function actionBtn(label, iconKey, opts = {}) {
+    const cls = ["btn", "btn-sm", opts.primary ? "btn-primary" : "", opts.danger ? "doc-del" : "", opts.cls || ""].filter(Boolean).join(" ");
+    return el("button", { class: cls, type: "button", title: opts.title || label, onclick: opts.onClick }, [
+      iconKey ? el("span", { class: "btn-ico", html: ICONS[iconKey] || "" }) : null,
+      el("span", {}, label),
+    ].filter(Boolean));
+  }
   function openInAppLink(url, name, hintPath) {
     if (!url) return null;
     const isPdf = extOf(hintPath || name) === "pdf";
@@ -581,9 +597,9 @@
           ].filter(Boolean))
         : el("span", { class: "pending" }, "link pending");
       const actions = [
-        opts.manage && opts.onNewVersion && d.id ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => opts.onNewVersion(d) }, "+ New version") : null,
-        opts.manage && opts.onDraft && d.id && (d.kind || "template") === "operational" ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onDraft(d) }, "AI draft") : null,
-        opts.manage && opts.onCreateOperational && d.id && (d.kind || "template") === "template" ? el("button", { class: "btn btn-sm", type: "button", onclick: () => opts.onCreateOperational(d) }, "Create as-operates") : null,
+        opts.manage && opts.onNewVersion && d.id ? actionBtn("New version", "plus", { primary: true, onClick: () => opts.onNewVersion(d) }) : null,
+        opts.manage && opts.onDraft && d.id && (d.kind || "template") === "operational" ? actionBtn("AI draft", "sparkles", { onClick: () => opts.onDraft(d) }) : null,
+        opts.manage && opts.onCreateOperational && d.id && (d.kind || "template") === "template" ? actionBtn("Create as-operates", "layers", { onClick: () => opts.onCreateOperational(d) }) : null,
         viewAction,
       ].filter(Boolean);
       return el("div", { class: "doc doc-op" }, [
@@ -611,7 +627,7 @@
         })),
       }));
       const action = (opts.manage && opts.onCreateNew && kind === "operational")
-        ? el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => opts.onCreateNew() }, "+ New As Operates")
+        ? actionBtn("New As Operates", "plus", { primary: true, cls: "doc-kind-new", onClick: () => opts.onCreateNew() })
         : null;
       tree.push({ heading: label, count: kdocs.length, action, hint, categories });
     }
@@ -1537,7 +1553,7 @@
       ]),
       manage ? el("div", { class: "std-actions" }, [
         el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => standardVersionEditor(s, role, reload) }, versions.length ? "+ New version" : "Upload file"),
-        el("button", { class: "btn btn-sm doc-del", type: "button", onclick: () => deleteStandard(s, role, reload) }, "Delete"),
+        actionBtn("Delete", "trash", { danger: true, onClick: () => deleteStandard(s, role, reload) }),
       ]) : null,
     ]);
     const currentEl = current
@@ -1562,7 +1578,7 @@
               v.effective_date ? el("span", { class: "muted" }, ` · effective ${v.effective_date}`) : null,
               el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
               versionFileActions(v.open_url, v.file_name || s.code || s.title, v.storage_path, () => viewFile(v)),
-              manage ? el("button", { class: "linklike std-del", type: "button", onclick: () => deleteStandardVersion(v, role, reload) }, "delete") : null,
+              manage ? deleteChip(() => deleteStandardVersion(v, role, reload)) : null,
             ]),
             v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
           ]))),

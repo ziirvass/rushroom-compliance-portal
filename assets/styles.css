@@ -469,6 +469,18 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .file-action .fa-ico { display: inline-flex; opacity: 0.85; }
 .file-action:hover .fa-ico { opacity: 1; }
 .file-action .fa-ico svg { display: block; }
+.file-action-danger { color: var(--red); }
+.file-action-danger:hover, .file-action-danger:focus-visible { color: var(--red); border-color: var(--red); background: var(--red-bg); }
+
+/* icon inside action buttons (New version / AI draft / Delete …) */
+.btn-ico { display: inline-flex; margin-right: 0.35rem; }
+.btn-ico svg { display: block; }
+
+/* narrow screens: file chips become icon-only (label kept as title/tooltip) */
+@media (max-width: 560px) {
+  .fa-label { display: none; }
+  .file-action { padding: 0.36rem 0.44rem; }
+}
 .std-del { margin-left: 0.6rem; color: var(--red); }
 .std-history { font-size: 0.88rem; }
 .std-history > summary { cursor: pointer; color: var(--muted); padding: 0.3rem 0; }
