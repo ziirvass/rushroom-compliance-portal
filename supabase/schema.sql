@@ -117,6 +117,9 @@ create table if not exists public.deviation_findings (
   created_at     timestamptz not null default now()
 );
 create index if not exists deviation_findings_scan_idx on public.deviation_findings (scan_id);
+-- Optional: persist AI token usage per scan so the cost shows in scan history.
+-- (The edge function self-heals if this column is missing.)
+alter table public.deviation_scans add column if not exists usage jsonb default '{}'::jsonb;
 
 -- ---- Row-Level Security: lock everything; only the service role (Edge
 --      Function) may read/write. No policies = no access for anon/authenticated.

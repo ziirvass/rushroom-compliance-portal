@@ -200,6 +200,20 @@ async function insertDocumentVersion(row: Record<string, unknown>) {
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const SCAN_MODEL = "claude-opus-4-8";
+// Token usage from a Claude response — surfaced in the UI so the team can see
+// how much AI each operation costs (front-end turns tokens into an estimate).
+const usageOf = (j: any) => ({
+  model: j?.model || SCAN_MODEL,
+  input_tokens: j?.usage?.input_tokens ?? 0,
+  output_tokens: j?.usage?.output_tokens ?? 0,
+  cache_read_input_tokens: j?.usage?.cache_read_input_tokens ?? 0,
+});
+const addUsage = (a: any, b: any) => ({
+  model: a.model || b?.model || SCAN_MODEL,
+  input_tokens: (a.input_tokens || 0) + (b?.input_tokens ?? 0),
+  output_tokens: (a.output_tokens || 0) + (b?.output_tokens ?? 0),
+  cache_read_input_tokens: (a.cache_read_input_tokens || 0) + (b?.cache_read_input_tokens ?? 0),
+});
 const SEVERITIES = ["Critical", "High", "Medium", "Low", "Info"];
 const TEXT_CAP = 40000; // per-file char cap fed to the model
 const DOCUMENT_DRAFT_SCHEMA = {
@@ -841,6 +855,7 @@ Deno.serve(async (req) => {
       draftText: String(parsed.draft_text || ""),
       versionHint: String(parsed.version_hint || "AI draft"),
       fileNameHint: String(parsed.file_name_hint || "draft.md"),
+      usage: usageOf(apiJson),
     });
   }
 
@@ -1082,6 +1097,7 @@ Deno.serve(async (req) => {
       version: String(parsed.version || ""),
       effectiveDate: String(parsed.effective_date || ""),
       summary: String(parsed.summary || ""),
+      usage: usageOf(apiJson),
     });
   }
 
@@ -1141,6 +1157,7 @@ Deno.serve(async (req) => {
       effectiveDate: String(parsed.effective_date || ""),
       kind: String(parsed.kind || ""),
       summary: String(parsed.summary || ""),
+      usage: usageOf(apiJson),
     });
   }
 
@@ -1231,6 +1248,7 @@ Deno.serve(async (req) => {
 
     let aiFindings: any[] = [];
     let aiModel = ""; let aiSummary = ""; let aiNote = "";
+    let aiUsage: any = { model: "", input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
     if (willRunAI) {
       const content: any[] = [{ type: "text", text: "=== STANDARDS & REGULATIONS (the requirements) ===" }];
       for (const s of standards) {
@@ -1281,6 +1299,7 @@ Be specific: name the exact document and the exact standard (and clause where po
         }));
         aiModel = apiJson.model || SCAN_MODEL;
         aiSummary = String(parsed.summary || "");
+        aiUsage = usageOf(apiJson);
       } catch (e) {
         // AI failure is non-fatal when we still have structured findings.
         if (!structuredFindings.length && !coveredDocIds.size) return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
@@ -1299,18 +1318,26 @@ Be specific: name the exact document and the exact standard (and clause where po
     if (aiNote) summaryParts.push(aiNote.trim());
     if (!summaryParts.length) summaryParts.push(allFindings.length ? `${allFindings.length} finding(s).` : "No issues found.");
 
-    const { data: scan, error: scanErr } = await db.from("deviation_scans").insert({
+    const scanRow: Record<string, unknown> = {
       model: aiModel || "structured", status: "ok", summary: summaryParts.join(" ").slice(0, 4000),
       counts, docs_scanned: coveredDocIds.size + (willRunAI && !aiNote ? uncoveredDocs.length : 0), standards_scanned: standards.length,
-    }).select("*").maybeSingle();
-    if (scanErr || !scan) return json({ error: `Could not save scan: ${scanErr?.message}` }, 500);
+      usage: aiUsage,
+    };
+    let scanResp = await db.from("deviation_scans").insert(scanRow).select("*").maybeSingle();
+    // Self-heal if the optional `usage` column hasn't been added yet.
+    if (scanResp.error && /usage/.test(scanResp.error.message || "")) {
+      const { usage: _u, ...noUsage } = scanRow;
+      scanResp = await db.from("deviation_scans").insert(noUsage).select("*").maybeSingle();
+    }
+    const scan = scanResp.data;
+    if (scanResp.error || !scan) return json({ error: `Could not save scan: ${scanResp.error?.message}` }, 500);
 
     if (allFindings.length) {
       const rows = allFindings.slice(0, 300).map((f: any) => ({ scan_id: scan.id, ...f }));
       const { error: fErr } = await db.from("deviation_findings").insert(rows);
       if (fErr) return json({ error: `Could not save findings: ${fErr.message}` }, 500);
     }
-    return json({ ok: true, scan, findings: allFindings, structuredCount: structuredFindings.length, aiCount: aiFindings.length });
+    return json({ ok: true, scan: { ...scan, usage: scan.usage ?? aiUsage }, findings: allFindings, structuredCount: structuredFindings.length, aiCount: aiFindings.length, usage: aiUsage });
   }
 
   if (action === "deleteUpload") {
@@ -1429,7 +1456,7 @@ Be specific: name the exact document and the exact standard (and clause where po
       }
     }
 
-    return json({ ok: true, inserted: insertedCount, standard: version.standard?.code, version: version.version });
+    return json({ ok: true, inserted: insertedCount, standard: version.standard?.code, version: version.version, usage: usageOf(apiJson) });
   }
 
   if (action === "generateInterpretations") {
@@ -1473,6 +1500,7 @@ Be specific: name the exact document and the exact standard (and clause where po
     const interpSystem = "You are a meticulous EU product-compliance auditor. For each requirement clause, read the attached company operational document and state how the document implements that clause. Base every interpretation strictly on the document — never invent implementation details. If the document does not address a clause, mark it 'pending' (unclear) or 'not_applicable', and say so in the rationale. Echo each clause's [index] exactly.";
 
     const results: any[] = [];
+    let usageTotal: any = { model: SCAN_MODEL, input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
     const batchSize = 10;
     for (let i = 0; i < clauses.length; i += batchSize) {
       const batch = clauses.slice(i, i + batchSize);
@@ -1495,6 +1523,7 @@ Be specific: name the exact document and the exact standard (and clause where po
           }),
         });
         const apiJson = await res.json();
+        usageTotal = addUsage(usageTotal, usageOf(apiJson));
         if (!res.ok || apiJson.stop_reason === "refusal") { markPending(); continue; }
         const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
         const parsed = JSON.parse(textBlock?.text || "{}");
@@ -1532,7 +1561,7 @@ Be specific: name the exact document and the exact standard (and clause where po
       return json({ error: `Insert error: ${insertErr.message}` }, 500);
     }
 
-    return json({ ok: true, generated: (inserted ?? []).length, total: clauseIds.length });
+    return json({ ok: true, generated: (inserted ?? []).length, total: clauseIds.length, usage: usageTotal });
   }
 
   if (action === "saveInterpretation") {

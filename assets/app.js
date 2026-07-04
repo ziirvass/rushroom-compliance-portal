@@ -521,6 +521,25 @@
     if (!ext) return null;
     return el("span", { class: `ftype ftype-${FTYPE_CAT[ext] || "other"}`, title: `${ext.toUpperCase()} file` }, ext.toUpperCase());
   }
+
+  // AI token usage → a compact "12.3k in · 2.3k out · ~$0.11" label, so the team
+  // can see how much each AI operation costs. Pricing is USD per 1M tokens.
+  const MODEL_PRICING = { "claude-opus-4-8": { in: 5, out: 25 }, "claude-opus-4-7": { in: 5, out: 25 }, "claude-sonnet-4-6": { in: 3, out: 15 }, "claude-haiku-4-5": { in: 1, out: 5 }, "claude-fable-5": { in: 10, out: 50 } };
+  const fmtTokens = (n) => { n = n || 0; return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n); };
+  function usageCostUSD(u) {
+    const p = (u && MODEL_PRICING[u.model]) || MODEL_PRICING["claude-opus-4-8"];
+    return (((u && u.input_tokens) || 0) * p.in + ((u && u.output_tokens) || 0) * p.out) / 1e6;
+  }
+  function usageLabel(u) {
+    if (!u || (!u.input_tokens && !u.output_tokens)) return "";
+    const c = usageCostUSD(u);
+    return `${fmtTokens(u.input_tokens)} in · ${fmtTokens(u.output_tokens)} out · ~$${c < 0.01 ? c.toFixed(4) : c.toFixed(2)}`;
+  }
+  // A subtle inline chip for token usage (used in AI-result status lines).
+  function usageChip(u) {
+    const label = usageLabel(u);
+    return label ? el("span", { class: "usage-chip", title: `AI tokens (${(u && u.model) || "claude-opus-4-8"})` }, `⚡ ${label}`) : null;
+  }
   // Consistent inline SVG icons (feather-style, stroke = currentColor).
   const svg = (inner) => `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
   const ICONS = {
@@ -1716,7 +1735,7 @@
 
   /* ---------------- AI Deviation Monitoring (Rushroom) ---------------- */
   const SEV_ORDER = ["Critical", "High", "Medium", "Low", "Info"];
-  async function renderDeviations(role, mount) {
+  async function renderDeviations(role, mount, lastRun) {
     if (role !== "rushroom") { mount.replaceChildren(el("div", { class: "empty" }, "Not available for this role.")); return; }
     mount.replaceChildren(el("div", { class: "loading" }, "Loading…"));
     let payload;
@@ -1733,10 +1752,15 @@
     const runBtn = actionBtn("Run AI scan", "sparkles", { primary: true });
     runBtn.addEventListener("click", async () => {
       runBtn.disabled = true; statusEl.className = "up-status";
-      statusEl.textContent = "Analysing documents against standards with Claude — this can take up to a minute, please wait…";
-      try { await API.runDeviationScan(API.getToken(role)); await reload(); }
+      statusEl.textContent = "Checking structured interpretations, then running Claude on any uncovered documents…";
+      try { const r = await API.runDeviationScan(API.getToken(role)); await renderDeviations(role, mount, r); }
       catch (ex) { runBtn.disabled = false; statusEl.className = "up-status err"; statusEl.textContent = `Scan failed: ${ex.message}`; }
     });
+    // Just-run summary (shows AI cost even if the persistent usage column isn't added).
+    const lastRunNote = lastRun ? el("div", { class: "notice ok" }, [
+      document.createTextNode(`Scan complete — ${lastRun.structuredCount || 0} structured + ${lastRun.aiCount || 0} AI finding(s). `),
+      usageChip(lastRun.usage) || document.createTextNode(lastRun.aiCount ? "" : "No AI tokens used (fully structured)."),
+    ]) : null;
 
     const head = el("div", { class: "card upload-card" }, [
       el("h3", {}, "AI deviation monitoring"),
@@ -1744,7 +1768,11 @@
         "Checks reviewed clause interpretations first (instant, no AI), then uses the Claude API only for documents that have no interpretations yet. Lists deviations by severity; scans are manual."),
       el("div", {}, runBtn),
       statusEl,
-      scan ? el("div", { class: "scan-meta muted" }, `Last scan: ${fmtDateTime(scan.created_at)} · ${scan.model || ""} · ${scan.docs_scanned} documents vs ${scan.standards_scanned} standards`) : null,
+      lastRunNote,
+      scan ? el("div", { class: "scan-meta muted" }, [
+        document.createTextNode(`Last scan: ${fmtDateTime(scan.created_at)} · ${scan.model || ""} · ${scan.docs_scanned} documents vs ${scan.standards_scanned} standards`),
+        usageChip(scan.usage) ? document.createTextNode(" · ") : null, usageChip(scan.usage),
+      ].filter(Boolean)) : null,
     ]);
 
     const body = el("div");
@@ -1987,7 +2015,7 @@
     };
     const extract = actionBtn("Extract clauses (AI)", "sparkles", { primary: true, onClick: async () => {
       status.className = "up-status"; status.textContent = "Reading the standard file with AI — this can take a minute…";
-      try { const r = await API.extractStandardClauses(ctx.token, { standardVersionId: sel.value }); status.className = "up-status ok"; status.textContent = `Extracted ${r.inserted} clause(s).`; await load(); }
+      try { const r = await API.extractStandardClauses(ctx.token, { standardVersionId: sel.value }); status.className = "up-status ok"; status.replaceChildren(document.createTextNode(`Extracted ${r.inserted} clause(s). `), usageChip(r.usage) || document.createTextNode("")); await load(); }
       catch (ex) { status.className = "up-status err"; status.textContent = ex.message; }
     } });
     sel.addEventListener("change", load);
@@ -2054,7 +2082,7 @@
     const gen = actionBtn("Generate all (AI)", "sparkles", { primary: true, onClick: async () => {
       if (!clauses.length) { status.className = "up-status warn"; status.textContent = "Extract clauses for this standard first."; return; }
       status.className = "up-status"; status.textContent = "AI is interpreting the document against each clause — this can take a minute…";
-      try { const r = await API.generateInterpretations(ctx.token, { documentVersionId: docSel.value, clauseIds: clauses.map((c) => c.id) }); status.className = "up-status ok"; status.textContent = `Generated ${r.generated} interpretation(s).`; await load(); }
+      try { const r = await API.generateInterpretations(ctx.token, { documentVersionId: docSel.value, clauseIds: clauses.map((c) => c.id) }); status.className = "up-status ok"; status.replaceChildren(document.createTextNode(`Generated ${r.generated} interpretation(s). `), usageChip(r.usage) || document.createTextNode("")); await load(); }
       catch (ex) { status.className = "up-status err"; status.textContent = ex.message; }
     } });
     docSel.addEventListener("change", load); stdSel.addEventListener("change", load);
