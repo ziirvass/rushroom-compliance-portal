@@ -716,3 +716,14 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 /* AI token-usage chip (⚡ 12k in · 2k out · ~$0.11) */
 .usage-chip { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.72rem; font-weight: 600; color: var(--amber); background: rgba(255,201,77,0.10); border: 1px solid rgba(255,201,77,0.35); border-radius: 999px; padding: 0.08rem 0.5rem; white-space: nowrap; vertical-align: middle; }
 .scan-meta .usage-chip { color: var(--muted); background: var(--panel-2); border-color: var(--border); }
+
+/* ===== Admin / super-admin (shared password) surfaces — flagged in red ===== */
+.tab-admin { color: var(--red); }
+.tab-admin:hover { color: var(--red); filter: brightness(1.12); }
+.tab-admin[aria-selected="true"] { color: var(--red); border-bottom-color: var(--red); }
+/* the shared-password login is the "super admin" entry point */
+.gate-fallback { border-top-color: var(--red-bd); }
+.gate-fallback summary { color: var(--red); }
+.gate-fallback summary::marker { color: var(--red); }
+/* red "super admin" badge shown in the toolbar when signed in via shared password */
+.superadmin-badge { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--red); background: var(--red-bg); border: 1px solid var(--red-bd); border-radius: 999px; padding: 0.14rem 0.55rem; }

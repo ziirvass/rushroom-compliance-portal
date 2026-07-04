@@ -2316,6 +2316,10 @@
         role === "rushroom" ? actionBtn("Add step", "plus", { primary: true, onClick: () => saveStep(null) }) : null,
         actionBtn("Print / Save PDF", "printer", { onClick: () => window.print() }),
         el("span", { class: "spacer" }),
+        (API.session() && API.session().admin)
+          ? el("span", { class: "superadmin-badge", title: (API.session().urole ? "Signed in as an administrator" : "Signed in with the shared super-admin password") },
+              API.session().urole ? "● Admin" : "● Super admin")
+          : null,
         actionBtn("Sign out", "external", { onClick: () => { API.clearToken(); location.reload(); } }),
         el("span", { class: "updated" }, `Live · ${(API.session() && (API.session().name || API.session().urole)) || role} · ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
