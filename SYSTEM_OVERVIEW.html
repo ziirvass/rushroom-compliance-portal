@@ -363,7 +363,43 @@
         <p class="subtitle">Document Versioning, Standards Management & AI-Assisted Drafting</p>
         <p class="subtitle"><span class="doc-changed">Level 2: Structured Clause-Level Interpretations &amp; DPP Preparation</span></p>
         <p class="doc-legend">🟡 <strong>Yellow</strong> marks content added or changed from the previous (Level 1) version of this document.</p>
-        
+
+        <!-- AS-BUILT STATUS SECTION -->
+        <div class="section doc-section-new">
+            <h2>0. As-Built Status <span class="doc-new-badge">Updated to match production</span></h2>
+            <p>This section reflects what is <strong>actually deployed and live</strong> as of 2026-07-05, superseding any "planned/pending" wording later in this document. Frontend is on GitHub Pages (cache-busted assets, currently <code>?v=64</code>); backend is the Supabase <code>portal-api</code> Edge Function (deployed) plus Postgres + Storage.</p>
+
+            <h3>Authentication &amp; Accounts <span class="doc-changed">(new)</span></h3>
+            <div class="list-grid">
+                <div class="list-item"><strong>Individual email + password login</strong> (<code>loginUser</code>): PBKDF2-SHA256 hashing, requires a verified email and an approved account; issues an HMAC session token carrying the access tier + admin flag.</div>
+                <div class="list-item"><strong>Self-registration</strong> (role, name, email, phone, WhatsApp, password) → emailed verification link (<code>verify.html</code>); admins review/approve and assign a role in an <strong>Accounts</strong> tab.</div>
+                <div class="list-item"><strong>Password reset</strong> via signed link (<code>reset.html</code>); admins can copy/resend verify &amp; reset links.</div>
+                <div class="list-item"><strong>Roles → access tier:</strong> admin/internal/reviewer = full ("rushroom") view; supplier/installer = limited. The <strong>Accounts</strong> tab and admin actions are gated on the admin flag and marked in red in the UI.</div>
+                <div class="list-item"><strong>Shared-password login</strong> is retained as a bootstrap "super admin" fallback.</div>
+                <div class="list-item"><strong>Email delivery</strong> via Resend (<code>RESEND_API_KEY</code> + <code>MAIL_FROM</code>); admin "Send test email" + status banner. Falls back to copyable links when unset.</div>
+            </div>
+
+            <h3>Level 2 (Clauses &amp; DPP) — <span class="doc-changed">shipped</span></h3>
+            <div class="list-grid">
+                <div class="list-item"><strong>"Clauses &amp; DPP" tab</strong> (admin) with four views: <em>Clauses</em> (AI-extract + table), <em>Interpretations</em> (AI-generate + edit with audit trail), <em>Compliance Matrix</em> (docs × clauses, colour-coded, click-to-edit), <em>Passports</em> (create, link interpretations, export DPP JSON-LD).</div>
+                <div class="list-item"><strong>Passport CRUD added</strong> (was export-only): <code>listProductPassports</code>, <code>getProductPassport</code>, <code>createProductPassport</code>, <code>updateProductPassport</code>, <code>deleteProductPassport</code>, <code>linkPassportInterpretation</code>, <code>unlinkPassportInterpretation</code>.</div>
+                <div class="list-item"><code>generateInterpretations</code> sends the <strong>document file</strong> to Claude (works for PDFs) and <strong>batches ~10 clauses/call</strong> with structured JSON output.</div>
+                <div class="list-item"><strong>Phase 3 (structured-first deviation scan) is now actually implemented:</strong> <code>runDeviationScan</code> emits instant findings from <code>as_operates_interpretations</code> (source <code>structured</code>) and only calls Claude for documents that have no interpretations (source <code>ai_inference</code>).</div>
+            </div>
+
+            <h3>Document &amp; UX features <span class="doc-changed">(new)</span></h3>
+            <div class="list-grid">
+                <div class="list-item"><strong>Version-to-version diff</strong> with <span class="doc-changed">yellow</span> highlighting across document/standard version history, AI drafts, and interpretations — with an <strong>Inline / Side-by-side</strong> toggle. Text extracted client-side (md/txt/html, docx via mammoth, xlsx via SheetJS, pdf via pdf.js).</div>
+                <div class="list-item"><strong>Deviation findings</strong> that are new since the previous scan are yellow-marked (<code>is_new</code>).</div>
+                <div class="list-item"><strong>File-type badges</strong> (PDF/DOCX/XLSX…) everywhere files are listed; type-aware <strong>Edit</strong> (DOCX→Google Docs, XLSX→Google Sheets round-trip; PDFs route to upload/AI-draft).</div>
+                <div class="list-item"><strong>AI token usage + cost estimate</strong> shown on AI operations (extract, generate, scan).</div>
+                <div class="list-item"><strong>Terminology/nav:</strong> the document library is now the <strong>As Operated</strong> tab (after Standards &amp; Regulations); Supplier uploads is its own sub-tab; session controls (badge · Supplier view · Sign out) live in the header.</div>
+            </div>
+
+            <h3>Google Docs integration <span class="doc-changed">changed</span></h3>
+            <p>The former <strong>service-account</strong> approach (and the <code>GOOGLE_SERVICE_ACCOUNT</code> secret / <code>createGoogleDoc</code> / <code>fetchGoogleDocContent</code> edge actions) has been <strong>removed</strong>. Editing now uses <strong>client-side Google Identity Services OAuth</strong> (the user's own Google account, via <code>assets/gdocs.js</code> with a public client ID) — see the correction in Section 5.</p>
+        </div>
+
         <!-- SYSTEM OVERVIEW SECTION -->
         <div class="section">
             <h2>1. System Overview</h2>
@@ -683,7 +719,9 @@
         <!-- GOOGLE DOCS INTEGRATION SECTION -->
         <div class="section page-break">
             <h2>5. Google Docs Integration for Document Editing</h2>
-            
+
+            <p class="doc-legend">⚠️ <strong>As-built correction:</strong> the server-side <strong>service-account</strong> flow shown in the diagram below has been <span class="doc-changed">removed</span>. Editing now runs <strong>entirely client-side</strong> via Google Identity Services (GIS) OAuth in <code>assets/gdocs.js</code>: the signed-in user authorises with <em>their own</em> Google account (public OAuth client ID, no secret), the file is imported to Google Docs/Sheets, edited there, then exported back as a new version. The <code>GOOGLE_SERVICE_ACCOUNT</code> secret and the <code>createGoogleDoc</code>/<code>fetchGoogleDocContent</code> edge actions no longer exist. The steps below are otherwise conceptually the same (open → edit → save-back).</p>
+
             <p>After AI draft generation, users can edit the draft in Google Docs before publishing, maintaining full document formatting and collaboration features.</p>
             
             <h3>Edit in Google Docs Workflow</h3>
@@ -710,13 +748,13 @@
                 <text x="100" y="190" text-anchor="middle" fill="white" font-weight="bold" font-size="14">2</text>
                 
                 <rect x="150" y="155" width="180" height="50" fill="#fce4ec" stroke="#e91e63" stroke-width="2" rx="4"/>
-                <text x="240" y="180" font-weight="bold" text-anchor="middle" fill="#2c3e50" font-size="12">Backend: Create</text>
-                <text x="240" y="200" text-anchor="middle" fill="#555" font-size="10">Google Doc via API</text>
+                <text x="240" y="180" font-weight="bold" text-anchor="middle" fill="#2c3e50" font-size="12">Import to Google</text>
+                <text x="240" y="200" text-anchor="middle" fill="#555" font-size="10">(client-side, user OAuth)</text>
                 
                 <!-- Arrow -->
                 <path d="M 330 180 L 380 180" stroke="#e91e63" stroke-width="2" fill="none" marker-end="url(#arrowpink2)"/>
-                <text x="355" y="170" font-size="9" fill="#e91e63" font-weight="bold">serviceAccount</text>
-                <text x="355" y="182" font-size="9" fill="#e91e63" font-weight="bold">authentication</text>
+                <text x="355" y="170" font-size="9" fill="#e91e63" font-weight="bold">user Google</text>
+                <text x="355" y="182" font-size="9" fill="#e91e63" font-weight="bold">OAuth (client-side)</text>
                 
                 <!-- Step 3 -->
                 <circle cx="100" cy="280" r="25" fill="#27ae60" stroke="#2c3e50" stroke-width="2"/>
@@ -745,20 +783,20 @@
                 <rect x="550" y="85" width="400" height="280" fill="#f9f9f9" stroke="#ddd" stroke-width="1" rx="4"/>
                 
                 <text x="570" y="110" font-weight="bold" fill="#2c3e50" font-size="11">Portal (Frontend)</text>
-                <text x="580" y="130" fill="#555" font-size="10">1. User clicks "Edit in Google Docs"</text>
-                <text x="580" y="150" fill="#555" font-size="10">2. Calls: API.createGoogleDoc({draftText, name})</text>
+                <text x="580" y="130" fill="#555" font-size="10">1. User clicks "Edit in Google Docs/Sheets"</text>
+                <text x="580" y="150" fill="#555" font-size="10">2. PortalGDocs.importDoc(file) — client-side</text>
                 
-                <text x="570" y="180" font-weight="bold" fill="#2c3e50" font-size="11">Edge Function (Backend)</text>
-                <text x="580" y="200" fill="#555" font-size="10">1. Load GOOGLE_SERVICE_ACCOUNT secret</text>
-                <text x="580" y="220" fill="#555" font-size="10">2. Authenticate with Google API</text>
-                <text x="580" y="240" fill="#555" font-size="10">3. Create a Google Doc</text>
-                <text x="580" y="260" fill="#555" font-size="10">4. Insert draft content into document</text>
-                <text x="580" y="280" fill="#555" font-size="10">5. Return: {googleDocId, editUrl}</text>
+                <text x="570" y="180" font-weight="bold" fill="#2c3e50" font-size="11">Browser (Google Identity Services)</text>
+                <text x="580" y="200" fill="#555" font-size="10">1. User authorises with their own Google account</text>
+                <text x="580" y="220" fill="#555" font-size="10">2. Upload file bytes to Google Docs/Sheets</text>
+                <text x="580" y="240" fill="#555" font-size="10">3. Open the editable doc URL in a new tab</text>
+                <text x="580" y="260" fill="#555" font-size="10">4. (no backend / no service account involved)</text>
+                <text x="580" y="280" fill="#555" font-size="10">5. Returns: {editUrl}</text>
                 
                 <text x="570" y="310" font-weight="bold" fill="#2c3e50" font-size="11">User edits externally in Google Docs</text>
                 
                 <text x="570" y="340" font-weight="bold" fill="#2c3e50" font-size="11">Portal (Return)</text>
-                <text x="580" y="360" fill="#555" font-size="10">1. Calls: API.fetchGoogleDocContent({googleDocId})</text>
+                <text x="580" y="360" fill="#555" font-size="10">1. PortalGDocs.exportDoc() → publish as new version</text>
                 
                 <defs>
                     <marker id="arrowblue2" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
@@ -774,19 +812,19 @@
             </svg>
             <p class="diagram-label">Figure 4: Google Docs Integration for Editing Drafts</p>
             
-            <h3>Backend Requirements</h3>
+            <h3 class="doc-changed">Requirements (as built — client-side OAuth)</h3>
             <div class="list-grid">
                 <div class="list-item">
-                    <strong>Google Service Account:</strong> JSON credentials with Docs & Drive API permissions
+                    <strong>Google OAuth client ID (public):</strong> a Web client ID in <code>assets/config.js</code>; no secret and no service account.
                 </div>
                 <div class="list-item">
-                    <strong>Supabase Secret:</strong> <code>GOOGLE_SERVICE_ACCOUNT</code> stores the JSON key
+                    <strong>GIS library:</strong> <code>accounts.google.com/gsi/client</code> loaded in <code>index.html</code>; the user grants access to Docs/Drive/Sheets with their own account.
                 </div>
                 <div class="list-item">
-                    <strong>API Actions:</strong> <code>createGoogleDoc</code> and <code>fetchGoogleDocContent</code>
+                    <strong>Client module:</strong> <code>assets/gdocs.js</code> (<code>PortalGDocs.importDoc</code> / <code>exportDoc</code>) does the round-trip; the file goes browser → Google → browser.
                 </div>
                 <div class="list-item">
-                    <strong>Permissions:</strong> Service account has Editor access to create/edit docs
+                    <strong>Save-back:</strong> the edited Doc/Sheet is exported (docx/xlsx) and published as a new document version via the normal version API — no Google credentials touch the backend.
                 </div>
             </div>
         </div>
@@ -1022,26 +1060,33 @@
                 </tr>
             </table>
             
-            <h3>Google Docs Integration (In Development)</h3>
+            <h3 class="doc-changed">Google Docs Integration — client-side (no edge actions)</h3>
+            <p>Editing runs in the browser via <code>assets/gdocs.js</code> (GIS OAuth, the user's own Google account). The former <code>createGoogleDoc</code> / <code>fetchGoogleDocContent</code> edge actions were <strong>removed</strong>.</p>
+
+            <h3 class="doc-changed">Authentication &amp; Accounts (as built)</h3>
             <table style="font-size: 12px;">
-                <tr>
-                    <th>Action</th>
-                    <th>Input</th>
-                    <th>Output</th>
-                    <th>Role</th>
-                </tr>
-                <tr>
-                    <td><code>createGoogleDoc</code></td>
-                    <td>draftText, documentName, mimeType</td>
-                    <td>{ok, googleDocId, editUrl, webViewLink}</td>
-                    <td>Rushroom</td>
-                </tr>
-                <tr>
-                    <td><code>fetchGoogleDocContent</code></td>
-                    <td>googleDocId</td>
-                    <td>{content, lastModified}</td>
-                    <td>Rushroom</td>
-                </tr>
+                <tr><th>Action</th><th>Input</th><th>Output</th><th>Role</th></tr>
+                <tr><td><code>login</code></td><td>role, password (shared "super admin")</td><td>{token, role, admin}</td><td>Public</td></tr>
+                <tr><td><code>loginUser</code></td><td>email, password</td><td>{token, role, admin, urole, name}</td><td>Public</td></tr>
+                <tr><td><code>registerUser</code></td><td>role, name, email, phone, whatsapp, password</td><td>{ok, message} (generic)</td><td>Public</td></tr>
+                <tr><td><code>verifyUser</code></td><td>token (HMAC-signed)</td><td>{ok, name, email}</td><td>Public</td></tr>
+                <tr><td><code>requestPasswordReset</code> / <code>setPassword</code></td><td>email / token + password</td><td>{ok} (generic)</td><td>Public</td></tr>
+                <tr><td><code>adminListUsers</code>, <code>adminUpdateUser</code>, <code>adminDeleteUser</code></td><td>token (+ id, fields)</td><td>{users…} / {ok}</td><td>Admin</td></tr>
+                <tr><td><code>adminUserVerifyLink</code>, <code>adminUserResetLink</code>, <code>adminSendTestEmail</code></td><td>token (+ id / to)</td><td>{ok, url, emailed}</td><td>Admin</td></tr>
+            </table>
+
+            <h3 class="doc-changed">Level 2 — Clauses, Interpretations, Passports (as built)</h3>
+            <table style="font-size: 12px;">
+                <tr><th>Action</th><th>Input</th><th>Output</th><th>Role</th></tr>
+                <tr><td><code>extractStandardClauses</code></td><td>standardVersionId, maxClauses?</td><td>{ok, inserted, usage}</td><td>Rushroom</td></tr>
+                <tr><td><code>getClausesForStandard</code></td><td>standardVersionId</td><td>{clauses:[…]}</td><td>Rushroom</td></tr>
+                <tr><td><code>generateInterpretations</code></td><td>documentVersionId, clauseIds[] — sends the document file, batched ~10/call</td><td>{ok, generated, usage}</td><td>Rushroom</td></tr>
+                <tr><td><code>saveInterpretation</code></td><td>id, interpretationText, complianceStatus, rationale…</td><td>{ok} (snapshots prior text)</td><td>Rushroom</td></tr>
+                <tr><td><code>getInterpretations</code></td><td>documentVersionId</td><td>{interpretations:[…, previous_interpretation_text]}</td><td>Rushroom</td></tr>
+                <tr><td><code>complianceMatrix</code></td><td>documentVersionIds[], standardVersionIds[]</td><td>{docs, clauses, matrix}</td><td>Rushroom</td></tr>
+                <tr><td><code>listProductPassports</code>, <code>getProductPassport</code>, <code>createProductPassport</code>, <code>updateProductPassport</code>, <code>deleteProductPassport</code></td><td>token (+ id, fields)</td><td>{passports…} / {ok, id}</td><td>Rushroom</td></tr>
+                <tr><td><code>linkPassportInterpretation</code>, <code>unlinkPassportInterpretation</code></td><td>passportId, interpretationId</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>exportProductPassport</code></td><td>passportId, format (json | json-ld | pdf-data)</td><td>{format, data}</td><td>Rushroom</td></tr>
             </table>
             
             <h3>Standards Management</h3>
@@ -1126,20 +1171,25 @@
                     <td>Claude API key for AI drafting and scanning</td>
                     <td>sk-ant-... (from Anthropic)</td>
                 </tr>
-                <tr>
-                    <td><code>GOOGLE_SERVICE_ACCOUNT</code></td>
-                    <td>Google Cloud service account JSON key</td>
-                    <td>{"type": "service_account", "project_id": "...", "private_key": "..."}</td>
+                <tr class="doc-changed">
+                    <td><code>RESEND_API_KEY</code> + <code>MAIL_FROM</code></td>
+                    <td><span class="doc-changed">Optional email delivery (verification / reset / test). Falls back to copyable links when unset.</span></td>
+                    <td>re_… &nbsp;·&nbsp; "Rushroom Compliance &lt;noreply@…&gt;"</td>
+                </tr>
+                <tr class="doc-changed">
+                    <td style="text-decoration: line-through;"><code>GOOGLE_SERVICE_ACCOUNT</code></td>
+                    <td><span class="doc-changed">Removed — Google editing is now client-side OAuth (no server secret).</span></td>
+                    <td>—</td>
                 </tr>
             </table>
-            
-            <h3>Deployment Steps</h3>
+
+            <h3 class="doc-changed">Deployment Steps (as built)</h3>
             <ol style="margin-left: 20px; margin-bottom: 20px;">
-                <li>Create Supabase project and run <code>supabase/schema.sql</code></li>
-                <li>Set all required secrets in Supabase Edge Functions settings</li>
-                <li>Deploy edge function: <code>supabase functions deploy portal-api --no-verify-jwt</code></li>
-                <li>Set <code>api.functionUrl</code> in <code>assets/config.js</code></li>
-                <li>Deploy frontend to static hosting (GitHub Pages, Vercel, etc.)</li>
+                <li>Create the Supabase project and apply <code>supabase/schema.sql</code> in the <span class="doc-changed"><strong>SQL Editor</strong> (there is no <code>migrations/</code> dir, so <code>supabase db push</code> does <em>not</em> apply the schema)</span>.</li>
+                <li>Set required secrets (<code>TOKEN_SECRET</code>, password hashes, <code>ANTHROPIC_API_KEY</code>; optional <code>RESEND_API_KEY</code> + <code>MAIL_FROM</code>).</li>
+                <li>Deploy edge function: <code>supabase functions deploy portal-api --no-verify-jwt</code> <span class="doc-changed">(project is linked, so no <code>--project-ref</code> needed)</span>.</li>
+                <li>Set <code>api.functionUrl</code> and the public Google OAuth <code>client_id</code> in <code>assets/config.js</code>.</li>
+                <li>Deploy frontend to GitHub Pages; bump the <code>?v=N</code> asset cache-bust.</li>
             </ol>
         </div>
         
