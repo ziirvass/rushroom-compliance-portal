@@ -1349,19 +1349,20 @@
             
             <h3>Active Proposals (sorted by priority)</h3>
             
-            <div class="proposal-card in_progress">
+            <div class="proposal-card implemented">
                 <div class="proposal-header">
                     <div style="display: flex; align-items: center;">
                         <div class="proposal-id">PROP-001</div>
                         <div class="proposal-title">Phase 5: Frontend UI Implementation</div>
                     </div>
-                    <span class="proposal-status status-in_progress">IN PROGRESS</span>
+                    <span class="proposal-status status-implemented">IMPLEMENTED</span>
                 </div>
                 <div class="proposal-meta">
                     <span>Priority: <span class="priority-high">HIGH</span></span>
                     <span>Effort: 4 hours</span>
-                    <span>Completion: 0%</span>
+                    <span>Completion: 100%</span>
                     <span>Proposed: 2026-07-05</span>
+                    <span>Completed: 2026-07-05</span>
                 </div>
                 <div class="cause-box">
                     <strong>Cause:</strong>
@@ -1372,21 +1373,22 @@
                     </ul>
                 </div>
                 <div class="effect-box">
-                    <strong>Effect:</strong>
+                    <strong>Effect (as delivered):</strong>
                     <ul class="proposal-list" style="margin-top: 5px;">
-                        <li>New functions in app.js: renderStandardDetails(), renderInterpretationEditor(), renderComplianceMatrix(), renderPassportView()</li>
-                        <li>New optional tabs in index.html or sections in existing tabs</li>
-                        <li>Users gain ability to view/edit clauses, manage interpretations, view compliance grids, manage DPP passports</li>
+                        <li>New Rushroom-only <strong>"Clauses &amp; DPP"</strong> tab in index.html, with four sub-views built in app.js via <code>renderLevel2()</code>:</li>
+                        <li><strong>Clauses</strong> (<code>l2ClausesView</code>) — pick a standard version, AI-extract its clauses (<code>extractStandardClauses</code>), browse as a sortable table.</li>
+                        <li><strong>Interpretations</strong> (<code>l2InterpretationsView</code> / <code>l2InterpCard</code>) — a document version × a standard's clauses; AI-generate a first pass (<code>generateInterpretations</code>), then review/edit each (status, rationale, reviewer audit trail) via <code>saveInterpretation</code>.</li>
+                        <li><strong>Matrix</strong> (<code>l2MatrixView</code> / <code>l2RenderMatrix</code> / <code>l2EditCell</code>) — documents × clauses grid, colour-coded by compliance status; click a cell to view/edit that interpretation.</li>
+                        <li><strong>Passports</strong> (<code>l2PassportsView</code> / <code>l2PassportEditor</code>) — create DPP records, link interpretations, export as JSON-LD (schema.org + ESPR) or JSON.</li>
                     </ul>
                 </div>
                 <div class="implications-box">
-                    <strong>Implications:</strong>
+                    <strong>Implementation notes:</strong>
                     <ul class="proposal-list" style="margin-top: 5px;">
-                        <li>Risk: Low (all APIs already tested and deployed)</li>
-                        <li>Dependencies: None (backend is ready)</li>
-                        <li>Browser: Modern browsers (same as existing portal)</li>
-                        <li>Performance: Compliance matrix may need pagination for 100+ clauses</li>
-                        <li>User training: Will need documentation on new workflow</li>
+                        <li><strong>Backend was not actually ready</strong> as originally assumed — it was undeployed and did not compile (<code>.on("conflict")</code> is not a Supabase method), had unauthenticated read actions, produced empty interpretations for PDFs, and was <em>missing the entire passport CRUD</em>. All fixed; <code>generateInterpretations</code> rewritten to send the document file to Claude (PDF-capable) and batch ~10 clauses per call.</li>
+                        <li>Verified live end-to-end against real data: RoHS clauses → interpretations → compliance matrix → DPP JSON-LD export. 15/15 UI mock checks passed.</li>
+                        <li>Function names differ from the original proposal (<code>renderStandardDetails</code> etc.) — the actual implementation uses the <code>l2*</code> naming under <code>renderLevel2()</code>.</li>
+                        <li>Commits: <code>9aec605</code> (fix + complete Level 2 backend), <code>91eb470</code> (build Level 2 UI — "Clauses &amp; DPP" tab). Related follow-ups: <code>4ca3cb1</code> (Phase 3 structured-first deviation scan), <code>7bf6a1b</code> (AI token-usage / cost display).</li>
                     </ul>
                 </div>
             </div>
