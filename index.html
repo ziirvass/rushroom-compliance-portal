@@ -5,7 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Rushroom Compliance Portal</title>
   <meta name="description" content="Live compliance status and as-operated documents for Rushroom AB's LED system-furniture product." />
-  <link rel="stylesheet" href="./assets/styles.css?v=66" />
+  <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg?v=66" />
+  <meta name="theme-color" content="#12161e" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#2fa564" media="(prefers-color-scheme: light)" />
+  <script>
+    /* Apply the saved (or system) theme before first paint to avoid a flash. */
+    (function () {
+      try {
+        var t = localStorage.getItem("rushroom_theme");
+        if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="./assets/styles.css?v=67" />
   <script>
     /* Keep the sticky tab bar pinned right below the sticky header, whatever
        height the header renders at (responsive / wrapped). */
@@ -37,7 +50,10 @@
           <p class="tagline">LED system-furniture — compliance status &amp; as-operated documents</p>
         </div>
       </div>
-      <nav aria-label="Session" id="session-actions" class="session-actions"></nav>
+      <div class="header-tools">
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Switch theme"></button>
+        <nav aria-label="Session" id="session-actions" class="session-actions"></nav>
+      </div>
     </div>
   </header>
 
@@ -110,10 +126,10 @@
   </footer>
 
   <script src="https://accounts.google.com/gsi/client" async></script>
-  <script src="./assets/config.js?v=66"></script>
-  <script src="./assets/api.js?v=66"></script>
-  <script src="./assets/gdocs.js?v=66"></script>
-  <script src="./assets/viewer.js?v=66"></script>
-  <script src="./assets/app.js?v=66"></script>
+  <script src="./assets/config.js?v=67"></script>
+  <script src="./assets/api.js?v=67"></script>
+  <script src="./assets/gdocs.js?v=67"></script>
+  <script src="./assets/viewer.js?v=67"></script>
+  <script src="./assets/app.js?v=67"></script>
 </body>
 </html>

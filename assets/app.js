@@ -2635,19 +2635,43 @@
   function wireBrandHome() {
     const brand = $(".brand");
     if (!brand) return;
+    const firstTab = $("#tablist .tab");
     brand.setAttribute("role", "link");
     brand.setAttribute("tabindex", "0");
-    brand.setAttribute("title", "Go to Compliance Status");
+    brand.setAttribute("title", firstTab ? `Go to ${firstTab.textContent.trim()}` : "Home");
     const go = () => {
-      const app = $("#portal-app"), tab = $("#tab-readiness");
+      const app = $("#portal-app"), tab = $("#tablist .tab");
       if (app && !app.hidden && tab) { tab.click(); tab.focus(); window.scrollTo({ top: 0, behavior: "smooth" }); }
     };
     brand.addEventListener("click", go);
     brand.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
   }
 
+  // Light/dark theme toggle (persisted). The initial theme is applied by an
+  // inline <head> script before paint; this just wires the button.
+  const THEME_ICON = {
+    dark: svg('<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4l1.4-1.4M18 6l1.4-1.4"/>'),
+    light: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4 6.5 6.5 0 0 0 20 14.5z"/>'),
+  };
+  function wireThemeToggle() {
+    const btn = $("#theme-toggle");
+    if (!btn) return;
+    const sync = () => {
+      const light = document.documentElement.getAttribute("data-theme") === "light";
+      btn.innerHTML = light ? THEME_ICON.light : THEME_ICON.dark; // moon while in light mode, sun while in dark mode
+      const label = light ? "Switch to dark theme" : "Switch to light theme";
+      btn.setAttribute("aria-label", label); btn.setAttribute("title", label);
+    };
+    sync();
+    btn.addEventListener("click", () => {
+      const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", next);
+      try { localStorage.setItem("rushroom_theme", next); } catch { /* ignore */ }
+      sync();
+    });
+  }
+
   function initFullPortal() {
-    wireBrandHome();
     if (apiEnabled()) setupLoginGate((s) => renderApi(s.role || "rushroom", "#readiness-panel"));
     else setupGate(renderPortal); // read-only fallback
   }
@@ -2690,4 +2714,8 @@
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initFullPortal);
     else initFullPortal();
   }
+  // Wire the theme toggle + brand-home on any page that has them (portal, supplier).
+  const wireChrome = () => { wireThemeToggle(); wireBrandHome(); };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireChrome);
+  else wireChrome();
 })();

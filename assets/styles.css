@@ -786,3 +786,48 @@ body:has(#portal-app:not([hidden])) .brand { cursor: pointer; border-radius: 12p
 body:has(#portal-app:not([hidden])) .brand:hover h1 { color: var(--accent); }
 body:has(#portal-app:not([hidden])) .brand:hover .brand-mark { filter: brightness(1.06); }
 .brand:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 12px; }
+
+/* Header tools: theme toggle + session cluster */
+.header-tools { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
+.icon-btn {
+  flex: none; width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.icon-btn:hover, .icon-btn:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+.icon-btn svg { display: block; }
+
+/* ============================ Light theme ============================ */
+:root[data-theme="light"] {
+  --bg: #eef1f6; --panel: #ffffff; --panel-2: #f3f6fa; --border: #d3dae4;
+  --text: #15202e; --muted: #566073;
+  --accent: #15803d; --accent-ink: #ffffff;
+  --green: #15803d; --green-bg: #e7f7ec; --green-bd: #9ad9ac;
+  --amber: #b7791f; --amber-bg: #fbf1dd; --amber-bd: #e6cf9a;
+  --red: #c0392b;   --red-bg: #fbeae8;   --red-bd: #e6b0aa;
+  --blue: #1d6fd6;  --blue-bg: #e8f0fc;  --blue-bd: #a9c8f0;
+  --gray: #55617a;  --gray-bg: #eef1f6;  --gray-bd: #cbd3df;
+  --focus: #b06f00;
+}
+:root[data-theme="light"] body { background: radial-gradient(1100px 520px at 50% -260px, #ffffff 0%, rgba(255,255,255,0) 62%), var(--bg); }
+:root[data-theme="light"] .site-header { background: rgba(255,255,255,0.82); box-shadow: 0 10px 28px -18px rgba(30,45,70,0.45); }
+:root[data-theme="light"] .gate-card { background: #ffffff; box-shadow: 0 24px 60px -28px rgba(30,45,70,0.35), inset 0 1px 0 rgba(0,0,0,0.02); }
+:root[data-theme="light"] .field input { background: #fff; }
+:root[data-theme="light"] .tabs { background: var(--bg); }
+:root[data-theme="light"] mark.diff-add { background: #ffe27a; color: #3a2c00; }
+
+/* ================= Print: force a clean, ink-friendly light palette ================= */
+@media print {
+  :root, :root[data-theme="dark"], :root[data-theme="light"] {
+    --bg: #ffffff; --panel: #ffffff; --panel-2: #f4f6f9; --border: #c3ccd8;
+    --text: #101418; --muted: #3f4a5a; --accent: #146c34; --accent-ink: #ffffff;
+    --green: #146c34; --amber: #8a5b00; --red: #a33028; --blue: #14549c;
+  }
+  body { background: #fff !important; }
+  .site-header { position: static; background: #fff !important; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; border-bottom: 1px solid #c3ccd8; }
+  .site-header::before { display: none; }
+  .header-tools, #theme-toggle, .session-actions, .skip-link { display: none !important; }
+  .tabs { position: static; box-shadow: none; }
+  mark.diff-add { background: #ffe27a !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .brand-mark { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

@@ -5,7 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Supplier View · Rushroom Compliance Portal</title>
   <meta name="description" content="Supplier view: supplier documents and the status of supplier compliance steps for Rushroom AB." />
-  <link rel="stylesheet" href="./assets/styles.css?v=66" />
+  <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg?v=67" />
+  <meta name="theme-color" content="#12161e" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#2fa564" media="(prefers-color-scheme: light)" />
+  <script>
+    (function () { try { var t = localStorage.getItem("rushroom_theme"); if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"; document.documentElement.setAttribute("data-theme", t); } catch (e) {} })();
+  </script>
+  <link rel="stylesheet" href="./assets/styles.css?v=67" />
   <script>
     (function () {
       function setHeaderH() {
@@ -23,14 +29,24 @@
 
   <header class="site-header">
     <div class="wrap header-row">
-      <div>
-        <span class="badge">Rushroom AB · Suppliers</span>
-        <h1>Supplier View</h1>
-        <p class="tagline">Your documents and the status of supplier compliance steps</p>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3l7 3v5c0 4.6-3.1 7.7-7 9-3.9-1.3-7-4.4-7-9V6l7-3z"/><path d="M9 12l2.2 2.2L15.5 10"/>
+          </svg>
+        </span>
+        <div class="brand-text">
+          <span class="badge">Rushroom AB · Suppliers</span>
+          <h1>Supplier View</h1>
+          <p class="tagline">Your documents and the status of supplier compliance steps</p>
+        </div>
       </div>
-      <nav aria-label="Views">
-        <a class="btn btn-sm" href="./index.html">Full portal →</a>
-      </nav>
+      <div class="header-tools">
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Switch theme"></button>
+        <nav aria-label="Views">
+          <a class="btn btn-sm" href="./index.html">Full portal →</a>
+        </nav>
+      </div>
     </div>
   </header>
 
@@ -83,10 +99,10 @@
     </div>
   </footer>
 
-  <script src="./assets/config.js?v=66"></script>
-  <script src="./assets/api.js?v=66"></script>
-  <script src="./assets/viewer.js?v=66"></script>
-  <script src="./assets/app.js?v=66"></script>
-  <script src="./assets/supplier.js?v=66"></script>
+  <script src="./assets/config.js?v=67"></script>
+  <script src="./assets/api.js?v=67"></script>
+  <script src="./assets/viewer.js?v=67"></script>
+  <script src="./assets/app.js?v=67"></script>
+  <script src="./assets/supplier.js?v=67"></script>
 </body>
 </html>
