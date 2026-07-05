@@ -15,7 +15,9 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             line-height: 1.6;
             color: #333;
-            background: #fafafa;
+            background: #fafafa;            git log --oneline -2
+            # f49aca9 docs: add handoff README for Claude Code
+            # 2e7b738 docs: add Implementation Status and Deployment Checklist
             padding: 40px;
         }
         
@@ -155,6 +157,188 @@
             margin: 40px 0;
         }
         
+        .proposal-card {
+            background: #f9f9f9;
+            border: 2px solid #ddd;
+            border-left: 5px solid #3498db;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        
+        .proposal-card.draft {
+            border-left-color: #95a5a6;
+            background: #ecf0f1;
+        }
+        
+        .proposal-card.proposed {
+            border-left-color: #f39c12;
+            background: #fef5e7;
+        }
+        
+        .proposal-card.in_progress {
+            border-left-color: #3498db;
+            background: #ebf5fb;
+        }
+        
+        .proposal-card.implemented {
+            border-left-color: #27ae60;
+            background: #eafaf1;
+        }
+        
+        .proposal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 10px;
+        }
+        
+        .proposal-title {
+            font-weight: bold;
+            font-size: 16px;
+            color: #2c3e50;
+            flex-grow: 1;
+        }
+        
+        .proposal-id {
+            background: #3498db;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .proposal-status {
+            padding: 4px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        
+        .status-draft {
+            background: #95a5a6;
+            color: white;
+        }
+        
+        .status-proposed {
+            background: #f39c12;
+            color: white;
+        }
+        
+        .status-in_progress {
+            background: #3498db;
+            color: white;
+        }
+        
+        .status-implemented {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .proposal-meta {
+            display: flex;
+            gap: 20px;
+            margin: 10px 0;
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .proposal-section {
+            margin: 10px 0;
+        }
+        
+        .proposal-section-title {
+            font-weight: bold;
+            color: #34495e;
+            margin-top: 8px;
+            margin-bottom: 5px;
+            font-size: 13px;
+        }
+        
+        .proposal-list {
+            margin-left: 15px;
+            font-size: 13px;
+            color: #555;
+        }
+        
+        .proposal-list li {
+            margin-bottom: 4px;
+        }
+        
+        .implications-box {
+            background: #fff3cd;
+            border-left: 3px solid #ffc107;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 13px;
+            border-radius: 3px;
+        }
+        
+        .cause-box {
+            background: #e3f2fd;
+            border-left: 3px solid #2196f3;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 13px;
+            border-radius: 3px;
+        }
+        
+        .effect-box {
+            background: #e8f5e9;
+            border-left: 3px solid #4caf50;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 13px;
+            border-radius: 3px;
+        }
+        
+        .priority-high {
+            color: #c0392b;
+            font-weight: bold;
+        }
+        
+        .priority-medium {
+            color: #e67e22;
+            font-weight: bold;
+        }
+        
+        .priority-low {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        
+        .proposal-filters {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        
+        .filter-button {
+            padding: 6px 12px;
+            border: 1px solid #bdc3c7;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.3s;
+        }
+        
+        .filter-button:hover {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+        
+        .filter-button.active {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+
         @media print {
             body {
                 padding: 0;
@@ -1147,6 +1331,325 @@
                 <div class="list-item">
                     <strong>PDF embedding:</strong> pdf-data format can be embedded in PDF metadata for offline distribution
                 </div>
+            </div>
+        </div>
+
+        <!-- PROPOSALS & DRAFTS SECTION -->
+        <div class="section page-break">
+            <h2>12. Proposals & Drafts — Future Enhancements</h2>
+            
+            <p>This section catalogs proposed features, improvements, and enhancements. Each proposal includes:</p>
+            <ul style="margin-left: 20px; margin-bottom: 20px;">
+                <li><strong>Cause:</strong> What problem or gap does it solve?</li>
+                <li><strong>Effect:</strong> What changes would be made?</li>
+                <li><strong>Implications:</strong> Risks, dependencies, performance, UX impact, effort estimate</li>
+                <li><strong>Status:</strong> Draft (idea), Proposed (approved for consideration), In Progress, Implemented, or Rejected</li>
+                <li><strong>Implementation:</strong> Track which proposals were implemented and in which commits</li>
+            </ul>
+            
+            <h3>Active Proposals (sorted by priority)</h3>
+            
+            <div class="proposal-card in_progress">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-001</div>
+                        <div class="proposal-title">Phase 5: Frontend UI Implementation</div>
+                    </div>
+                    <span class="proposal-status status-in_progress">IN PROGRESS</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-high">HIGH</span></span>
+                    <span>Effort: 4 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>Level 2 backend API complete (7 new actions) but frontend views missing</li>
+                        <li>Users cannot interact with extracted clauses, create interpretations, view compliance matrices</li>
+                        <li>DPP export API exists but no UI to trigger it</li>
+                    </ul>
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>New functions in app.js: renderStandardDetails(), renderInterpretationEditor(), renderComplianceMatrix(), renderPassportView()</li>
+                        <li>New optional tabs in index.html or sections in existing tabs</li>
+                        <li>Users gain ability to view/edit clauses, manage interpretations, view compliance grids, manage DPP passports</li>
+                    </ul>
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>Risk: Low (all APIs already tested and deployed)</li>
+                        <li>Dependencies: None (backend is ready)</li>
+                        <li>Browser: Modern browsers (same as existing portal)</li>
+                        <li>Performance: Compliance matrix may need pagination for 100+ clauses</li>
+                        <li>User training: Will need documentation on new workflow</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="proposal-card proposed">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-010</div>
+                        <div class="proposal-title">ESPR-Specific Module: Compliance Path Tracing</div>
+                    </div>
+                    <span class="proposal-status status-proposed">PROPOSED</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-high">HIGH</span></span>
+                    <span>Effort: 8 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>EU regulators will ask: 'How did you ensure compliance with Article 8?'</li>
+                        <li>Need to trace complete path from regulation to implementation to declaration</li>
+                        <li>Current system has pieces but no integrated compliance chain visualization</li>
+                    </ul>
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>New 'Compliance Paths' view showing: Clause → Implementation → Interpretation → Product Feature → DPP Declaration</li>
+                        <li>User can trace back from DPP claim to its evidence</li>
+                        <li>Generates compliance chain report (PDF) suitable for auditors</li>
+                    </ul>
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>Risk: Medium (regulatory compliance - must be accurate)</li>
+                        <li>Regulatory value: Very high (directly addresses ESPR requirements)</li>
+                        <li>Dependencies: PROP-001 (needs all pieces in place first)</li>
+                        <li><strong>ESPR deadline 2027</strong> - should start Phase 6 planning</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="proposal-card draft">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-002</div>
+                        <div class="proposal-title">Automated Compliance Matrix Updates</div>
+                    </div>
+                    <span class="proposal-status status-draft">DRAFT</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-medium">MEDIUM</span></span>
+                    <span>Effort: 3 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong> Users need to see compliance impact immediately after saving interpretations; currently requires manual refresh or page reload to see updated matrix
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong> Background task triggers on saveInterpretation(); emits WebSocket/SSE events to connected clients; matrix updates in real-time without page reload
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong> Risk: Medium (adds real-time complexity, WebSocket dependencies) | Dependencies: WebSocket support | Browser: Modern browsers only
+                </div>
+            </div>
+
+            <div class="proposal-card draft">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-003</div>
+                        <div class="proposal-title">Bulk Interpretation Generation & Approval Workflow</div>
+                    </div>
+                    <span class="proposal-status status-draft">DRAFT</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-medium">MEDIUM</span></span>
+                    <span>Effort: 6 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong> Current API requires manually selecting which clauses to generate; no staged workflow; users need to review all proposals before committing
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong> Add 'Generate for entire document' button; create temp draft storage; show all proposals side-by-side before saving; bulk approve/reject/edit
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong> Risk: Medium (adds DB schema for draft state) | Depends on: PROP-001 | UX improvement: Significant (review all proposals at once)
+                </div>
+            </div>
+
+            <div class="proposal-card draft">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-004</div>
+                        <div class="proposal-title">Deviation Trend Analysis & Patterns</div>
+                    </div>
+                    <span class="proposal-status status-draft">DRAFT</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-medium">MEDIUM</span></span>
+                    <span>Effort: 4 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong> No visibility into compliance trends; can't identify systemic problems ('clause 4.11 is always a deviation'); can't prioritize which issues to fix first
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong> Analytics tab showing: most problematic clauses, problematic documents, compliance trends over time, deviation distribution by severity
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong> Risk: Low (read-only) | Performance: Good (simple GROUP BY queries) | Data quality: Trends meaningful after weeks of data collection
+                </div>
+            </div>
+
+            <div class="proposal-card draft">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-005</div>
+                        <div class="proposal-title">Automatic DPP Generation from Compliance Matrix</div>
+                    </div>
+                    <span class="proposal-status status-draft">DRAFT</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-medium">MEDIUM</span></span>
+                    <span>Effort: 3 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong> Passports created manually; no automatic population from compliance data; users copy-paste data manually (error-prone)
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong> 'Generate from Matrix' button; select product + standards + interpretations; system auto-creates passport with compliance data pre-populated
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong> Risk: Low (no new tables) | Effort: 3 hours | UX: Significant (reduces manual work) | Could be Phase 5b
+                </div>
+            </div>
+
+            <div class="proposal-card draft">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-006</div>
+                        <div class="proposal-title">AI-Suggested Compliance Status</div>
+                    </div>
+                    <span class="proposal-status status-draft">DRAFT</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-low">LOW</span></span>
+                    <span>Effort: 2 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong> Users manually set status for each interpretation; Claude already read document - could provide preliminary assessment
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong> Claude suggests compliance_status (compliant/deviation/pending/na) during generation; UI shows as pre-filled but editable
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong> Risk: Low (suggestion only) | Token usage: Minimal | UX: Moderate (saves typing, user must verify) | Effort: 2 hours
+                </div>
+            </div>
+
+            <div class="proposal-card draft">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-008</div>
+                        <div class="proposal-title">Version Control for Interpretations (Diff View)</div>
+                    </div>
+                    <span class="proposal-status status-draft">DRAFT</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-medium">MEDIUM</span></span>
+                    <span>Effort: 5 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong> Interpretations can be edited; no audit trail showing what changed; can't see if compliance status changed from compliant → deviation
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong> Add interpretation_versions table; saveInterpretation creates new row instead of UPDATE; show version history + diff view; can revert versions
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong> Compliance value: High (audit trail useful for regulatory) | Aligns with Level 1 immutability philosophy | Storage: DB size increases
+                </div>
+            </div>
+
+            <div class="proposal-card draft">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-009</div>
+                        <div class="proposal-title">Scheduled Compliance Scans & Alerts</div>
+                    </div>
+                    <span class="proposal-status status-draft">DRAFT</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-low">LOW</span></span>
+                    <span>Effort: 4 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong> Deviation scans are manual; no proactive monitoring for compliance drift; users may miss emerging compliance issues
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong> Run scans on schedule (weekly); email alerts when compliance status changes; include summary (improved/worsened count)
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong> Risk: Low | Operational awareness: Positive | Phase 6 candidate | Cost: Minimal
+                </div>
+            </div>
+
+            <div class="proposal-card draft">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-007</div>
+                        <div class="proposal-title">Multi-Language Support (EN, DE, SV)</div>
+                    </div>
+                    <span class="proposal-status status-draft">DRAFT</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-low">LOW</span></span>
+                    <span>Effort: 10 hours</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-05</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong> Rushroom is international; standards referenced in multiple languages; some users may prefer local language for compliance docs
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong> Add language_code column; add translation_group_id; Claude auto-generates translations; UI language selector; DPP respects language
+                </div>
+                <div class="implications-box">
+                    <strong>Implications:</strong> Effort: 10 hours (large) | Risk: Medium (complexity) | ROI depends on actual multi-language need | Recommend MVP: English only, defer to Phase 6
+                </div>
+            </div>
+
+            <h3>How to Use This Section</h3>
+            <div class="highlight">
+                <p><strong>Decision Workflow:</strong></p>
+                <ol style="margin-left: 20px; margin-top: 10px;">
+                    <li><strong>Review proposals</strong> for relevance to your compliance needs</li>
+                    <li><strong>Check cause/effect/implications</strong> to assess value vs. effort</li>
+                    <li><strong>Update status</strong> from Draft → Proposed → In Progress → Implemented</li>
+                    <li><strong>Track implementation</strong> by adding commit hashes to each proposal</li>
+                    <li><strong>Document learnings</strong> about what worked or what changed during implementation</li>
+                </ol>
+                
+                <p style="margin-top: 15px;"><strong>Status Meanings:</strong></p>
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li><span class="proposal-status status-draft">DRAFT</span> — Idea, not yet reviewed or approved</li>
+                    <li><span class="proposal-status status-proposed">PROPOSED</span> — Reviewed, approved for consideration, waiting on priority/scheduling</li>
+                    <li><span class="proposal-status status-in_progress">IN PROGRESS</span> — Active development underway</li>
+                    <li><span class="proposal-status status-implemented">IMPLEMENTED</span> — Complete and deployed; commit hash recorded</li>
+                </ul>
             </div>
         </div>
 

@@ -1,0 +1,421 @@
+[
+  {
+    "id": "PROP-001",
+    "date_proposed": "2026-07-05",
+    "title": "Phase 5: Frontend UI Implementation",
+    "status": "in_progress",
+    "category": "UI",
+    "description": "Implement four new Level 2 UI views in assets/app.js for standards detail, interpretation editor, compliance matrix, and passport management.",
+    "cause": [
+      "Level 2 backend API is complete (7 new actions) but frontend views are missing",
+      "Users cannot yet interact with extracted clauses, create interpretations, or view compliance matrices",
+      "DPP export API exists but has no UI to trigger it"
+    ],
+    "effect": [
+      "New functions added to app.js: renderStandardDetails(), renderInterpretationEditor(), renderComplianceMatrix(), renderPassportView()",
+      "New optional tabs added to index.html or sections in existing tabs",
+      "Users gain ability to see extracted clauses, edit interpretations, view compliance grids, manage DPP passports"
+    ],
+    "implications": [
+      "Effort: ~4 hours of frontend development",
+      "Risk: Low (all APIs already tested and deployed)",
+      "Dependencies: None (backend is ready)",
+      "Browser compatibility: Same as existing portal (modern browsers)",
+      "Performance: Compliance matrix might need pagination for 100+ clauses",
+      "User training: Will need documentation on new workflow"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "HIGH",
+    "estimated_effort_hours": 4,
+    "implementation_checklist": [
+      "Standards detail view - show extracted clauses as sortable table",
+      "Interpretation editor - per-clause compliance form with status dropdown",
+      "Compliance matrix - grid visualization with color-coded cells",
+      "Passport view - create/link/export product passports"
+    ],
+    "implementation_notes": "",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  },
+  {
+    "id": "PROP-002",
+    "date_proposed": "2026-07-05",
+    "title": "Automated Compliance Matrix Updates",
+    "status": "draft",
+    "category": "Feature",
+    "description": "Automatically trigger compliance matrix recalculation whenever an interpretation is saved, providing real-time view of compliance changes.",
+    "cause": [
+      "Users need to see compliance impact immediately after saving interpretations",
+      "Currently requires manual refresh or page reload to see updated matrix",
+      "Could detect patterns (e.g., multiple deviations in same clause across docs)"
+    ],
+    "effect": [
+      "Add background task to portal-api that triggers on saveInterpretation() completion",
+      "Emit WebSocket or server-sent events to connected clients",
+      "Update compliance matrix UI in real-time without page reload",
+      "Optional: Highlight changed cells in matrix"
+    ],
+    "implications": [
+      "Effort: ~2-3 hours (backend + frontend)",
+      "Risk: Medium (adds real-time complexity, WebSocket dependencies)",
+      "Dependencies: WebSocket support or Server-Sent Events",
+      "Browser compatibility: Modern browsers only (IE 11 may not support)",
+      "Performance: Could impact server if many users editing simultaneously",
+      "UX benefit: Highly visible - users see changes immediately",
+      "Operational: May need monitoring for WebSocket connection issues"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "MEDIUM",
+    "estimated_effort_hours": 3,
+    "implementation_checklist": [
+      "Add event emitter to saveInterpretation action",
+      "Implement WebSocket/SSE on backend",
+      "Add real-time listener in app.js",
+      "Highlight matrix cells that changed"
+    ],
+    "implementation_notes": "Depends on PROP-001 (Compliance Matrix UI must exist first)",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  },
+  {
+    "id": "PROP-003",
+    "date_proposed": "2026-07-05",
+    "title": "Bulk Interpretation Generation & Approval Workflow",
+    "status": "draft",
+    "category": "Workflow",
+    "description": "Add UI for generating interpretations in bulk (all clauses for a document), with staged approval workflow (draft → review → approved).",
+    "cause": [
+      "Current generateInterpretations() requires manually selecting which clauses to generate for",
+      "No staged workflow - once generated, interpretations are immediately saved",
+      "Users need to review all proposals before any are committed to database"
+    ],
+    "effect": [
+      "Add 'Generate for entire document' button in interpretation editor",
+      "Create temporary 'draft interpretations' storage (session or temp table)",
+      "Show all generated proposals side-by-side before saving any",
+      "Allow bulk approve/reject/edit before final save",
+      "Add workflow stage tracking: draft → review_pending → approved → saved"
+    ],
+    "implications": [
+      "Effort: ~5-6 hours (backend staging + UI workflow)",
+      "Risk: Medium (adds database schema for draft state)",
+      "Dependencies: New 'draft_interpretations' temp table or session storage",
+      "Browser compatibility: All modern browsers",
+      "Performance: Session storage is fine for <1000 interpretations, otherwise use DB",
+      "Data consistency: Temp storage must be cleaned up after session",
+      "UX improvement: Significant (users can review all proposals at once)",
+      "Operational: Must manage cleanup of abandoned draft sessions"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "MEDIUM",
+    "estimated_effort_hours": 6,
+    "implementation_checklist": [
+      "Create temp storage for draft interpretations",
+      "Add bulk generate UI component",
+      "Implement side-by-side review view",
+      "Add approve/reject/edit controls",
+      "Implement cleanup for abandoned drafts"
+    ],
+    "implementation_notes": "Depends on PROP-001. Could use session storage instead of DB for MVP.",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  },
+  {
+    "id": "PROP-004",
+    "date_proposed": "2026-07-05",
+    "title": "Deviation Deviation Trend Analysis & Patterns",
+    "status": "draft",
+    "category": "Analytics",
+    "description": "Add analytics view showing deviation patterns: which clauses have most deviations, which documents, trending worse/better over time.",
+    "cause": [
+      "Users have no visibility into compliance trend over time",
+      "No way to identify systemic compliance problems (e.g., 'clause 4.11 is always a deviation')",
+      "Can't prioritize which compliance issues to fix first (high-impact vs low-impact)"
+    ],
+    "effect": [
+      "New 'Analytics' tab or section in portal showing:",
+      "  - Most problematic clauses (sorted by deviation count)",
+      "  - Most problematic documents (sorted by deviation count)",
+      "  - Compliance trend line (over time, as versions increase)",
+      "  - Deviation distribution by severity/type",
+      "  - New query: SELECT clause_id, COUNT(*) as deviation_count FROM as_operates_interpretations WHERE compliance_status='deviation' GROUP BY clause_id"
+    ],
+    "implications": [
+      "Effort: ~3-4 hours (new queries + visualization)",
+      "Risk: Low (read-only, no mutations)",
+      "Dependencies: New database queries (already supported by schema)",
+      "Browser compatibility: Modern browsers with chart library (Chart.js, etc.)",
+      "Performance: Good (simple GROUP BY queries, indexed on compliance_status)",
+      "Data quality: Trends only meaningful after several weeks of data collection",
+      "UX value: High (helps prioritize compliance work)",
+      "Operational: None (read-only)"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "MEDIUM",
+    "estimated_effort_hours": 4,
+    "implementation_checklist": [
+      "Add deviation analytics queries to portal-api",
+      "Create renderAnalyticsDashboard() function",
+      "Add Chart.js or similar for visualizations",
+      "Implement clause trend line",
+      "Add document deviation heatmap"
+    ],
+    "implementation_notes": "Can be added independently, doesn't block other features.",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  },
+  {
+    "id": "PROP-005",
+    "date_proposed": "2026-07-05",
+    "title": "Automatic DPP Generation from Compliance Matrix",
+    "status": "draft",
+    "category": "Feature",
+    "description": "Auto-create product passports from compliance data: select product + applicable standards + compliance matrix rows → system generates complete DPP.",
+    "cause": [
+      "Currently product passports are created manually",
+      "No automatic population from compliance matrix data",
+      "Users must copy-paste compliance data into passport fields",
+      "Error-prone process (manual data entry)"
+    ],
+    "effect": [
+      "New 'Generate from Matrix' button in passport view",
+      "UI shows: select product + standards + relevant interpretations",
+      "System automatically creates passport_interpretations_links based on selection",
+      "Passport pre-populated with compliance data from selected interpretations",
+      "User can then add sustainability data and export"
+    ],
+    "implications": [
+      "Effort: ~2-3 hours (mostly UI + linking logic)",
+      "Risk: Low (no new tables, uses existing queries)",
+      "Dependencies: PROP-001 (Compliance Matrix), existing passport table",
+      "Browser compatibility: All modern browsers",
+      "Performance: Fast (simple joins)",
+      "User training: Medium (new workflow to explain)",
+      "Operational: None",
+      "UX improvement: Significant (reduces manual work, improves data accuracy)"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "MEDIUM",
+    "estimated_effort_hours": 3,
+    "implementation_checklist": [
+      "Add new action: autoGeneratePassport (take product + standards + interpretation IDs)",
+      "Create UI modal for selection",
+      "Implement linking logic",
+      "Add pre-population of compliance data in passport"
+    ],
+    "implementation_notes": "Low-risk, high-value feature. Could be Phase 5b.",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  },
+  {
+    "id": "PROP-006",
+    "date_proposed": "2026-07-05",
+    "title": "AI-Suggested Compliance Status Based on Document Content",
+    "status": "draft",
+    "category": "AI Feature",
+    "description": "When generating interpretations, Claude also suggests compliance_status (compliant/deviation/pending) based on document content analysis.",
+    "cause": [
+      "Currently interpretations are generated without suggested status",
+      "Users must manually read through and set status for each",
+      "Claude has already read the document - could provide preliminary assessment"
+    ],
+    "effect": [
+      "Update generateInterpretations action to add compliance_status_suggested field",
+      "Claude prompt modified to include: 'Based on the document, what is likely status? (compliant/deviation/pending/na)'",
+      "Returned interpretation includes both interpretation_text and suggested status",
+      "UI shows suggested status as pre-filled but editable (user can override)"
+    ],
+    "implications": [
+      "Effort: ~1-2 hours (prompt modification + UI change)",
+      "Risk: Low (suggestion only, user decides final status)",
+      "Dependencies: PROP-001 (needs UI to show suggestions)",
+      "Browser compatibility: None (backend change)",
+      "Performance: No impact (Claude already called)",
+      "Token usage: Minimal (already generating text, just extracting structured data)",
+      "UX improvement: Moderate (saves typing, but user must verify)",
+      "Operational: Monitor Claude accuracy over time to calibrate expectations"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "LOW",
+    "estimated_effort_hours": 2,
+    "implementation_checklist": [
+      "Modify Claude prompt to suggest status",
+      "Update JSON schema for generateInterpretations response",
+      "Update UI to show suggested_status field",
+      "Add explanatory note: 'Claude suggests: X (review and confirm)'"
+    ],
+    "implementation_notes": "Easy win, low risk. Good for Phase 5b.",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  },
+  {
+    "id": "PROP-007",
+    "date_proposed": "2026-07-05",
+    "title": "Multi-Language Support for Standards & Interpretations",
+    "status": "draft",
+    "category": "Localization",
+    "description": "Add optional translations for standards and interpretations (English, German, Swedish).",
+    "cause": [
+      "Rushroom is international (Swedish company, EU market)",
+      "Standards often referenced in multiple languages",
+      "Some users may prefer local language for compliance documents"
+    ],
+    "effect": [
+      "Add language_code column to standards and interpretations tables",
+      "Add translation_group_id to link translations of same content",
+      "Claude can auto-generate translations when new interpretation created",
+      "UI language selector to switch between translations",
+      "DPP export respects selected language"
+    ],
+    "implications": [
+      "Effort: ~8-10 hours (schema changes + UI + translations)",
+      "Risk: Medium (schema change, complexity in query logic)",
+      "Dependencies: None",
+      "Browser compatibility: All",
+      "Performance: Need indexes on language_code and translation_group_id",
+      "Data volume: Increases storage (each interpretation now multiple rows)",
+      "Operational: Must manage translation quality (Claude + human review)",
+      "User training: Medium (new language selector UI)",
+      "ROI: High (if users actually need multiple languages)"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "LOW",
+    "estimated_effort_hours": 10,
+    "implementation_checklist": [
+      "Add language_code column to schema",
+      "Add translation_group_id for linking",
+      "Create language selector UI",
+      "Integrate Claude for auto-translation",
+      "Update DPP export to use selected language"
+    ],
+    "implementation_notes": "Large effort. Recommend deferring to Phase 6. Consider MVP: just English for now.",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  },
+  {
+    "id": "PROP-008",
+    "date_proposed": "2026-07-05",
+    "title": "Version Control for Interpretations (Diff View)",
+    "status": "draft",
+    "category": "Feature",
+    "description": "Track changes to interpretations over time (what text changed, who changed it, when). Show diff view comparing versions.",
+    "cause": [
+      "Interpretations can be edited (compliance status, text, rationale, etc.)",
+      "No audit trail showing what changed between edits",
+      "Can't see if compliance status changed from compliant → deviation"
+    ],
+    "effect": [
+      "Add interpretation_versions table (like document_versions)",
+      "saveInterpretation creates new row instead of UPDATE",
+      "Each version has: id, interpretation_id (FK), version_number, created_by, created_at, full_content",
+      "UI shows version history + diff view (side-by-side)",
+      "Can revert to previous version if needed"
+    ],
+    "implications": [
+      "Effort: ~4-5 hours (new table + query logic + UI)",
+      "Risk: Medium (schema change, versioning logic)",
+      "Dependencies: None",
+      "Browser compatibility: All (diff library needed: e.g., diff-match-patch)",
+      "Storage: Increases DB size (all interpretations kept)",
+      "Performance: Query must select specific version, not performance issue",
+      "Compliance value: High (audit trail useful for regulatory)",
+      "Operational: Data cleanup (old versions can be archived)"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "MEDIUM",
+    "estimated_effort_hours": 5,
+    "implementation_checklist": [
+      "Create interpretation_versions table",
+      "Modify saveInterpretation to insert new version row",
+      "Add getInterpretationHistory action",
+      "Create diff view UI component",
+      "Add 'Revert to version' button"
+    ],
+    "implementation_notes": "Good for compliance. Aligns with Level 1 immutability philosophy.",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  },
+  {
+    "id": "PROP-009",
+    "date_proposed": "2026-07-05",
+    "title": "Scheduled Compliance Scans & Alerts",
+    "status": "draft",
+    "category": "Automation",
+    "description": "Run deviation scans on a schedule (e.g., weekly) and email alerts when compliance status changes.",
+    "cause": [
+      "Currently deviation scans are manual (user clicks button)",
+      "No proactive monitoring for compliance drift",
+      "Users may miss emerging compliance issues"
+    ],
+    "effect": [
+      "Add scheduled job (via Supabase cron / edge function)",
+      "Weekly run of runDeviationScan",
+      "Compare new findings to previous scan",
+      "Email alert if: new deviations found, or existing deviations resolved",
+      "Include summary in email (improved/worsened count)"
+    ],
+    "implications": [
+      "Effort: ~3-4 hours (scheduling + alerting)",
+      "Risk: Low (runs in background)",
+      "Dependencies: Email service (already integrated via Supabase Auth)",
+      "Performance: Scans run off-peak to minimize load",
+      "User experience: Positive (proactive notifications)",
+      "Operational: Monitor scheduled tasks for failures",
+      "Cost: Minimal (already paying for Supabase)"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "LOW",
+    "estimated_effort_hours": 4,
+    "implementation_checklist": [
+      "Set up Supabase scheduled job",
+      "Create scan comparison logic",
+      "Design alert email template",
+      "Implement alerting action",
+      "Add opt-in/opt-out for users"
+    ],
+    "implementation_notes": "Phase 6 candidate. Improves operational awareness.",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  },
+  {
+    "id": "PROP-010",
+    "date_proposed": "2026-07-05",
+    "title": "ESPR-Specific Module: Compliance Path Tracing",
+    "status": "draft",
+    "category": "Compliance",
+    "description": "New module showing complete compliance chain for ESPR: standard clause → interpretation → product feature → DPP declaration.",
+    "cause": [
+      "EU regulators will ask: 'How did you ensure compliance with Article 8?'",
+      "Need to trace complete path from regulation to implementation to declaration",
+      "Current system has pieces but no integrated compliance chain visualization"
+    ],
+    "effect": [
+      "New 'Compliance Paths' view in portal",
+      "Shows: Standard Clause → Implementation in Document → Interpretation → Product Feature → DPP Declaration",
+      "User can trace back from DPP claim to its evidence",
+      "Generates compliance chain report (PDF) suitable for auditors"
+    ],
+    "implications": [
+      "Effort: ~6-8 hours (new queries + visualization + PDF generation)",
+      "Risk: Medium (regulatory compliance - must be accurate)",
+      "Dependencies: All of PROP-001 (needs all pieces in place)",
+      "Browser compatibility: Modern browsers + PDF library",
+      "Regulatory value: Very high (directly addresses ESPR requirements)",
+      "Operational: Must validate accuracy for regulatory submissions",
+      "User training: High (complex feature, needs good documentation)"
+    ],
+    "proposed_by": "GitHub Copilot",
+    "priority": "HIGH",
+    "estimated_effort_hours": 8,
+    "implementation_checklist": [
+      "Design compliance chain data model",
+      "Create tracing queries (standard → implementation → DPP)",
+      "Build visualization UI",
+      "Add PDF report generation",
+      "Add export/download function"
+    ],
+    "implementation_notes": "ESPR deadline 2027 - should start Phase 6 planning. Depends on PROP-001.",
+    "commits_implemented": [],
+    "percentage_complete": 0
+  }
+]
