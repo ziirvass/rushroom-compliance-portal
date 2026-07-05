@@ -52,7 +52,7 @@ Executive summary of what was built and why
 
 | ID | Title | Status | Priority | Effort |
 |---|---|---|---|---|
-| **PROP-001** | Phase 5 Frontend UI | ⏳ IN PROGRESS | HIGH | 4h |
+| **PROP-001** | Phase 5 Frontend UI | ✅ IMPLEMENTED | HIGH | 4h |
 | **PROP-010** | ESPR Compliance Tracing | 🟡 PROPOSED | HIGH | 8h |
 | **PROP-002** | Real-time Matrix Updates | 🟢 DRAFT | MEDIUM | 3h |
 | **PROP-003** | Bulk Interpretation Workflow | 🟢 DRAFT | MEDIUM | 6h |
@@ -108,7 +108,7 @@ Scroll to: Section 12 - Proposals & Drafts
 ## Current State
 
 ### Phase 5 (Now)
-- ✅ PROP-001: Frontend UI (IN PROGRESS)
+- ✅ PROP-001: Frontend UI (IMPLEMENTED — Clauses & DPP tab)
 
 ### Phase 5b (If time)
 - 🟡 PROP-006: AI-Suggested Status (2h)

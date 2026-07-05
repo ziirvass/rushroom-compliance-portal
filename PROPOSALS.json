@@ -2,8 +2,9 @@
   {
     "id": "PROP-001",
     "date_proposed": "2026-07-05",
+    "date_completed": "2026-07-05",
     "title": "Phase 5: Frontend UI Implementation",
-    "status": "in_progress",
+    "status": "implemented",
     "category": "UI",
     "description": "Implement four new Level 2 UI views in assets/app.js for standards detail, interpretation editor, compliance matrix, and passport management.",
     "cause": [
@@ -12,9 +13,11 @@
       "DPP export API exists but has no UI to trigger it"
     ],
     "effect": [
-      "New functions added to app.js: renderStandardDetails(), renderInterpretationEditor(), renderComplianceMatrix(), renderPassportView()",
-      "New optional tabs added to index.html or sections in existing tabs",
-      "Users gain ability to see extracted clauses, edit interpretations, view compliance grids, manage DPP passports"
+      "Delivered a Rushroom-only 'Clauses & DPP' tab (index.html) with four sub-views built in app.js under renderLevel2()",
+      "Clauses (l2ClausesView): AI-extract a standard version's clauses and browse them as a table",
+      "Interpretations (l2InterpretationsView/l2InterpCard): AI-generate per-clause interpretations, then review/edit status + rationale with a reviewer audit trail",
+      "Matrix (l2MatrixView/l2RenderMatrix/l2EditCell): documents x clauses grid, colour-coded by compliance status, click a cell to edit",
+      "Passports (l2PassportsView/l2PassportEditor): create DPP records, link interpretations, export JSON-LD (schema.org + ESPR) or JSON"
     ],
     "implications": [
       "Effort: ~4 hours of frontend development",
@@ -33,9 +36,9 @@
       "Compliance matrix - grid visualization with color-coded cells",
       "Passport view - create/link/export product passports"
     ],
-    "implementation_notes": "",
-    "commits_implemented": [],
-    "percentage_complete": 0
+    "implementation_notes": "IMPLEMENTED 2026-07-05. Note: the backend was NOT actually ready as assumed - it was undeployed and did not compile (.on('conflict') is not a Supabase method), had unauthenticated read actions, produced empty interpretations for PDFs, and was missing the entire passport CRUD. All fixed before/alongside the UI; generateInterpretations rewritten to send the document file to Claude (PDF-capable) and batch ~10 clauses per call. Actual function names use the l2* naming under renderLevel2(), not the proposed renderStandardDetails() etc. Verified live end-to-end (RoHS clauses -> interpretations -> matrix -> DPP JSON-LD) and 15/15 UI mock checks.",
+    "commits_implemented": ["9aec605", "91eb470"],
+    "percentage_complete": 100
   },
   {
     "id": "PROP-002",

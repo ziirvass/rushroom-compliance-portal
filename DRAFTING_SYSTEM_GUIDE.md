@@ -28,7 +28,7 @@ A comprehensive framework for **proposing, tracking, and implementing** new feat
 **Purpose:** Single source of truth for all proposals
 
 **Initial Proposals Included:**
-1. **PROP-001** — Phase 5 Frontend UI (IN PROGRESS)
+1. **PROP-001** — Phase 5 Frontend UI (IMPLEMENTED)
 2. **PROP-002** — Real-time Compliance Matrix Updates (DRAFT)
 3. **PROP-003** — Bulk Interpretation Workflow (DRAFT)
 4. **PROP-004** — Deviation Trend Analysis & Patterns (DRAFT)
@@ -214,7 +214,7 @@ Beautiful HTML cards make it easy to:
 
 | ID | Title | Priority | Status | Effort | Notes |
 |---|---|---|---|---|---|
-| **PROP-001** | Phase 5 Frontend UI | HIGH | IN PROGRESS | 4h | Critical - unblocks all features |
+| **PROP-001** | Phase 5 Frontend UI | HIGH | IMPLEMENTED | 4h | Critical - unblocks all features |
 | **PROP-010** | ESPR Compliance Tracing | HIGH | PROPOSED | 8h | Regulatory requirement (2027 deadline) |
 | **PROP-002** | Real-time Matrix Updates | MEDIUM | DRAFT | 3h | Nice-to-have, depends on PROP-001 |
 | **PROP-003** | Bulk Interpretation Workflow | MEDIUM | DRAFT | 6h | UX improvement, depends on PROP-001 |
@@ -343,14 +343,14 @@ git commit -m "feat: complete PROP-XXX - [Description]"
 
 ## Examples from Current System
 
-### Example: PROP-001 (In Progress)
-- **Status:** IN PROGRESS (actively being built)
+### Example: PROP-001 (Implemented)
+- **Status:** IMPLEMENTED (shipped in commits 9aec605, 91eb470)
 - **Priority:** HIGH
 - **Effort:** 4 hours
 - **Cause:** Backend API ready, but no UI
 - **Effect:** 4 new UI functions (Standard Details, Interpretation Editor, Compliance Matrix, Passport View)
 - **Implications:** Low risk (APIs tested), no dependencies
-- **Next:** Claude Code will implement this in Phase 5
+- **Next:** Done — shipped as the "Clauses & DPP" tab (renderLevel2 + l2* views)
 
 ### Example: PROP-010 (High Value, Not Yet Started)
 - **Status:** PROPOSED

@@ -9,20 +9,19 @@
 ## Implementation Timeline
 
 ### PROP-001: Phase 5 Frontend UI Implementation
-- **Status:** ⏳ IN PROGRESS
+- **Status:** ✅ IMPLEMENTED
 - **Proposed:** 2026-07-05
-- **Expected:** Phase 5 (4 hours)
+- **Completed:** 2026-07-05
 - **Commits:** 
-  - TBD (renderStandardDetails)
-  - TBD (renderInterpretationEditor)
-  - TBD (renderComplianceMatrix)
-  - TBD (renderPassportView)
+  - 9aec605 (fix + complete Level 2 backend)
+  - 91eb470 (build Level 2 UI — "Clauses & DPP" tab)
 - **Implementation Notes:** 
-  - [ ] Waiting for implementation by Claude Code
-  - [ ] All backend APIs ready and deployed
-  - [ ] No blockers - ready to start immediately
-- **Learnings:** (To be filled in during implementation)
-- **Percentage Complete:** 0%
+  - [x] Built the Rushroom-only "Clauses & DPP" tab: `renderLevel2()` + `l2ClausesView` / `l2InterpretationsView` / `l2MatrixView` / `l2PassportsView`
+  - [x] Backend was NOT actually ready — undeployed, did not compile (`.on('conflict')` is not a Supabase method), unauthenticated read actions, empty interpretations for PDFs, and missing the entire passport CRUD; all fixed
+  - [x] `generateInterpretations` rewritten to send the document file to Claude (PDF-capable) and batch ~10 clauses per call
+  - [x] Verified live end-to-end (RoHS clauses → interpretations → matrix → DPP JSON-LD); 15/15 UI mock checks passed
+- **Learnings:** Never trust a handoff's "backend ready/deployed" claim without verifying — `functions deploy` skips type-checking, so runtime-invalid code (e.g. `.on(...)`) can appear "deployed"; always test live before building UI on top. Actual function names use the `l2*` naming, not the proposed `renderStandardDetails()` etc.
+- **Percentage Complete:** 100%
 
 ---
 
@@ -175,7 +174,7 @@
 ## Phase 5 Plan (Current Focus)
 
 **Phase 5 will implement:**
-- ✅ PROP-001: Frontend UI (renderStandardDetails, renderInterpretationEditor, renderComplianceMatrix, renderPassportView)
+- ✅ PROP-001: Frontend UI — shipped as renderLevel2() + l2ClausesView / l2InterpretationsView / l2MatrixView / l2PassportsView
 
 **Phase 5b Candidates (if time permits):**
 - 🟡 PROP-006: AI-Suggested Status (easy, 2 hours)
@@ -235,7 +234,7 @@ When you implement a proposal:
 | 2 | API Extraction (7 actions) | — | ✅ Complete |
 | 3 | Deviation Scan Update | Structured data first | ✅ Complete |
 | 4 | DPP Export (JSON-LD) | — | ✅ Complete |
-| **5** | **Frontend UI (PROP-001)** | **PROP-006, PROP-005** | **⏳ In Progress** |
+| **5** | **Frontend UI (PROP-001)** | **PROP-006, PROP-005** | **✅ Implemented** |
 | 6 | ESPR Compliance Tracing (PROP-010) | PROP-003, PROP-004, PROP-008 | 🟡 Proposed |
 
 ---
