@@ -39,6 +39,104 @@
     return _scriptCache[src];
   }
   const MARKED_CDN = "https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js";
+  const MAMMOTH_CDN = "https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js";
+  const XLSX_CDN = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+  const PDFJS_CDN = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js";
+  const PDFJS_WORKER = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+
+  /* ===== version-to-version text diff (yellow "what changed" highlighting) =====
+   * A dependency-light word-level LCS diff that renders the NEW text with added/
+   * changed words wrapped in <mark class="diff-add"> (yellow) and removed text as
+   * <del>. Text is extracted from stored files client-side (md/txt/html natively,
+   * docx via mammoth, xlsx via SheetJS, pdf via pdf.js). */
+  async function fetchBytes(url) {
+    const r = await fetch(url, { cache: "no-cache" });
+    if (!r.ok) throw new Error(`fetch failed (HTTP ${r.status}) — the link may have expired; reopen the library`);
+    return r.arrayBuffer();
+  }
+  const stripHtmlToText = (html) => { const d = document.createElement("div"); d.innerHTML = html; return d.textContent || ""; };
+  async function extractPdfText(buf) {
+    await loadScript(PDFJS_CDN);
+    const pdfjs = window.pdfjsLib;
+    if (!pdfjs) throw new Error("PDF reader unavailable");
+    pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+    const pdf = await pdfjs.getDocument({ data: buf }).promise;
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const tc = await (await pdf.getPage(i)).getTextContent();
+      pages.push(tc.items.map((it) => it.str).join(" "));
+    }
+    return pages.join("\n\n");
+  }
+  // Returns plain text for diffing, or null if the format can't be text-extracted.
+  async function extractVersionText(url, hint) {
+    if (!url) return null;
+    const ext = extOf(hint || url);
+    const buf = await fetchBytes(url);
+    const asText = () => unescapeUnicode(new TextDecoder().decode(new Uint8Array(buf)));
+    if (["md", "markdown", "txt", "csv", "json", "xml", ""].includes(ext)) return asText();
+    if (["html", "htm"].includes(ext)) return stripHtmlToText(asText());
+    if (ext === "docx") { await loadScript(MAMMOTH_CDN); return (await window.mammoth.extractRawText({ arrayBuffer: buf })).value || ""; }
+    if (["xlsx", "xls"].includes(ext)) { await loadScript(XLSX_CDN); const wb = window.XLSX.read(new Uint8Array(buf), { type: "array" }); return (wb.SheetNames || []).map((n) => `# ${n}\n${window.XLSX.utils.sheet_to_csv(wb.Sheets[n])}`).join("\n\n"); }
+    if (ext === "pdf") return await extractPdfText(buf);
+    return null; // image, zip, etc.
+  }
+
+  const WORD_CAP = 1800, LINE_CAP = 4000;
+  const diffEsc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  // LCS over a token array → ops [{t:'='|'+'|'-', v}]
+  function lcsDiff(a, b) {
+    const n = a.length, m = b.length;
+    const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const ops = []; let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) { ops.push({ t: "=", v: b[j] }); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ t: "-", v: a[i] }); i++; }
+      else { ops.push({ t: "+", v: b[j] }); j++; }
+    }
+    while (i < n) ops.push({ t: "-", v: a[i++] });
+    while (j < m) ops.push({ t: "+", v: b[j++] });
+    return ops;
+  }
+  // Render a word-level (or line-level, for huge inputs) diff as highlighted HTML.
+  function diffToHtml(oldText, newText) {
+    const aw = (oldText || "").match(/\s+|\S+/g) || [], bw = (newText || "").match(/\s+|\S+/g) || [];
+    let ops;
+    if (aw.length <= WORD_CAP && bw.length <= WORD_CAP) ops = lcsDiff(aw, bw);
+    else {
+      const al = (oldText || "").split(/(\n)/), bl = (newText || "").split(/(\n)/);
+      if (al.length <= LINE_CAP && bl.length <= LINE_CAP) ops = lcsDiff(al, bl);
+      else return `<mark class="diff-add">${diffEsc((newText || "").slice(0, 200000))}</mark><p class="muted">(document too large for a word-level comparison — showing the current version)</p>`;
+    }
+    let html = "";
+    for (const op of ops) {
+      const v = diffEsc(op.v);
+      html += op.t === "=" ? v : op.t === "+" ? `<mark class="diff-add">${v}</mark>` : `<del class="diff-del">${v}</del>`;
+    }
+    return html;
+  }
+  // Open a modal comparing two stored file versions with yellow-highlighted changes.
+  async function openVersionDiff({ title, oldUrl, oldHint, newUrl, newHint }) {
+    const body = el("div", { class: "step-form" }, el("div", { class: "loading" }, "Loading both versions…"));
+    openModal(title || "Changes", body);
+    try {
+      const [oldText, newText] = await Promise.all([extractVersionText(oldUrl, oldHint), extractVersionText(newUrl, newHint)]);
+      if (oldText == null || newText == null) { body.replaceChildren(el("div", { class: "notice warn" }, "Text comparison isn't available for this file type (e.g. image or archive). Open both versions to compare them.")); return; }
+      if (!oldText.trim() && !newText.trim()) { body.replaceChildren(el("div", { class: "notice" }, "Neither version has extractable text.")); return; }
+      const legend = el("div", { class: "diff-legend" }, [
+        el("span", {}, [el("mark", { class: "diff-add" }, "added / changed")]),
+        el("span", {}, [el("del", { class: "diff-del" }, "removed")]),
+      ]);
+      const view = el("pre", { class: "diff-view" }); view.innerHTML = diffToHtml(oldText, newText);
+      body.replaceChildren(el("div", {}, [legend, view]));
+    } catch (ex) { body.replaceChildren(el("div", { class: "error" }, `Couldn't compare: ${ex.message}`)); }
+  }
+  // Inline highlighted diff (used where old & new text are already in hand).
+  function diffInline(oldText, newText) {
+    const view = el("pre", { class: "diff-view" }); view.innerHTML = diffToHtml(oldText || "", newText || "");
+    return view;
+  }
 
   /* ---------------- password gate ---------------- */
   async function portalHash(text) {
@@ -554,6 +652,7 @@
     edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
     expand: svg('<polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/>'),
     collapse: svg('<polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/>'),
+    diff: svg('<line x1="12" y1="3" x2="12" y2="21"/><polyline points="8 8 4 12 8 16"/><polyline points="16 8 20 12 16 16"/>'),
   };
   // File action chip (View / Open) — subtle pill; label hides on narrow screens.
   function fileActionBtn(label, iconKey, opts = {}) {
@@ -628,6 +727,7 @@
             fileTypeChip(current.file_name || current.storage_path || d.name),
             el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
             versionFileActions(current.open_url, current.file_name || d.name, current.storage_path || d.storage_path, () => openViewer({ ...d, open_url: current.open_url, storage_path: current.storage_path || d.storage_path })),
+            versions.length > 1 ? fileActionBtn("Changes", "diff", { title: "Highlight what changed vs the previous version", onClick: () => openVersionDiff({ title: `Changes — v${versions.length} vs v${versions.length - 1}`, oldUrl: versions[1].open_url, oldHint: versions[1].file_name || d.name, newUrl: current.open_url, newHint: current.file_name || d.name }) }) : null,
             opts.manage && opts.onEditVersion && d.id ? fileActionBtn("Edit", "edit", { onClick: () => opts.onEditVersion(d, current), title: "Edit this version → save as a new version" }) : null,
           ])
         : el("div", { class: "std-current muted" }, "No file uploaded yet.");
@@ -648,6 +748,7 @@
                   fileTypeChip(v.file_name || v.storage_path || d.name),
                   el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
                   versionFileActions(v.open_url, v.file_name || d.name, v.storage_path || d.storage_path, () => openViewer({ ...d, open_url: v.open_url, storage_path: v.storage_path || d.storage_path, name: v.file_name || d.name })),
+                  vi + 1 < versions.length ? fileActionBtn("Changes", "diff", { title: "Highlight what changed vs the previous version", onClick: () => openVersionDiff({ title: `Changes — v${versions.length - vi} vs v${versions.length - vi - 1}`, oldUrl: versions[vi + 1].open_url, oldHint: versions[vi + 1].file_name || d.name, newUrl: v.open_url, newHint: v.file_name || d.name }) }) : null,
                   opts.manage && opts.onEditVersion && d.id ? fileActionBtn("Edit", "edit", { onClick: () => opts.onEditVersion(d, v), title: "Edit this version → save as a new version" }) : null,
                 ]),
                 v.notes ? el("div", { class: "std-notes" }, v.notes) : null,
@@ -1663,6 +1764,7 @@
           current.effective_date ? el("span", { class: "muted" }, ` · effective ${current.effective_date}`) : null,
           el("span", { class: "muted" }, ` · added ${fmtDate(current.created_at)}`),
           versionFileActions(current.open_url, current.file_name || s.code || s.title, current.storage_path, () => viewFile(current)),
+          versions.length > 1 ? fileActionBtn("Changes", "diff", { title: "Highlight what changed vs the previous revision", onClick: () => openVersionDiff({ title: `Changes — v${versions.length} vs v${versions.length - 1}`, oldUrl: versions[1].open_url, oldHint: versions[1].file_name || s.code, newUrl: current.open_url, newHint: current.file_name || s.code }) }) : null,
         ])
       : el("div", { class: "std-current" }, [
           el("span", { class: "muted" }, "No file uploaded yet."),
@@ -1679,6 +1781,7 @@
               v.effective_date ? el("span", { class: "muted" }, ` · effective ${v.effective_date}`) : null,
               el("span", { class: "muted" }, ` · added ${fmtDate(v.created_at)}`),
               versionFileActions(v.open_url, v.file_name || s.code || s.title, v.storage_path, () => viewFile(v)),
+              vi + 1 < versions.length ? fileActionBtn("Changes", "diff", { title: "Highlight what changed vs the previous revision", onClick: () => openVersionDiff({ title: `Changes — v${versions.length - vi} vs v${versions.length - vi - 1}`, oldUrl: versions[vi + 1].open_url, oldHint: versions[vi + 1].file_name || s.code, newUrl: v.open_url, newHint: v.file_name || s.code }) }) : null,
               manage ? deleteChip(() => deleteStandardVersion(v, role, reload)) : null,
             ]),
             v.notes ? el("div", { class: "std-notes" }, v.notes) : null,

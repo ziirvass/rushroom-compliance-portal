@@ -732,3 +732,9 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .session-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .btn-admin-link { color: var(--red); border-color: var(--red-bd); }
 .btn-admin-link:hover, .btn-admin-link:focus-visible { color: var(--red); border-color: var(--red); background: var(--red-bg); }
+
+/* ===== version-to-version diff highlighting (yellow "what changed") ===== */
+.diff-legend { display: flex; gap: 1.2rem; font-size: 0.8rem; margin-bottom: 0.6rem; color: var(--muted); }
+.diff-view { white-space: pre-wrap; word-break: break-word; font: inherit; line-height: 1.6; max-height: 62vh; overflow: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1rem; margin: 0; }
+mark.diff-add { background: #fde68a; color: #1a1400; border-radius: 2px; padding: 0 1px; font-style: normal; }
+del.diff-del { background: rgba(255,138,138,0.16); color: var(--red); text-decoration: line-through; border-radius: 2px; padding: 0 1px; }
