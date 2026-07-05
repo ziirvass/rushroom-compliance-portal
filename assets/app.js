@@ -116,6 +116,47 @@
     }
     return html;
   }
+  // Two-column (Previous | Current) HTML — removals marked on the left, additions
+  // (yellow) on the right — sharing the same LCS ops as the inline view.
+  function diffSides(oldText, newText) {
+    const aw = (oldText || "").match(/\s+|\S+/g) || [], bw = (newText || "").match(/\s+|\S+/g) || [];
+    let ops = null;
+    if (aw.length <= WORD_CAP && bw.length <= WORD_CAP) ops = lcsDiff(aw, bw);
+    else { const al = (oldText || "").split(/(\n)/), bl = (newText || "").split(/(\n)/); if (al.length <= LINE_CAP && bl.length <= LINE_CAP) ops = lcsDiff(al, bl); }
+    if (!ops) return { left: diffEsc(oldText || ""), right: `<mark class="diff-add">${diffEsc((newText || "").slice(0, 200000))}</mark>` };
+    let left = "", right = "";
+    for (const op of ops) {
+      const v = diffEsc(op.v);
+      if (op.t === "=") { left += v; right += v; }
+      else if (op.t === "-") left += `<del class="diff-del">${v}</del>`;
+      else right += `<mark class="diff-add">${v}</mark>`;
+    }
+    return { left, right };
+  }
+  // A diff view with an Inline / Side-by-side toggle.
+  function diffViewToggle(oldText, newText) {
+    const body = el("div");
+    const render = (mode) => {
+      if (mode === "side") {
+        const s = diffSides(oldText, newText);
+        const l = el("pre", { class: "diff-view diff-col" }); l.innerHTML = s.left || "(empty)";
+        const r = el("pre", { class: "diff-view diff-col" }); r.innerHTML = s.right || "(empty)";
+        body.replaceChildren(el("div", { class: "diff-sbs" }, [
+          el("div", {}, [el("div", { class: "diff-col-head" }, "Previous"), l]),
+          el("div", {}, [el("div", { class: "diff-col-head" }, "Current"), r]),
+        ]));
+      } else {
+        const v = el("pre", { class: "diff-view" }); v.innerHTML = diffToHtml(oldText, newText);
+        body.replaceChildren(v);
+      }
+    };
+    const bIn = el("button", { class: "subtab active", type: "button" }, "Inline");
+    const bSide = el("button", { class: "subtab", type: "button" }, "Side-by-side");
+    bIn.addEventListener("click", () => { bIn.classList.add("active"); bSide.classList.remove("active"); render("inline"); });
+    bSide.addEventListener("click", () => { bSide.classList.add("active"); bIn.classList.remove("active"); render("side"); });
+    render("inline");
+    return el("div", {}, [el("div", { class: "subtabs diff-toggle" }, [bIn, bSide]), body]);
+  }
   // Open a modal comparing two stored file versions with yellow-highlighted changes.
   async function openVersionDiff({ title, oldUrl, oldHint, newUrl, newHint }) {
     const body = el("div", { class: "step-form" }, el("div", { class: "loading" }, "Loading both versions…"));
@@ -128,8 +169,7 @@
         el("span", {}, [el("mark", { class: "diff-add" }, "added / changed")]),
         el("span", {}, [el("del", { class: "diff-del" }, "removed")]),
       ]);
-      const view = el("pre", { class: "diff-view" }); view.innerHTML = diffToHtml(oldText, newText);
-      body.replaceChildren(el("div", {}, [legend, view]));
+      body.replaceChildren(el("div", {}, [legend, diffViewToggle(oldText, newText)]));
     } catch (ex) { body.replaceChildren(el("div", { class: "error" }, `Couldn't compare: ${ex.message}`)); }
   }
   // Inline highlighted diff (used where old & new text are already in hand).
@@ -143,7 +183,7 @@
       el("span", {}, [el("mark", { class: "diff-add" }, "added / changed")]),
       el("span", {}, [el("del", { class: "diff-del" }, "removed")]),
     ]);
-    openModal(title || "Changes", el("div", {}, [legend, diffInline(oldText, newText)]));
+    openModal(title || "Changes", el("div", {}, [legend, diffViewToggle(oldText, newText)]));
   }
 
   /* ---------------- password gate ---------------- */
@@ -1902,6 +1942,8 @@
       const counts = scan.counts || {};
       body.appendChild(el("div", { class: "sev-summary" }, SEV_ORDER.map((sev) =>
         el("span", { class: `sev-chip sev-${sev.toLowerCase()}` }, `${sev}: ${counts[sev] || 0}`))));
+      const newCount = findings.filter((f) => f.is_new).length;
+      if (payload.hasPrevious && newCount) body.appendChild(el("div", { class: "notice", style: "border-left:4px solid #f5c518" }, [el("span", { class: "finding-new-badge" }, "NEW"), document.createTextNode(` ${newCount} finding(s) are new since the previous scan (marked in yellow below).`)]));
       if (!findings.length) {
         body.appendChild(el("div", { class: "notice ok" }, "No deviations found in this scan."));
       } else {
@@ -1912,9 +1954,10 @@
           if (!items || !items.length) continue;
           const group = el("div", { class: "sev-group" }, el("h3", { class: `sev-head sev-${sev.toLowerCase()}` }, `${sev} (${items.length})`));
           for (const f of items) {
-            group.appendChild(el("div", { class: `finding sev-border-${sev.toLowerCase()}` }, [
+            group.appendChild(el("div", { class: `finding sev-border-${sev.toLowerCase()}${f.is_new ? " finding-new" : ""}` }, [
               el("div", { class: "finding-title" }, [
                 el("span", {}, f.title || "(untitled)"),
+                f.is_new ? el("span", { class: "finding-new-badge", title: "New since the previous scan" }, "NEW") : null,
                 el("span", { class: `finding-src finding-src-${f.source === "structured" ? "structured" : "ai"}`, title: f.source === "structured" ? "From a reviewed clause interpretation (no AI)" : "Inferred by the AI scan" },
                   f.source === "structured" ? "⚙ structured" : "✨ AI"),
               ]),

@@ -1175,10 +1175,21 @@ Deno.serve(async (req) => {
   // --- AI deviation monitoring (Rushroom only) ----------------------------
   if (action === "deviations") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const { data: scan } = await db.from("deviation_scans").select("*").order("created_at", { ascending: false }).limit(1).maybeSingle();
+    // Fetch the latest scan and the one before it, so we can flag findings that
+    // are new since the previous scan (yellow-marked in the UI).
+    const { data: scans } = await db.from("deviation_scans").select("*").order("created_at", { ascending: false }).limit(2);
+    const scan = scans?.[0];
+    const prevScan = scans?.[1];
     if (!scan) return json({ scan: null, findings: [] });
+    const sigOf = (f: any) => `${f.severity}|${String(f.title || "").trim().toLowerCase()}|${String(f.document || "").trim().toLowerCase()}|${String(f.standard || "").trim().toLowerCase()}`;
+    let prevSet: Set<string> | null = null;
+    if (prevScan) {
+      const { data: prevFindings } = await db.from("deviation_findings").select("severity,title,document,standard").eq("scan_id", prevScan.id);
+      prevSet = new Set((prevFindings ?? []).map(sigOf));
+    }
     const { data: findings } = await db.from("deviation_findings").select("*").eq("scan_id", scan.id);
-    return json({ scan, findings: findings ?? [] });
+    const withNew = (findings ?? []).map((f) => ({ ...f, is_new: prevSet ? !prevSet.has(sigOf(f)) : false }));
+    return json({ scan, findings: withNew, hasPrevious: !!prevScan });
   }
 
   if (action === "runDeviationScan") {

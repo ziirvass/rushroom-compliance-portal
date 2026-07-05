@@ -738,3 +738,14 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .diff-view { white-space: pre-wrap; word-break: break-word; font: inherit; line-height: 1.6; max-height: 62vh; overflow: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1rem; margin: 0; }
 mark.diff-add { background: #fde68a; color: #1a1400; border-radius: 2px; padding: 0 1px; font-style: normal; }
 del.diff-del { background: rgba(255,138,138,0.16); color: var(--red); text-decoration: line-through; border-radius: 2px; padding: 0 1px; }
+
+/* diff Inline/Side-by-side toggle + two-column view */
+.diff-toggle { margin-bottom: 0.6rem; display: inline-flex; }
+.diff-sbs { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+.diff-col-head { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem; }
+.diff-col { max-height: 58vh; }
+@media (max-width: 720px) { .diff-sbs { grid-template-columns: 1fr; } }
+
+/* deviation finding that's new since the previous scan */
+.finding.finding-new { border-left: 4px solid #f5c518; background: linear-gradient(90deg, rgba(253,230,138,0.10), transparent 45%); }
+.finding-new-badge { display: inline-block; background: #fde68a; color: #1a1400; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.04em; padding: 0.1rem 0.44rem; border-radius: 999px; }
