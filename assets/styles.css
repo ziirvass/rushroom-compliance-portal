@@ -780,3 +780,9 @@ del.diff-del { background: rgba(255,138,138,0.16); color: var(--red); text-decor
 /* deviation finding that's new since the previous scan */
 .finding.finding-new { border-left: 4px solid #f5c518; background: linear-gradient(90deg, rgba(253,230,138,0.10), transparent 45%); }
 .finding-new-badge { display: inline-block; background: #fde68a; color: #1a1400; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.04em; padding: 0.1rem 0.44rem; border-radius: 999px; }
+
+/* Brand is a "home" link to Compliance Status once the portal is unlocked */
+body:has(#portal-app:not([hidden])) .brand { cursor: pointer; border-radius: 12px; transition: color 0.12s ease; }
+body:has(#portal-app:not([hidden])) .brand:hover h1 { color: var(--accent); }
+body:has(#portal-app:not([hidden])) .brand:hover .brand-mark { filter: brightness(1.06); }
+.brand:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 12px; }

@@ -2630,7 +2630,24 @@
   };
 
   /* ---------------- full-portal page init ---------------- */
+  // Clicking the brand (logo + "Compliance Portal") jumps to the Compliance
+  // Status tab, once the portal is unlocked.
+  function wireBrandHome() {
+    const brand = $(".brand");
+    if (!brand) return;
+    brand.setAttribute("role", "link");
+    brand.setAttribute("tabindex", "0");
+    brand.setAttribute("title", "Go to Compliance Status");
+    const go = () => {
+      const app = $("#portal-app"), tab = $("#tab-readiness");
+      if (app && !app.hidden && tab) { tab.click(); tab.focus(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+    };
+    brand.addEventListener("click", go);
+    brand.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  }
+
   function initFullPortal() {
+    wireBrandHome();
     if (apiEnabled()) setupLoginGate((s) => renderApi(s.role || "rushroom", "#readiness-panel"));
     else setupGate(renderPortal); // read-only fallback
   }
