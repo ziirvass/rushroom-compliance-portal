@@ -261,6 +261,8 @@ create table if not exists public.as_operates_interpretations (
   updated_at                timestamptz not null default now(),
   unique(clause_id, document_version_id)
 );
+-- Optional: keep the prior interpretation text so the UI can show a version diff.
+alter table public.as_operates_interpretations add column if not exists previous_interpretation_text text;
 create index if not exists as_op_interp_clause_idx on public.as_operates_interpretations (clause_id);
 create index if not exists as_op_interp_doc_version_idx on public.as_operates_interpretations (document_version_id);
 create index if not exists as_op_interp_status_idx on public.as_operates_interpretations (compliance_status);

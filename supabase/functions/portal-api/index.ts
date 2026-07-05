@@ -1589,8 +1589,19 @@ Be specific: name the exact document and the exact standard (and clause where po
 
     if (!id || !Object.keys(patch).length) return json({ error: "id and at least one field required" }, 400);
 
-    const { error } = await db.from("as_operates_interpretations").update(patch).eq("id", id);
-    if (error) return json({ error: error.message }, 500);
+    // When the interpretation text changes, snapshot the prior text so the UI can
+    // show a version-to-version diff. Optional column — self-heals if absent.
+    if (patch.interpretation_text !== undefined) {
+      const { data: cur } = await db.from("as_operates_interpretations").select("interpretation_text").eq("id", id).maybeSingle();
+      const prior = cur?.interpretation_text ?? "";
+      if (prior && prior !== patch.interpretation_text) patch.previous_interpretation_text = prior;
+    }
+    let upd = await db.from("as_operates_interpretations").update(patch).eq("id", id);
+    if (upd.error && /previous_interpretation_text/.test(upd.error.message || "")) {
+      const { previous_interpretation_text: _p, ...noPrev } = patch;
+      upd = await db.from("as_operates_interpretations").update(noPrev).eq("id", id);
+    }
+    if (upd.error) return json({ error: upd.error.message }, 500);
     return json({ ok: true });
   }
 
@@ -1599,10 +1610,11 @@ Be specific: name the exact document and the exact standard (and clause where po
     const documentVersionId = String(body.documentVersionId ?? "").trim();
     if (!documentVersionId) return json({ error: "documentVersionId required" }, 400);
 
+    // `*` includes the optional previous_interpretation_text column when present
+    // (and simply omits it otherwise — no schema-cache error).
     const { data: interps, error } = await db.from("as_operates_interpretations")
       .select(`
-        id, clause_id, compliance_status, interpretation_text, rationale, deviation_description,
-        deviation_accepted_by, deviation_accepted_at, reviewed_by, reviewed_at, ai_generated, updated_at,
+        *,
         clause:clause_id(id,standard_version_id,clause_ref,clause_title,clause_text,requirement_type,
           standard:standard_version_id(standard:standard_id(code,title)))
       `).eq("document_version_id", documentVersionId).order("updated_at", { ascending: false });

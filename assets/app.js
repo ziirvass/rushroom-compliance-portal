@@ -137,6 +137,14 @@
     const view = el("pre", { class: "diff-view" }); view.innerHTML = diffToHtml(oldText || "", newText || "");
     return view;
   }
+  // Diff modal from two in-hand strings (yellow = added/changed).
+  function openTextDiffModal(title, oldText, newText) {
+    const legend = el("div", { class: "diff-legend" }, [
+      el("span", {}, [el("mark", { class: "diff-add" }, "added / changed")]),
+      el("span", {}, [el("del", { class: "diff-del" }, "removed")]),
+    ]);
+    openModal(title || "Changes", el("div", {}, [legend, diffInline(oldText, newText)]));
+  }
 
   /* ---------------- password gate ---------------- */
   async function portalHash(text) {
@@ -1354,6 +1362,14 @@
       status,
       el("div", { style: "margin-top:1rem" }, [el("strong", {}, "Suggested changes"), changeList]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Draft text"), draft]),
+      (!isCreateMode && d && (d.versions || [])[0]) ? el("div", { style: "margin-top:0.4rem" }, actionBtn("Changes vs current version", "diff", { onClick: async () => {
+        const cur = (d.versions || [])[0];
+        try {
+          const oldText = await extractVersionText(cur.open_url, cur.file_name || d.name);
+          if (oldText == null) { alert("The current version's file type can't be compared as text."); return; }
+          openTextDiffModal(`AI draft vs current (v${(d.versions || []).length})`, oldText, draft.value || "");
+        } catch (ex) { alert(`Couldn't compare: ${ex.message}`); }
+      } })) : null,
       gdocRow,
       el("div", { style: "margin-top:1rem; border-top:1px solid var(--border); padding-top:0.85rem" }, [
         el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [publishBottom]),
@@ -2155,6 +2171,9 @@
       ]),
       clause.clause_text ? el("details", { class: "l2-clause-req" }, [el("summary", {}, "Requirement text"), el("p", { class: "muted" }, clause.clause_text)]) : null,
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Interpretation"), text]),
+      (interp && interp.previous_interpretation_text && interp.previous_interpretation_text !== interp.interpretation_text)
+        ? el("details", { class: "l2-clause-req" }, [el("summary", {}, "Changes since previous version"), diffInline(interp.previous_interpretation_text, interp.interpretation_text || "")])
+        : null,
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Rationale"), rationale]),
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [el("span", { class: "form-label" }, "Status"), statusSel, interp && interp.id ? save : genOne, note]),
       interp && interp.reviewed_by ? el("div", { class: "muted", style: "font-size:0.8rem; margin-top:0.3rem" }, `Reviewed by ${interp.reviewed_by}${interp.reviewed_at ? " · " + fmtDate(interp.reviewed_at) : ""}${interp.ai_generated ? " · AI-drafted" : ""}`) : null,
