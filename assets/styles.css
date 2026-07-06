@@ -20,7 +20,10 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+/* Always reserve the vertical scrollbar gutter so switching between a tall tab
+   (scrollbar shown) and a short one (no scrollbar) doesn't shift the centered
+   layout sideways. No-op on overlay-scrollbar systems, so no empty gap there. */
+html { scroll-behavior: smooth; scrollbar-gutter: stable; }
 body {
   margin: 0;
   min-height: 100vh;
@@ -180,7 +183,9 @@ main {
   min-height: 40px; /* WCAG 2.5.8 target size */
 }
 .tab:hover { color: var(--text); }
-.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+/* Active = accent colour + underline only. No font-weight change: bold text is
+   wider and would nudge the neighbouring tabs on every switch (layout jitter). */
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
 
 /* ---- Readiness ---- */
 .summary { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 1.5rem; }
