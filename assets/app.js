@@ -999,7 +999,9 @@
     let file = null, uploaded = null, uploading = false;
     const readyCbs = []; if (opts.onReady) readyCbs.push(opts.onReady); // run when an upload completes
     const gated = []; // { el, requireFile }
-    const sync = () => { for (const g of gated) g.el.disabled = uploading || (g.requireFile && !uploaded); };
+    // Gated buttons stay disabled until the bar reaches 100% — i.e. while the
+    // file is uploading AND while the AI read (phase "process") is running.
+    const sync = () => { for (const g of gated) g.el.disabled = uploading || phase === "process" || (g.requireFile && !uploaded); };
     const register = (btnEl, requireFile = true) => { gated.push({ el: btnEl, requireFile }); sync(); };
 
     // Smoothly animated 0→100 progress: the displayed value eases toward a moving
@@ -1041,7 +1043,7 @@
         const { signedUrl, path } = await API.signedUploadUrl(API.getToken(role), f.name, bucket);
         await xhrPut(signedUrl, f, (p) => bump(Math.min(UP_CAP - 3, p * UP_CAP / 100)));
         stopTrickle();
-        uploaded = { path, fileName: f.name }; uploading = false; sync();
+        uploaded = { path, fileName: f.name }; uploading = false;
         if (hasProc) {
           // Hand off to the AI-read phase: fill the remaining UP_CAP→~96 slowly
           // while the model reads the file; finishProcessing() lands it on 100.
@@ -1050,6 +1052,7 @@
         } else {
           phase = "done"; doneLabel = `✓ ${f.name} — uploaded`; doneCls = "ok"; bump(100);
         }
+        sync(); // keep gated buttons disabled through the AI-read phase
         for (const cb of readyCbs) { try { cb(uploaded, f); } catch (_) {} }
       } catch (ex) {
         stopAnim();
@@ -1084,6 +1087,7 @@
         const nm = file ? file.name : "file";
         doneLabel = label || (ok ? `✓ ${nm} — uploaded & read` : `✓ ${nm} — uploaded (couldn’t read automatically)`);
         bump(100);
+        sync(); // bar is at 100% — release the gated buttons
       },
       getUploaded: () => uploaded,
       getFile: () => file,
