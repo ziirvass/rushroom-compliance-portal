@@ -902,7 +902,7 @@
             
             <h3>Immutable Versioning</h3>
             <ul style="margin-left: 20px; margin-bottom: 20px;">
-                <li><strong>Never delete:</strong> All documents and standards are version-controlled. No row is ever deleted.</li>
+                <li><strong>Version-controlled:</strong> All documents and standards are version-controlled; the normal workflow never deletes — a new version is added instead. <strong>Exception:</strong> an administrator (super-user) may permanently delete a document via the <code>deleteDocument</code> action, which removes the row (cascading to versions, interpretations and passport links) and the stored files via the Storage API. Finer-grained delete permissions are a later security layer.</li>
                 <li><strong>Full history:</strong> Each version row has <code>created_at</code>, <code>uploaded_by</code>, and <code>notes</code> for audit trails.</li>
                 <li><strong>Provenance:</strong> Each document_version tracks its source: <code>source_document_version_id</code> and <code>source_standard_version_ids[]</code>.</li>
             </ul>

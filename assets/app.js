@@ -838,6 +838,7 @@
         opts.manage && opts.onDraft && d.id && (d.kind || "template") === "operational" ? actionBtn("AI draft", "sparkles", { onClick: () => opts.onDraft(d) }) : null,
         opts.manage && opts.onCreateOperational && d.id && (d.kind || "template") === "template" ? actionBtn("Create as-operated", "layers", { onClick: () => opts.onCreateOperational(d) }) : null,
         viewAction,
+        opts.manage && opts.onDeleteDocument && d.id ? actionBtn("Delete", "trash", { danger: true, onClick: () => opts.onDeleteDocument(d) }) : null,
       ].filter(Boolean);
       return el("div", { class: "doc doc-op" }, [
         el("div", {}, [el("div", { class: "name" }, [el("span", {}, d.name), fileTypeChip((current && (current.file_name || current.storage_path)) || d.storage_path || d.url || d.name)]), el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`)]),
@@ -3110,8 +3111,15 @@
       const onDraft = (d) => documentDraftAssistant(d, role, load, { templates: templatesOf() });
       const onCreateOperational = (d) => createOperationalFromTemplate(d, role, load, templatesOf());
       const onCreateNew = () => documentDraftAssistant(null, role, load, { mode: "create", templates: templatesOf() });
+      // Admin/super-user only: permanently delete a document (records + files).
+      const onDeleteDocument = async (d) => {
+        const vc = (d.versions || []).length;
+        if (!confirm(`Permanently delete “${d.name}”${vc ? ` and all ${vc} version${vc === 1 ? "" : "s"}` : ""}, including the stored files? This cannot be undone.`)) return;
+        try { await API.deleteDocument(API.getToken(role), d.id); await load(); }
+        catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
+      };
       const docsPanel = $("#documents-panel");
-      const listTab = () => documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onEditVersion, onDraft, onCreateOperational, onCreateNew });
+      const listTab = () => documentLibrary(role === "supplier" ? "supplier" : null, payload.documents, { manage: role === "rushroom", onNewVersion, onEditVersion, onDraft, onCreateOperational, onCreateNew, onDeleteDocument: API.isAdmin() ? onDeleteDocument : null });
       const addTab = () => (role === "supplier" ? uploadCard(role, steps) : manageDocumentsCard(role, load));
       // Supplier uploads is its own sub-tab (Rushroom only), alongside Library / Add document.
       const uploadsTab = () => {

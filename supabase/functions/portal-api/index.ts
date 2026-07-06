@@ -1201,9 +1201,28 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
+  // Permanently delete a document + all its versions and stored files.
+  // Documents are normally immutable; deletion is a super-user (admin) power.
+  // Accepts a single { id } or bulk { ids: [...] }. Removes the files from the
+  // documents bucket via the Storage API, then deletes the row (which cascades
+  // to document_versions → as_operates_interpretations → passport links).
   if (action === "deleteDocument") {
-    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    return json({ error: "Documents are version-controlled and cannot be deleted. Create a new version instead." }, 400);
+    if (!isAdmin) return json({ error: "Only an administrator can delete documents." }, 403);
+    const ids = Array.isArray(body.ids) ? body.ids.map((x: unknown) => String(x)) : (body.id ? [String(body.id)] : []);
+    if (!ids.length) return json({ error: "id or ids required" }, 400);
+    let deletedDocs = 0, deletedFiles = 0;
+    const errors: any[] = [];
+    for (const id of ids) {
+      const { data: doc } = await db.from("documents").select("id, storage_path").eq("id", id).maybeSingle();
+      if (!doc) { errors.push({ id, error: "not found" }); continue; }
+      const { data: vers } = await db.from("document_versions").select("storage_path").eq("document_id", id);
+      const paths = [doc.storage_path, ...((vers ?? []).map((v: any) => v.storage_path))].filter((p: unknown): p is string => typeof p === "string" && p.trim() !== "");
+      if (paths.length) { try { const { error: rmErr } = await db.storage.from(DOC_BUCKET).remove(paths); if (!rmErr) deletedFiles += paths.length; } catch { /* file cleanup best-effort */ } }
+      const { error } = await db.from("documents").delete().eq("id", id);
+      if (error) { errors.push({ id, error: error.message }); continue; }
+      deletedDocs++;
+    }
+    return json({ ok: true, deletedDocuments: deletedDocs, deletedFiles, errors });
   }
 
   // --- Standards & Regulations register -----------------------------------
