@@ -2589,11 +2589,12 @@
     try { await loadScript(D3_CDN); d3 = window.d3; if (!d3) throw new Error("d3 missing"); }
     catch { mount.replaceChildren(el("div", { class: "error" }, "Couldn't load the graph library (offline?). Reconnect and reload.")); return; }
 
-    const state = { scope: "company", passportId: null, passports: [], graph: null };
+    const state = { scope: "all", passportId: null, passports: [], graph: null };
     try { const pp = await API.listProductPassports(API.getToken()); state.passports = pp.passports || []; } catch { /* passports optional */ }
 
     // ---- controls ----
     const scopeSel = el("select", { class: "up-text", "aria-label": "Graph scope" }, [
+      el("option", { value: "all" }, "All directives in the platform"),
       el("option", { value: "company" }, "Company view — applies to Rushroom AB"),
       el("option", { value: "product" }, "Product view — applies to a product"),
     ]);
@@ -2626,7 +2627,7 @@
     const stage = el("div", { class: "dg-stage" }, [svgWrap, sidebar]);
     const gapsMount = el("div", { style: "margin-top:1rem" });
     const wrap = el("div", {}, [
-      el("div", { class: "notice" }, "How the EU directives that apply to Rushroom relate to one another, drawn from the EU Publications Office (CELLAR). Node colour shows clause-level compliance coverage; edges show how directives require, implement or reference each other. Use “Sync from CELLAR” to pull the latest relations."),
+      el("div", { class: "notice" }, "Every EU directive/regulation already in the platform (the directive registry + any classed as EU acts in the Standards register) is pre-loaded here, showing how they relate to one another — drawn from the EU Publications Office (CELLAR). Node colour shows clause-level compliance coverage; edges show how directives require, implement or reference each other. Switch to Company or a Product view to narrow it. Use “Sync from CELLAR” to pull the latest relations."),
       controls, legend, stage, gapsMount,
     ]);
     mount.replaceChildren(wrap);
@@ -2660,7 +2661,7 @@
     const drawGraph = () => {
       const { nodes, edges } = state.graph;
       svgWrap.replaceChildren();
-      if (!nodes.length) { svgWrap.replaceChildren(el("div", { class: "empty" }, state.scope === "company" ? "No directives marked as applying to the company yet. Add one, or mark one via Add directive." : "No applicable directives for this product yet.")); return; }
+      if (!nodes.length) { svgWrap.replaceChildren(el("div", { class: "empty" }, state.scope === "product" ? "No applicable directives for this product yet." : state.scope === "company" ? "No directives marked as applying to the company yet." : "No directives in the platform yet. Run the directive SQL, or add one via “Add directive”.")); return; }
       const W = Math.max(520, svgWrap.clientWidth || 640), H = 460;
       const maxClauses = Math.max(1, ...nodes.map((n) => (n.coverage && n.coverage.total_clauses) || 0));
       const rOf = (n) => 16 + 14 * Math.sqrt(((n.coverage && n.coverage.total_clauses) || 0) / maxClauses);
@@ -2777,7 +2778,7 @@
       if (btn) btn.disabled = true;
       status.className = "up-status"; status.textContent = `Adding ${g.celex} from CELLAR…`;
       try {
-        const r = await API.addDirective(API.getToken(), { celexNumber: g.celex, shortName: g.shortName || "", appliesToCompany: state.scope === "company" });
+        const r = await API.addDirective(API.getToken(), { celexNumber: g.celex, shortName: g.shortName || "", appliesToCompany: state.scope !== "product" });
         if (r.id) { try { await API.syncDirectiveRelations(API.getToken(), r.id); } catch { /* offline */ } }
         status.className = "up-status ok"; status.textContent = `Added ${g.celex}.`;
         await load();
@@ -2801,7 +2802,7 @@
     const addDirectiveModal = () => {
       const celex = el("input", { type: "text", class: "up-text", placeholder: "CELEX number, e.g. 32014L0035" });
       const short = el("input", { type: "text", class: "up-text", placeholder: "Short name, e.g. LVD (optional)" });
-      const company = el("input", { type: "checkbox", checked: state.scope === "company" ? "checked" : null });
+      const company = el("input", { type: "checkbox", checked: state.scope !== "product" ? "checked" : null });
       const note = el("p", { class: "up-status", role: "status" }, "");
       const save = el("button", { class: "btn btn-primary", type: "button" }, "Add from CELLAR");
       const close = openModal("Add an EU directive / regulation", el("div", { class: "step-form" }, [

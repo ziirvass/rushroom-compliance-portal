@@ -416,9 +416,60 @@ async function coverageForDirective(dir: any): Promise<{ total_clauses: number; 
   } catch { return zero; }
 }
 
+// Derive a CELEX number from a standards-register code, e.g. "2014/35/EU" →
+// 32014L0035, "(EU) 2023/1542" → 32023R1542, "(EC) No 765/2008" → 32008R0765.
+// Returns null when the code can't be parsed confidently.
+function celexFromCode(code: string, regType: string): string | null {
+  const c = String(code || "").toUpperCase().replace(/\s+/g, "");
+  // Directive: YYYY/NN/EU|EC|EEC
+  let m = /(\d{4})\/(\d{1,4})\/(EU|EC|EEC)/.exec(c);
+  if (m) return `3${m[1]}L${m[2].padStart(4, "0")}`;
+  // Regulation post-2015: (EU)YYYY/NNNN
+  m = /\((?:EU|EC)\)(?:NO)?(\d{4})\/(\d{1,4})/.exec(c);
+  if (m) return `3${m[1]}R${m[2].padStart(4, "0")}`;
+  // Regulation pre-2015: (EU|EC)No NNN/YYYY
+  m = /\((?:EU|EC|EEC)\)NO(\d{1,4})\/(\d{4})/.exec(c);
+  if (m) return `3${m[2]}R${m[1].padStart(4, "0")}`;
+  // Only treat as a regulation if the register says so (avoid matching EN standard codes).
+  if (/EU Regulation/i.test(regType || "")) {
+    m = /(\d{4})\/(\d{1,4})/.exec(c);
+    if (m) return `3${m[1]}R${m[2].padStart(4, "0")}`;
+  }
+  return null;
+}
+
+// Pre-load the directive registry from the Standards & Regulations register: any
+// standard classed as an EU Directive/Regulation whose code yields a CELEX and that
+// isn't already tracked gets added to eu_directives. Idempotent; best-effort.
+async function importDirectivesFromStandards(): Promise<number> {
+  try {
+    const { data: stds } = await db.from("standards").select("code, title, reg_type, category");
+    if (!stds || !stds.length) return 0;
+    const { data: existing } = await db.from("eu_directives").select("celex_number");
+    const have = new Set((existing || []).map((d: any) => String(d.celex_number).toUpperCase()));
+    const rows: Record<string, unknown>[] = [];
+    for (const s of stds) {
+      if (!/EU Directive|EU Regulation/i.test(s.reg_type || "")) continue;
+      const celex = celexFromCode(s.code || "", s.reg_type || "");
+      if (!celex || have.has(celex)) continue;
+      have.add(celex);
+      rows.push({
+        celex_number: celex,
+        short_name: String(s.category || s.code || celex).slice(0, 40),
+        official_title: s.title || null,
+        directive_type: celex.charAt(4) === "R" ? "regulation" : "directive",
+        eur_lex_url: `https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:${celex}`,
+        applies_to_company: true,
+      });
+    }
+    if (rows.length) await db.from("eu_directives").upsert(rows, { onConflict: "celex_number", ignoreDuplicates: true });
+    return rows.length;
+  } catch { return 0; }
+}
+
 // Build the directive relationship graph for a scope: nodes (directives + coverage),
 // edges (relations between in-scope directives) and gaps (referenced directives not
-// in scope / not in the portal).
+// in scope / not in the portal). scope: "all" (whole registry) | "company" | "product".
 async function buildComplianceGraph(scope: string, passportId: string | null): Promise<{ nodes: any[]; edges: any[]; gaps: any[] }> {
   let directives: any[] = [];
   const applicabilityByDir = new Map<string, string>();
@@ -427,8 +478,12 @@ async function buildComplianceGraph(scope: string, passportId: string | null): P
     for (const a of appl || []) applicabilityByDir.set(a.directive_id, a.applicability_status);
     const dirIds = (appl || []).filter((a: any) => a.applicability_status !== "not_applicable").map((a: any) => a.directive_id);
     if (dirIds.length) { const { data } = await db.from("eu_directives").select("*").in("id", dirIds); directives = data || []; }
-  } else {
+  } else if (scope === "company") {
     const { data } = await db.from("eu_directives").select("*").eq("applies_to_company", true);
+    directives = data || [];
+  } else {
+    // "all" — every directive already in the platform's registry, pre-loaded.
+    const { data } = await db.from("eu_directives").select("*");
     directives = data || [];
   }
   const { data: allDirs } = await db.from("eu_directives").select("id, celex_number, short_name, applies_to_company, status, directive_type, official_title");
@@ -2137,10 +2192,12 @@ Be specific: name the exact document and the exact standard (and clause where po
 
   if (action === "analyseComplianceGraph") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const scope = body.scope === "product" ? "product" : "company";
+    const scope = body.scope === "product" ? "product" : body.scope === "company" ? "company" : "all";
     const passportId = String(body.passportId ?? "").trim() || null;
     if (scope === "product" && !passportId) return json({ error: "passportId required for product scope" }, 400);
     try {
+      // Pre-load any EU directives/regulations already catalogued in the standards register.
+      if (scope !== "product") await importDirectivesFromStandards();
       const graph = await buildComplianceGraph(scope, passportId);
       return json({ ok: true, scope, passportId, ...graph });
     } catch (e) {
@@ -2178,7 +2235,7 @@ Be specific: name the exact document and the exact standard (and clause where po
   if (action === "generateComplianceNarrative") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY." }, 400);
-    const scope = body.scope === "product" ? "product" : "company";
+    const scope = body.scope === "product" ? "product" : body.scope === "company" ? "company" : "all";
     const passportId = String(body.passportId ?? "").trim() || null;
     const language = body.language === "sv" ? "sv" : "en";
     if (scope === "product" && !passportId) return json({ error: "passportId required for product scope" }, 400);
