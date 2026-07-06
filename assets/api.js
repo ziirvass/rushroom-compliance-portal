@@ -108,6 +108,7 @@
     // Standards & Regulations register (with version history)
     standards: (token) => call({ action: "standards", token }),
     addStandard: (token, fields) => call({ action: "addStandard", token, ...fields }),
+    updateStandard: (token, id, fields) => call({ action: "updateStandard", token, id, ...fields }),
     deleteStandard: (token, id) => call({ action: "deleteStandard", token, id }),
     deleteStandardVersion: (token, id) => call({ action: "deleteStandardVersion", token, id }),
     // AI deviation monitoring (Rushroom only). The scan can take a while — the

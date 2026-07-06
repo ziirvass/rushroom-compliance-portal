@@ -1013,6 +1013,27 @@ Deno.serve(async (req) => {
     return json({ ok: true, id: res.data?.id });
   }
 
+  if (action === "updateStandard") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const id = String(body.id ?? "");
+    if (!id) return json({ error: "id required" }, 400);
+    const patch: Record<string, unknown> = {};
+    if (body.code !== undefined) patch.code = String(body.code).slice(0, 120);
+    if (body.title !== undefined) patch.title = String(body.title).slice(0, 300);
+    if (body.category !== undefined) patch.category = String(body.category).slice(0, 80);
+    if (body.regType !== undefined) patch.reg_type = String(body.regType).slice(0, 60);
+    if (body.jurisdiction !== undefined) patch.jurisdiction = String(body.jurisdiction).slice(0, 60);
+    if (Array.isArray(body.audience)) patch.audience = body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
+    if (!Object.keys(patch).length) return json({ error: "nothing to update" }, 400);
+    let res = await db.from("standards").update(patch).eq("id", id);
+    if (res.error && /reg_type|jurisdiction/.test(res.error.message || "")) {
+      const { reg_type: _r, jurisdiction: _j, ...base } = patch;
+      res = await db.from("standards").update(base).eq("id", id);
+    }
+    if (res.error) return json({ error: res.error.message }, 500);
+    return json({ ok: true });
+  }
+
   if (action === "deleteStandard") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const id = String(body.id ?? "");

@@ -1861,6 +1861,37 @@
     });
   }
 
+  // Edit a standard's catalogue fields (code/title/domain/type/jurisdiction/audience)
+  // without re-adding it — so existing standards can be classified.
+  function standardMetaEditor(s, role, reload) {
+    const code = el("input", { type: "text", class: "up-text", value: s.code || "", placeholder: "Code (e.g. EN 60598-1)" });
+    const title = el("input", { type: "text", class: "up-text", value: s.title || "", placeholder: "Title" });
+    const category = el("input", { type: "text", class: "up-text", value: s.category || "", placeholder: "Domain (e.g. LVD, EMC)" });
+    const regType = el("select", { class: "up-text" }, [el("option", { value: "" }, "— regulatory type —"), ...REG_TYPES.map((t) => el("option", { value: t, selected: (s.reg_type || "") === t ? "selected" : null }, t))]);
+    const jurisdiction = el("select", { class: "up-text" }, [el("option", { value: "" }, "— jurisdiction —"), ...JURISDICTIONS.map((j) => el("option", { value: j, selected: (s.jurisdiction || "") === j ? "selected" : null }, jurLabel(j)))]);
+    const auds = ["internal", "supplier", "reviewer", "installer"].map((a) => { const cb = el("input", { type: "checkbox", value: a, checked: (s.audience || []).includes(a) ? "checked" : null }); return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) }; });
+    const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const save = el("button", { class: "btn btn-primary", type: "button" }, "Save changes");
+    const form = el("div", { class: "step-form" }, [
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Code"), code]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Title"), title]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Domain"), category]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Regulatory type"), regType]),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Jurisdiction"), jurisdiction]),
+      el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Audience"), el("div", { class: "aud-checks" }, auds.map((c) => c.label))]),
+      note, el("div", { style: "margin-top:0.5rem" }, save),
+    ]);
+    const close = openModal(`Edit — ${s.code || s.title || "standard"}`, form);
+    save.addEventListener("click", async () => {
+      note.className = "up-status"; note.textContent = "Saving…"; save.disabled = true;
+      try {
+        const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
+        await API.updateStandard(API.getToken(role), s.id, { code: code.value, title: title.value, category: category.value, regType: regType.value, jurisdiction: jurisdiction.value, audience: audience.length ? audience : ["internal"] });
+        flash(s.id); close(); await reload();
+      } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
+    });
+  }
+
   function standardCard(s, role, reload) {
     const versions = s.versions || []; // newest first (server-ordered)
     const current = versions[0];
@@ -1877,6 +1908,7 @@
       ]),
       manage ? el("div", { class: "std-actions" }, [
         el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => standardVersionEditor(s, role, reload) }, versions.length ? "+ New version" : "Upload file"),
+        actionBtn("Edit", "edit", { onClick: () => standardMetaEditor(s, role, reload) }),
         actionBtn("Delete", "trash", { danger: true, onClick: () => deleteStandard(s, role, reload) }),
       ]) : null,
     ]);
