@@ -989,6 +989,7 @@
     ]);
 
     let file = null, uploaded = null, uploading = false;
+    const readyCbs = []; if (opts.onReady) readyCbs.push(opts.onReady); // run when an upload completes
     const gated = []; // { el, requireFile }
     const sync = () => { for (const g of gated) g.el.disabled = uploading || (g.requireFile && !uploaded); };
     const register = (btnEl, requireFile = true) => { gated.push({ el: btnEl, requireFile }); sync(); };
@@ -1029,7 +1030,7 @@
         if (trickleId) { clearInterval(trickleId); trickleId = null; }
         uploaded = { path, fileName: f.name }; uploading = false; done = true; sync();
         bump(100);
-        if (opts.onReady) opts.onReady(uploaded, f);
+        for (const cb of readyCbs) { try { cb(uploaded, f); } catch (_) {} }
       } catch (ex) {
         stopAnim();
         uploading = false; uploaded = null; done = false; sync();
@@ -1053,6 +1054,7 @@
 
     return {
       el: zone, bucket, register,
+      onReady: (fn) => { if (fn) readyCbs.push(fn); },
       getUploaded: () => uploaded,
       getFile: () => file,
       isUploading: () => uploading,
@@ -1068,24 +1070,22 @@
     };
   }
 
-  /* AI "read the uploaded file and fill fields" button. Uses the file already
-   * uploaded by the uploadZone, so it is instant and never re-uploads. */
+  /* AI "read the uploaded file and fill fields" — runs automatically as soon as
+   * the file finishes uploading (one batch, no separate button). Uses the file
+   * already uploaded by the uploadZone, so it is instant and never re-uploads. */
   function aiAutofill(role, { zone, statusEl, onFill }) {
-    const btn = el("button", { class: "btn btn-primary", type: "button" }, "✨ Read file & auto-fill");
-    btn.addEventListener("click", async () => {
-      const up = zone.getUploaded();
-      if (!up) { statusEl.className = "up-status warn"; statusEl.textContent = zone.isUploading() ? "Please wait — the file is still uploading." : "Add a file first."; return; }
-      btn.disabled = true; statusEl.className = "up-status"; statusEl.textContent = "Reading the file with AI…";
+    zone.onReady(async (up) => {
+      if (!up) return;
+      statusEl.className = "up-status"; statusEl.textContent = "✨ Reading the file with AI…";
       try {
         const meta = await API.suggestFileMetadata(API.getToken(role), { path: up.path, fileName: up.fileName, bucket: zone.bucket });
         onFill(meta, up);
         statusEl.className = "up-status ok";
         statusEl.textContent = meta.summary ? `AI read: ${meta.summary} — review and approve.` : "AI filled the fields — review and approve.";
       } catch (ex) {
-        statusEl.className = "up-status err"; statusEl.textContent = `Couldn't read the file: ${ex.message}. You can still fill the fields manually.`;
-      } finally { btn.disabled = false; }
+        statusEl.className = "up-status err"; statusEl.textContent = `Couldn't read the file automatically: ${ex.message}. You can still fill the fields manually.`;
+      }
     });
-    return { btn };
   }
 
   function uploadCard(role, steps) {
@@ -1100,10 +1100,10 @@
     const note = el("input", { type: "text", class: "up-note", placeholder: "Note (optional)", "aria-label": "Note" });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const btn = el("button", { class: "btn btn-primary", type: "button" }, "Upload");
-    const af = aiAutofill(role, { zone, statusEl: status, onFill: (meta) => {
+    aiAutofill(role, { zone, statusEl: status, onFill: (meta) => {
       if (meta.summary && !note.value.trim()) note.value = meta.summary;
     } });
-    zone.register(af.btn); zone.register(btn);
+    zone.register(btn);
     btn.addEventListener("click", async () => {
       const up = zone.getUploaded();
       if (!up) { status.className = "up-status warn"; status.textContent = "Add a file first."; return; }
@@ -1119,11 +1119,11 @@
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Upload a document"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, role === "supplier"
-        ? "Submit your signed declaration, test reports, datasheets, or RoHS/REACH declarations. The AI can read the file and suggest a note."
-        : "Attach a file to the technical file or a specific step. The AI can read the file and suggest a note."),
+        ? "Submit your signed declaration, test reports, datasheets, or RoHS/REACH declarations. The AI reads the file and suggests a note automatically."
+        : "Attach a file to the technical file or a specific step. The AI reads the file and suggests a note automatically."),
       zone.el,
       el("div", { class: "upload-fields", style: "margin-top:0.6rem" }, [stepSel, who, note].filter(Boolean)),
-      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.6rem" }, [af.btn, btn]),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.6rem" }, btn),
       status,
     ]);
   }
@@ -1144,12 +1144,12 @@
     });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const btn = el("button", { class: "btn btn-primary", type: "button" }, "Add document");
-    const af = aiAutofill(role, { zone, statusEl: status, onFill: (meta) => {
+    aiAutofill(role, { zone, statusEl: status, onFill: (meta) => {
       if (meta.name) name.value = meta.name;
       if (meta.category) category.value = meta.category;
       if (meta.kind === "template" || meta.kind === "operational") kind.value = meta.kind;
     } });
-    zone.register(af.btn); zone.register(btn);
+    zone.register(btn);
     btn.addEventListener("click", async () => {
       const up = zone.getUploaded();
       if (!up) { status.className = "up-status warn"; status.textContent = "Add a file first."; return; }
@@ -1171,7 +1171,6 @@
       el("h3", {}, "Manage documents"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file — the AI reads its name, category and section for you. Review, then add. Templates can later become As Operated documents without deleting anything."),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document file"), zone.el]),
-      el("div", { style: "margin:0.5rem 0 0.9rem" }, af.btn),
       el("div", { class: "upload-fields" }, [name, category, kind]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
       el("div", { style: "margin-top:0.75rem" }, btn),
@@ -1241,11 +1240,11 @@
     const zone = uploadZone(role, "documents", { ariaLabel: "Choose the new version file" });
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload new version");
-    const af = aiAutofill(role, { zone, statusEl: note, onFill: (meta) => {
+    aiAutofill(role, { zone, statusEl: note, onFill: (meta) => {
       if (meta.version && !version.value.trim()) version.value = meta.version;
       if (meta.summary && !notes.value.trim()) notes.value = meta.summary;
     } });
-    zone.register(af.btn); zone.register(save);
+    zone.register(save);
 
     const reasonNote = opts.reason === "pdf"
       ? el("div", { class: "notice warn" }, `PDF files can't be edited in Google Docs. Upload a corrected file below${(d.kind || "template") === "operational" ? ", or close this and use “AI draft” to generate a new version." : "."}`)
@@ -1255,7 +1254,6 @@
     const uploadPath = showUpload ? [
       showGoogle ? el("div", { class: "muted", style: "text-align:center; margin:0.4rem 0" }, "— or upload a replacement file —") : null,
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), zone.el]),
-      el("div", {}, af.btn),
       note, el("div", { style: "margin-top:0.5rem" }, save),
     ] : [];
     const form = el("div", { class: "step-form" }, [
@@ -1771,16 +1769,11 @@
       return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
     });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
-    const zone = uploadZone(role, "standards", { ariaLabel: "Standard or regulation file" });
-    const autofill = el("button", { class: "btn btn-primary", type: "button" }, "✨ Read file & auto-fill");
-    const btn = el("button", { class: "btn btn-primary", type: "button" }, "Approve & add standard");
-    zone.register(autofill);        // needs an uploaded file
-    zone.register(btn, false);      // a file is optional; only block while uploading
-
-    autofill.addEventListener("click", async () => {
-      const up = zone.getUploaded();
-      if (!up) { status.className = "up-status warn"; status.textContent = zone.isUploading() ? "Please wait — the file is still uploading." : "Add a file first."; return; }
-      autofill.disabled = true; status.className = "up-status"; status.textContent = "Reading the file with AI…";
+    // The AI read runs automatically as soon as the file finishes uploading —
+    // one batch, no separate button. onReady fires when the upload completes.
+    const autofill = async (up) => {
+      if (!up) return;
+      status.className = "up-status"; status.textContent = "✨ Reading the file with AI…";
       try {
         const meta = await API.suggestStandardMetadata(API.getToken(role), { path: up.path, fileName: up.fileName });
         if (meta.code) code.value = meta.code;
@@ -1793,9 +1786,12 @@
         status.className = "up-status ok";
         status.textContent = meta.summary ? `AI read: ${meta.summary} — review the fields and approve.` : "AI filled the fields — review and approve.";
       } catch (ex) {
-        status.className = "up-status err"; status.textContent = `Couldn't read the file: ${ex.message}. You can still fill the fields manually.`;
-      } finally { autofill.disabled = false; }
-    });
+        status.className = "up-status err"; status.textContent = `Couldn't read the file automatically: ${ex.message}. You can still fill the fields manually.`;
+      }
+    };
+    const zone = uploadZone(role, "standards", { ariaLabel: "Standard or regulation file", onReady: (up) => autofill(up) });
+    const btn = el("button", { class: "btn btn-primary", type: "button" }, "Approve & add standard");
+    zone.register(btn, false);      // a file is optional; only block while uploading
 
     btn.addEventListener("click", async () => {
       if (!code.value.trim() && !title.value.trim()) { status.className = "up-status warn"; status.textContent = "Enter a code or title (or auto-fill from a file)."; return; }
@@ -1816,10 +1812,9 @@
 
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Add a standard / regulation"),
-      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload the standard file — the AI reads its code, title, domain, regulatory type, jurisdiction and version for you. Review the fields, then approve. Every upload is kept for a full revision trail."),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload the standard file and the AI automatically reads its code, title, domain, regulatory type, jurisdiction and version for you. Review the fields, then approve. Every upload is kept for a full revision trail."),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Standard file"), zone.el]),
-      el("div", { style: "margin:0.5rem 0 0.9rem" }, autofill),
-      el("div", { class: "upload-fields" }, [code, title, category]),
+      el("div", { class: "upload-fields", style: "margin-top:0.5rem" }, [code, title, category]),
       el("div", { class: "upload-fields", style: "margin-top:0.5rem" }, [regType, jurisdiction]),
       el("div", { class: "upload-fields", style: "margin-top:0.5rem" }, [version, eff]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
@@ -1835,15 +1830,14 @@
     const notes = el("textarea", { rows: "3", placeholder: "What changed in this revision (optional)" });
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload version");
-    const af = aiAutofill(role, { zone, statusEl: note, onFill: (meta) => {
+    aiAutofill(role, { zone, statusEl: note, onFill: (meta) => {
       if (meta.version && !version.value.trim()) version.value = meta.version;
       if (meta.effectiveDate && !eff.value.trim()) eff.value = meta.effectiveDate;
       if (meta.summary && !notes.value.trim()) notes.value = meta.summary;
     } });
-    zone.register(af.btn); zone.register(save);
+    zone.register(save);
     const form = el("div", { class: "step-form" }, [
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "File"), zone.el]),
-      el("div", {}, af.btn),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Version"), version]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Effective date"), eff]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Revision notes"), notes]),
