@@ -2003,7 +2003,6 @@
         : el("div", { class: "empty" }, role === "rushroom" ? "No standards yet — add one in the Add standard tab." : "No standards shared with you yet."));
       typeSel.addEventListener("change", rebuild); jurSel.addEventListener("change", rebuild);
       wrap.append(
-        el("div", { class: "notice" }, "Version-controlled register, grouped by regulatory type and jurisdiction. EU directives & regulations set the EU-wide framework; harmonised (EN) standards give presumption of conformity; national standards add member-state specifics on top. Filter to see what applies where."),
         standards.length ? el("div", { class: "std-filters" }, [el("span", { class: "form-label", style: "margin:0" }, "Filter"), typeSel, jurSel]) : null,
         bmount,
       );
@@ -2244,7 +2243,6 @@
     const counts = users.reduce((m, u) => { m[u.status] = (m[u.status] || 0) + 1; return m; }, {});
     const summary = el("div", { class: "sev-summary" }, ["pending", "verified", "approved", "rejected", "disabled"].map((st) => el("span", { class: "sev-chip" }, `${st}: ${counts[st] || 0}`)));
     mount.replaceChildren(el("div", {}, [
-      el("div", { class: "notice" }, "User accounts — people register from the login page and verify their email; approve them and assign a role here. Registration only requests a role; you decide the actual access."),
       emailBanner,
       summary,
       el("div", { style: "margin-top:0.75rem" }, search),
@@ -2628,7 +2626,6 @@
     const stage = el("div", { class: "dg-stage" }, [svgWrap, sidebar]);
     const gapsMount = el("div", { style: "margin-top:1rem" });
     const wrap = el("div", {}, [
-      el("div", { class: "notice" }, "Every EU directive/regulation already in the platform (the directive registry + any classed as EU acts in the Standards register) is pre-loaded here, showing how they relate to one another — drawn from the EU Publications Office (CELLAR). Node colour shows clause-level compliance coverage; edges show how directives require, implement or reference each other. Switch to Company or a Product view to narrow it. Use “Sync from CELLAR” to pull the latest relations."),
       controls, legend, stage, gapsMount,
     ]);
     mount.replaceChildren(wrap);
