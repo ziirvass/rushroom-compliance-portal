@@ -21,6 +21,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as JSZipNS from "https://esm.sh/jszip@3.10.1";
 // jszip ships an export-assignment type (no default export); unwrap for Deno.
 const JSZip: any = (JSZipNS as any).default ?? JSZipNS;
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const BUCKET = "supplier-uploads";
 const DOC_BUCKET = "documents";
@@ -315,6 +316,24 @@ function toBase64(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
   return btoa(bin);
 }
+// Claude accepts at most 600 PDF pages per request; large regulations (e.g. the
+// REACH full text) exceed that. The metadata / key requirements we need live on
+// the first pages, so cap oversized PDFs to their first PDF_PAGE_CAP pages.
+const PDF_PAGE_CAP = 40;
+async function capPdfPages(bytes: Uint8Array): Promise<Uint8Array> {
+  try {
+    const src = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    const total = src.getPageCount();
+    if (total <= PDF_PAGE_CAP) return bytes;
+    const out = await PDFDocument.create();
+    const pages = await out.copyPages(src, Array.from({ length: PDF_PAGE_CAP }, (_, i) => i));
+    for (const pg of pages) out.addPage(pg);
+    return await out.save();
+  } catch (_) {
+    return bytes; // best effort — if it still exceeds the limit the caller surfaces a graceful message
+  }
+}
+
 // Returns a Claude content block for a stored file.
 async function fileBlock(bucket: string, path: string, fileName: string) {
   const { data, error } = await db.storage.from(bucket).download(path);
@@ -322,7 +341,7 @@ async function fileBlock(bucket: string, path: string, fileName: string) {
   const bytes = new Uint8Array(await data.arrayBuffer());
   const ext = (fileName.split(".").pop() || "").toLowerCase();
   try {
-    if (ext === "pdf") return { type: "document", source: { type: "base64", media_type: "application/pdf", data: toBase64(bytes) } };
+    if (ext === "pdf") return { type: "document", source: { type: "base64", media_type: "application/pdf", data: toBase64(await capPdfPages(bytes)) } };
     if (ext === "docx") return { type: "text", text: (await extractDocx(bytes)).slice(0, TEXT_CAP) || "(empty)" };
     if (ext === "xlsx" || ext === "xls") return { type: "text", text: (await extractXlsx(bytes)).slice(0, TEXT_CAP) || "(empty)" };
     return { type: "text", text: new TextDecoder().decode(bytes).slice(0, TEXT_CAP) || "(empty)" };

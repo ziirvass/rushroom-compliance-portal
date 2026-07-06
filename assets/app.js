@@ -975,18 +975,26 @@
    * browsers that don't allow assigning input.files (the dropped File is used
    * directly, not read back from the input). */
   function uploadZone(role, bucket, opts = {}) {
+    // When true, the bar spans the whole operation: upload fills 0→UP_CAP, then
+    // the AI read fills UP_CAP→100 (the consumer calls finishProcessing() when the
+    // read completes). Zones with no AI read complete at 100 on upload.
+    const hasProc = !!opts.processing;
+    const UP_CAP = hasProc ? 55 : 100;      // share of the bar the upload phase gets
     const input = el("input", { type: "file", class: "up-file", "aria-label": opts.ariaLabel || "Choose a file" });
     const bar = el("div", { class: "up-progress-bar" });
     const pct = el("span", { class: "up-progress-pct" }, "0%");
     const barWrap = el("div", { class: "up-progress-row", hidden: "" }, [el("div", { class: "up-progress" }, bar), pct]);
     const info = el("div", { class: "dropzone-file muted" }, "No file selected.");
-    const zone = el("div", { class: "dropzone" }, [
+    // Dashed drop target holds only the hint + file picker …
+    const dropbox = el("div", { class: "dropzone" }, [
       el("div", { class: "dropzone-hint" }, [
         el("span", { class: "dropzone-ico", "aria-hidden": "true" }, "⬆"),
         el("span", {}, opts.hint || "Drag & drop a file here, or"),
       ]),
-      input, info, barWrap,
+      input,
     ]);
+    // … and the status + progress bar sit below it, representing the full process.
+    const wrap = el("div", { class: "upload-zone" }, [dropbox, info, barWrap]);
 
     let file = null, uploaded = null, uploading = false;
     const readyCbs = []; if (opts.onReady) readyCbs.push(opts.onReady); // run when an upload completes
@@ -995,20 +1003,23 @@
     const register = (btnEl, requireFile = true) => { gated.push({ el: btnEl, requireFile }); sync(); };
 
     // Smoothly animated 0→100 progress: the displayed value eases toward a moving
-    // target, so even an instant upload visibly counts up; real XHR progress and
-    // a steady "trickle" both push the target forward.
-    let dispPct = 0, targetPct = 0, rafId = null, trickleId = null, done = false;
+    // target, so even an instant step visibly counts up; real XHR progress and a
+    // steady "trickle" both push the target forward.
+    // phase: "idle" | "upload" | "process" | "done"
+    let dispPct = 0, targetPct = 0, rafId = null, trickleId = null, phase = "idle";
+    let doneLabel = "", doneCls = "ok";
     const paint = () => {
       const v = Math.max(0, Math.min(100, dispPct));
       bar.style.width = v.toFixed(1) + "%";
       pct.textContent = Math.round(v) + "%";           // always-updating counter
-      if (!done && file) info.textContent = `Uploading “${file.name}”…`;
+      if (file && phase === "upload") info.textContent = `Uploading “${file.name}”…`;
+      else if (file && phase === "process") info.textContent = `Reading “${file.name}” with AI…`;
     };
     const tick = () => {
       const diff = targetPct - dispPct;
       if (diff <= 0.4) {
         dispPct = targetPct; paint(); rafId = null;
-        if (done && dispPct >= 100 && file) { info.className = "dropzone-file ok"; info.textContent = `✓ ${file.name} — uploaded`; }
+        if (phase === "done" && dispPct >= 100 && file) { info.className = "dropzone-file " + doneCls; info.textContent = doneLabel; }
         return;
       }
       dispPct = Math.min(targetPct, dispPct + diff * 0.12 + 0.4);
@@ -1016,35 +1027,44 @@
       rafId = requestAnimationFrame(tick);
     };
     const bump = (t) => { targetPct = Math.max(targetPct, Math.min(100, t)); if (rafId == null) rafId = requestAnimationFrame(tick); };
-    const stopAnim = () => { if (trickleId) { clearInterval(trickleId); trickleId = null; } if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; } };
+    const stopTrickle = () => { if (trickleId) { clearInterval(trickleId); trickleId = null; } };
+    const stopAnim = () => { stopTrickle(); if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; } };
 
     const startUpload = async (f) => {
       file = f; uploaded = null; uploading = true; sync();
-      stopAnim(); dispPct = 0; targetPct = 0; done = false;
+      stopAnim(); dispPct = 0; targetPct = 0; phase = "upload";
       info.className = "dropzone-file"; barWrap.hidden = false; paint();
-      // creep the target toward 90% so the bar always shows steady movement
-      trickleId = setInterval(() => { if (!done && targetPct < 90) bump(targetPct + Math.max(1.5, (90 - targetPct) * 0.06)); }, 120);
+      // creep toward just under the upload cap so the bar always shows movement
+      const upTop = UP_CAP - 6;
+      trickleId = setInterval(() => { if (phase === "upload" && targetPct < upTop) bump(targetPct + Math.max(1.2, (upTop - targetPct) * 0.06)); }, 120);
       try {
         const { signedUrl, path } = await API.signedUploadUrl(API.getToken(role), f.name, bucket);
-        await xhrPut(signedUrl, f, (pct) => bump(Math.min(95, pct)));
-        if (trickleId) { clearInterval(trickleId); trickleId = null; }
-        uploaded = { path, fileName: f.name }; uploading = false; done = true; sync();
-        bump(100);
+        await xhrPut(signedUrl, f, (p) => bump(Math.min(UP_CAP - 3, p * UP_CAP / 100)));
+        stopTrickle();
+        uploaded = { path, fileName: f.name }; uploading = false; sync();
+        if (hasProc) {
+          // Hand off to the AI-read phase: fill the remaining UP_CAP→~96 slowly
+          // while the model reads the file; finishProcessing() lands it on 100.
+          phase = "process"; bump(UP_CAP); paint();
+          trickleId = setInterval(() => { if (phase === "process" && targetPct < 96) bump(targetPct + Math.max(0.5, (96 - targetPct) * 0.035)); }, 220);
+        } else {
+          phase = "done"; doneLabel = `✓ ${f.name} — uploaded`; doneCls = "ok"; bump(100);
+        }
         for (const cb of readyCbs) { try { cb(uploaded, f); } catch (_) {} }
       } catch (ex) {
         stopAnim();
-        uploading = false; uploaded = null; done = false; sync();
+        uploading = false; uploaded = null; phase = "idle"; sync();
         info.className = "dropzone-file err"; info.textContent = `Upload failed: ${ex.message}. Please try again.`;
         barWrap.hidden = true;
       }
     };
 
     input.addEventListener("change", () => { const f = input.files && input.files[0]; if (f) startUpload(f); });
-    const setDrag = (on) => zone.classList.toggle("dragover", on);
-    zone.addEventListener("dragenter", (e) => { e.preventDefault(); setDrag(true); });
-    zone.addEventListener("dragover", (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; setDrag(true); });
-    zone.addEventListener("dragleave", (e) => { if (!zone.contains(e.relatedTarget)) setDrag(false); });
-    zone.addEventListener("drop", (e) => {
+    const setDrag = (on) => dropbox.classList.toggle("dragover", on);
+    dropbox.addEventListener("dragenter", (e) => { e.preventDefault(); setDrag(true); });
+    dropbox.addEventListener("dragover", (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; setDrag(true); });
+    dropbox.addEventListener("dragleave", (e) => { if (!dropbox.contains(e.relatedTarget)) setDrag(false); });
+    dropbox.addEventListener("drop", (e) => {
       e.preventDefault(); setDrag(false);
       const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
       if (!f) return;
@@ -1053,14 +1073,24 @@
     });
 
     return {
-      el: zone, bucket, register,
+      el: wrap, bucket, register,
       onReady: (fn) => { if (fn) readyCbs.push(fn); },
+      // Called by the AI-read consumer to land the bar on 100% once the read is
+      // done (ok=true) or failed (ok=false, bar still completes so it never hangs).
+      finishProcessing: (ok, label) => {
+        if (phase !== "process") return;
+        stopTrickle(); phase = "done";
+        doneCls = ok ? "ok" : "warn";
+        const nm = file ? file.name : "file";
+        doneLabel = label || (ok ? `✓ ${nm} — uploaded & read` : `✓ ${nm} — uploaded (couldn’t read automatically)`);
+        bump(100);
+      },
       getUploaded: () => uploaded,
       getFile: () => file,
       isUploading: () => uploading,
       reset: () => {
         stopAnim();
-        file = null; uploaded = null; uploading = false; done = false;
+        file = null; uploaded = null; uploading = false; phase = "idle";
         dispPct = 0; targetPct = 0;
         try { input.value = ""; } catch (_) {}
         bar.style.width = "0%"; pct.textContent = "0%"; barWrap.hidden = true;
@@ -1082,14 +1112,16 @@
         onFill(meta, up);
         statusEl.className = "up-status ok";
         statusEl.textContent = meta.summary ? `AI read: ${meta.summary} — review and approve.` : "AI filled the fields — review and approve.";
+        zone.finishProcessing(true);
       } catch (ex) {
         statusEl.className = "up-status err"; statusEl.textContent = `Couldn't read the file automatically: ${ex.message}. You can still fill the fields manually.`;
+        zone.finishProcessing(false);
       }
     });
   }
 
   function uploadCard(role, steps) {
-    const zone = uploadZone(role, "uploads", { ariaLabel: "Choose a file to upload" });
+    const zone = uploadZone(role, "uploads", { ariaLabel: "Choose a file to upload", processing: true });
     const stepSel = el("select", { class: "up-step", "aria-label": "Related step (optional)" }, [
       el("option", { value: "" }, "— related step (optional) —"),
       ...steps.map((s) => el("option", { value: String(s.step) }, `#${s.step} · ${s.action.slice(0, 60)}`)),
@@ -1131,7 +1163,7 @@
   // Rushroom-only: add a file to the document library (stored in Supabase).
   function manageDocumentsCard(role, reload) {
     if (role !== "rushroom") return null;
-    const zone = uploadZone(role, "documents", { ariaLabel: "Choose a document to add" });
+    const zone = uploadZone(role, "documents", { ariaLabel: "Choose a document to add", processing: true });
     const name = el("input", { type: "text", class: "up-text", placeholder: "Display name (defaults to file name)", "aria-label": "Document name" });
     const category = el("input", { type: "text", class: "up-text", placeholder: "Category (e.g. Test reports)", "aria-label": "Category" });
     const kind = el("select", { class: "up-text", "aria-label": "Section" }, [
@@ -1237,7 +1269,7 @@
     ]) : null;
 
     // ---- Path B: upload a new file ----
-    const zone = uploadZone(role, "documents", { ariaLabel: "Choose the new version file" });
+    const zone = uploadZone(role, "documents", { ariaLabel: "Choose the new version file", processing: true });
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, "Upload new version");
     aiAutofill(role, { zone, statusEl: note, onFill: (meta) => {
@@ -1785,11 +1817,13 @@
         if (meta.effectiveDate) eff.value = meta.effectiveDate;
         status.className = "up-status ok";
         status.textContent = meta.summary ? `AI read: ${meta.summary} — review the fields and approve.` : "AI filled the fields — review and approve.";
+        zone.finishProcessing(true);
       } catch (ex) {
         status.className = "up-status err"; status.textContent = `Couldn't read the file automatically: ${ex.message}. You can still fill the fields manually.`;
+        zone.finishProcessing(false);
       }
     };
-    const zone = uploadZone(role, "standards", { ariaLabel: "Standard or regulation file", onReady: (up) => autofill(up) });
+    const zone = uploadZone(role, "standards", { ariaLabel: "Standard or regulation file", processing: true, onReady: (up) => autofill(up) });
     const btn = el("button", { class: "btn btn-primary", type: "button" }, "Approve & add standard");
     zone.register(btn, false);      // a file is optional; only block while uploading
 
@@ -1824,7 +1858,7 @@
   }
 
   function standardVersionEditor(s, role, reload) {
-    const zone = uploadZone(role, "standards", { ariaLabel: "Choose the standard file" });
+    const zone = uploadZone(role, "standards", { ariaLabel: "Choose the standard file", processing: true });
     const version = el("input", { type: "text", placeholder: "e.g. 2015+A1:2022 or Rev 3" });
     const eff = el("input", { type: "text", placeholder: "Effective date (optional)" });
     const notes = el("textarea", { rows: "3", placeholder: "What changed in this revision (optional)" });
