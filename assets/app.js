@@ -720,6 +720,7 @@
     expand: svg('<polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/>'),
     collapse: svg('<polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/>'),
     diff: svg('<line x1="12" y1="3" x2="12" y2="21"/><polyline points="8 8 4 12 8 16"/><polyline points="16 8 20 12 16 16"/>'),
+    tag: svg('<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>'),
   };
   // File action chip (View / Open) — subtle pill; label hides on narrow screens.
   function fileActionBtn(label, iconKey, opts = {}) {
@@ -2637,10 +2638,16 @@
         uploadsReview(role, load).then((card) => mount.replaceChildren(card || el("div", { class: "empty" }, "No supplier uploads.")));
         return mount;
       };
+      // Placeholder for upcoming product labels & instructions functionality.
+      const labelsTab = () => el("div", { class: "card" }, [
+        el("h3", {}, "Labels and Instructions"),
+        el("p", { class: "muted", style: "margin:0.35rem 0 0" }, "Manage product labels (CE marking, warnings, ratings, energy labels) and the accompanying instructions and manuals here. Functionality is coming soon."),
+      ]);
       const docTabs = [
         { id: "list", label: "Library", icon: "layers", build: listTab },
         { id: "add", label: role === "supplier" ? "Upload a document" : "Add document", icon: "plus", build: addTab },
       ];
+      if (role === "rushroom") docTabs.push({ id: "labels", label: "Labels and Instructions", icon: "tag", build: labelsTab });
       if (role === "rushroom") docTabs.push({ id: "uploads", label: "Supplier uploads", icon: "external", build: uploadsTab });
       docsPanel.replaceChildren(subTabs("documents", docTabs));
     };
