@@ -2610,9 +2610,6 @@
         el("span", { class: "updated" }, `Live · ${(API.session() && (API.session().name || API.session().urole)) || role} · ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
       const frag = el("div", {}, [
-        el("div", { class: "notice ok" }, role === "rushroom"
-          ? "Signed in as Rushroom — edit any step's status from the dropdowns; changes save instantly."
-          : "Signed in as a supplier — update the status of your steps and upload documents; changes save instantly."),
         tools,
         summaryTiles(steps),
         phaseToolbar(),
