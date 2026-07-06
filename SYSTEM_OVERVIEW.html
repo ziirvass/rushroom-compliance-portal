@@ -1431,9 +1431,35 @@
             <p>A <strong>D3.js 7.9.0</strong> force-directed graph (CDN). Nodes = directives, sized by number of applicable clauses, coloured by compliance coverage (green &gt;80%, amber 40–80%, red &lt;40%, grey not assessed). Edges styled by relation type (solid requires/implements, dashed references/amends, dotted AI-inferred) with confidence-scaled width. Click a node → sidebar (title, scope, coverage bar, related directives, EUR-Lex + standards-register links); click an edge → relation type, clauses, description, confidence, source. A <strong>Company / Product</strong> toggle (product selector in product mode), a <strong>gaps table</strong> ("Add to portal" per referenced-but-missing directive), and an AI <strong>compliance narrative</strong> export complete the view.</p>
         </div>
 
+        <!-- COMPLIANCE STATUS DIMENSION -->
+        <div class="section page-break">
+            <h2>13. Compliance Status Dimension — Lifecycle × Scope <span class="doc-new-badge">New module</span></h2>
+
+            <p>Positions every compliance item (documents + clause interpretations) in a <strong>2×2 matrix</strong>: <strong>lifecycle phase</strong> (<code>pre_launch</code> — one-time pre-market requirements | <code>monitoring</code> — ongoing post-launch obligations) × <strong>scope</strong> (<code>company</code> — organisation-level | <code>product_services</code> — per-product/service). All columns are nullable (<code>NULL = unclassified</code>): an existing Level 1/2 database keeps working unchanged (progressive enrichment). This phase establishes the dimension and the matrix view only — quadrant-specific behaviour is deferred.</p>
+
+            <h3>Schema (additive, <code>supabase/schema.sql</code>)</h3>
+            <ul style="margin-left:20px">
+                <li>Enums <code>lifecycle_phase</code> and <code>compliance_scope</code>.</li>
+                <li>On <code>documents</code> and <code>as_operates_interpretations</code>: nullable <code>lifecycle_phase</code>, <code>scope</code>, <code>classification_ai_generated</code> (bool), <code>classified_by</code> (uuid), <code>classified_at</code>. Interpretations inherit their parent document's classification when their own is unset (overridable per row).</li>
+                <li>Monitoring recurrence — <strong>schema only</strong>, no logic this phase: <code>monitoring_frequency</code> (interval), <code>next_due_at</code>, <code>last_verified_at</code>, with a CHECK that they are NULL for <code>pre_launch</code> items.</li>
+                <li><code>classification_log</code> — append-only audit trail of every classification change (entity, old/new phase & scope, changed_by, ai_generated).</li>
+            </ul>
+
+            <h3>Endpoints (edge function)</h3>
+            <ul style="margin-left:20px">
+                <li><code>setClassification</code> {entityType, ids[], lifecyclePhase, scope, aiGenerated} — bulk set/update; writes to <code>classification_log</code>. Rushroom/Reviewer only.</li>
+                <li><code>getComplianceMatrix</code> — pure aggregation (no LLM): per-quadrant totals, compliance_status breakdown, coverage % + colour, and the unclassified count.</li>
+                <li><code>listClassificationItems</code> — items with own + effective classification; optional <code>lifecycle_phase</code> / <code>scope</code> / <code>unclassified</code> / <code>entityType</code> filters.</li>
+                <li><code>suggestClassifications</code> — Claude proposes phase + scope for unclassified items (title/category/clause) with a confidence; returns proposals only, never writes. Accepted proposals persist via <code>setClassification</code> with <code>classification_ai_generated = true</code>.</li>
+            </ul>
+
+            <h3>UI (Compliance Status section)</h3>
+            <p>A 2×2 quadrant overview (Pre Launch/Monitoring × Company/Product&nbsp;&amp;&nbsp;Services), each card showing item count, % compliant and a status colour (green/amber/red; grey when empty), plus a distinct <strong>unclassified</strong> indicator. Clicking a quadrant (or the unclassified card) filters the item list below. Each row has compact phase/scope selects (Rushroom/Reviewer) or read-only pills (other roles), multi-select + bulk apply, and an AI-suggestion flow with per-row Accept/Reject and an AI badge on accepted rows. The matrix persists across step reloads.</p>
+        </div>
+
         <!-- PROPOSALS & DRAFTS SECTION -->
         <div class="section page-break">
-            <h2>13. Proposals & Drafts — Future Enhancements</h2>
+            <h2>14. Proposals & Drafts — Future Enhancements</h2>
             
             <p>This section catalogs proposed features, improvements, and enhancements. Each proposal includes:</p>
             <ul style="margin-left: 20px; margin-bottom: 20px;">

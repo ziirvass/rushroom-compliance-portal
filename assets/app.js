@@ -2868,10 +2868,194 @@
     await load();
   }
 
+  /* ------- Compliance Status dimension: Lifecycle phase × Scope (2×2) ------- */
+  const PHASE_LABEL = { pre_launch: "Pre Launch", monitoring: "Monitoring" };
+  const SCOPE_LABEL = { company: "Company", product_services: "Product & Services" };
+  const CS_QUADS = [
+    { key: "pre_launch|company", phase: "pre_launch", scope: "company" },
+    { key: "pre_launch|product_services", phase: "pre_launch", scope: "product_services" },
+    { key: "monitoring|company", phase: "monitoring", scope: "company" },
+    { key: "monitoring|product_services", phase: "monitoring", scope: "product_services" },
+  ];
+  const phaseSelect = (val) => el("select", { class: "cs-sel", "aria-label": "Lifecycle phase" }, [
+    el("option", { value: "", selected: !val ? "selected" : null }, "— phase —"),
+    el("option", { value: "pre_launch", selected: val === "pre_launch" ? "selected" : null }, "Pre Launch"),
+    el("option", { value: "monitoring", selected: val === "monitoring" ? "selected" : null }, "Monitoring"),
+  ]);
+  const scopeSelect = (val) => el("select", { class: "cs-sel", "aria-label": "Scope" }, [
+    el("option", { value: "", selected: !val ? "selected" : null }, "— scope —"),
+    el("option", { value: "company", selected: val === "company" ? "selected" : null }, "Company"),
+    el("option", { value: "product_services", selected: val === "product_services" ? "selected" : null }, "Product & Services"),
+  ]);
+
+  async function renderComplianceMatrix(role, mount) {
+    const canEdit = role === "rushroom";
+    const token = () => API.getToken();
+    let matrix = null, items = [];
+    const state = { filter: null };            // {type:'quad',key,phase,scope} | {type:'unclassified'} | null
+    const selected = new Set();                // keys "entityType:id"
+    let proposals = null;                       // AI proposals awaiting accept/reject
+
+    mount.replaceChildren(el("div", { class: "loading" }, "Loading compliance matrix…"));
+
+    const reload = async () => {
+      try {
+        const [m, li] = await Promise.all([API.getComplianceMatrix(token()), API.listClassificationItems(token(), {})]);
+        matrix = m; items = li.items || [];
+      } catch (ex) {
+        if (/aren't set up/i.test(ex.message)) { mount.replaceChildren(el("div", { class: "cs-setup notice" }, "The Compliance Matrix needs its database columns — run the classification SQL in Supabase, then reload.")); return; }
+        mount.replaceChildren(el("div", { class: "error" }, `Couldn't load the compliance matrix: ${ex.message}`)); return;
+      }
+      render();
+    };
+
+    const setFilter = (f) => { state.filter = f; render(); };
+
+    const applyOne = async (item, phase, scope) => {
+      try {
+        await API.setClassification(token(), { entityType: item.entityType, ids: [item.id], lifecyclePhase: phase, scope, aiGenerated: false });
+        await reload();
+      } catch (ex) { alert(`Couldn't save: ${ex.message}`); }
+    };
+
+    const applyBulk = async (phase, scope) => {
+      const byType = { document: [], interpretation: [] };
+      for (const k of selected) { const [t, id] = k.split(":"); byType[t] && byType[t].push(id); }
+      try {
+        for (const t of ["document", "interpretation"]) if (byType[t].length) await API.setClassification(token(), { entityType: t, ids: byType[t], lifecyclePhase: phase, scope, aiGenerated: false });
+        selected.clear(); await reload();
+      } catch (ex) { alert(`Couldn't apply: ${ex.message}`); }
+    };
+
+    const runSuggest = async (visibleItems) => {
+      const ids = visibleItems.filter((i) => !i.lifecycle_phase || !i.scope).map((i) => i.id);
+      if (!ids.length) return;
+      const btn = mount.querySelector(".cs-suggest-btn"); if (btn) { btn.disabled = true; btn.textContent = "Thinking…"; }
+      try { const r = await API.suggestClassifications(token(), ids); proposals = r.proposals || []; render(); }
+      catch (ex) { alert(`Couldn't get suggestions: ${ex.message}`); if (btn) { btn.disabled = false; btn.textContent = "✨ Suggest classifications"; } }
+    };
+    const acceptProposal = async (p) => {
+      try { await API.setClassification(token(), { entityType: p.entityType, ids: [p.id], lifecyclePhase: p.lifecyclePhase, scope: p.scope, aiGenerated: true }); proposals = proposals.filter((x) => x.id !== p.id); await reload(); }
+      catch (ex) { alert(`Couldn't accept: ${ex.message}`); }
+    };
+    const rejectProposal = (p) => { proposals = proposals.filter((x) => x.id !== p.id); render(); };
+
+    const quadCard = (q) => {
+      const data = (matrix.quadrants && matrix.quadrants[q.key]) || { total: 0, pct_compliant: null, colour: "grey" };
+      const active = state.filter && state.filter.type === "quad" && state.filter.key === q.key;
+      return el("button", { class: `cs-quad cs-${data.colour}${active ? " active" : ""}`, type: "button", onclick: () => setFilter(active ? null : { type: "quad", ...q }) }, [
+        el("div", { class: "cs-quad-title" }, `${PHASE_LABEL[q.phase]} · ${SCOPE_LABEL[q.scope]}`),
+        el("div", { class: "cs-quad-count" }, String(data.total)),
+        el("div", { class: "cs-quad-sub" }, data.total === 0 ? "no items" : (data.pct_compliant == null ? "—" : `${data.pct_compliant}% compliant`)),
+      ]);
+    };
+
+    const render = () => {
+      const u = (matrix && matrix.unclassified) || { total: 0 };
+      const activeU = state.filter && state.filter.type === "unclassified";
+      const grid = el("div", { class: "cs-grid" }, [
+        ...CS_QUADS.map(quadCard),
+        el("button", { class: `cs-quad cs-unclassified${activeU ? " active" : ""}${u.total ? " has-unc" : ""}`, type: "button", onclick: () => setFilter(activeU ? null : { type: "unclassified" }) }, [
+          el("div", { class: "cs-quad-title" }, "Unclassified"),
+          el("div", { class: "cs-quad-count" }, String(u.total || 0)),
+          el("div", { class: "cs-quad-sub" }, u.total ? "needs classifying" : "all classified"),
+        ]),
+      ]);
+
+      // Filter the item list per the active quadrant / unclassified selection.
+      let shown = items;
+      if (state.filter) {
+        if (state.filter.type === "unclassified") shown = items.filter((i) => !i.effective_phase || !i.effective_scope);
+        else shown = items.filter((i) => i.effective_phase === state.filter.phase && i.effective_scope === state.filter.scope);
+      }
+
+      const header = el("div", { class: "cs-head" }, [
+        el("h3", { style: "margin:0" }, "Compliance matrix"),
+        el("span", { class: "muted", style: "font-size:0.82rem" }, state.filter ? `${shown.length} item(s) — ` : "Lifecycle phase × scope. "),
+        state.filter ? el("button", { class: "btn btn-sm", type: "button", onclick: () => setFilter(null) }, "Clear filter") : null,
+        el("span", { class: "spacer" }),
+        canEdit ? el("button", { class: "btn btn-sm cs-suggest-btn", type: "button", onclick: () => runSuggest(shown) }, "✨ Suggest classifications") : null,
+      ]);
+
+      const parts = [grid, header];
+
+      // AI proposals panel.
+      if (proposals && proposals.length) {
+        parts.push(el("div", { class: "cs-proposals card" }, [
+          el("div", { class: "cs-prop-head" }, [el("strong", {}, `AI suggestions (${proposals.length})`), el("span", { class: "spacer" }),
+            el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: async () => { for (const p of [...proposals]) await acceptProposal(p); } }, "Accept all"),
+            el("button", { class: "btn btn-sm", type: "button", onclick: () => { proposals = null; render(); } }, "Dismiss"),
+          ]),
+          ...proposals.map((p) => el("div", { class: "cs-prop-row" }, [
+            el("div", { class: "cs-prop-label" }, [el("strong", {}, p.label), p.sublabel ? el("span", { class: "muted" }, ` — ${p.sublabel}`) : null]),
+            el("span", { class: "cs-pill" }, `${PHASE_LABEL[p.lifecyclePhase]} · ${SCOPE_LABEL[p.scope]}`),
+            el("span", { class: "cs-conf", title: p.rationale }, `${Math.round(p.confidence * 100)}%`),
+            el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => acceptProposal(p) }, "Accept"),
+            el("button", { class: "btn btn-sm", type: "button", onclick: () => rejectProposal(p) }, "Reject"),
+          ])),
+        ]));
+      } else if (proposals && !proposals.length) {
+        parts.push(el("div", { class: "notice", style: "margin-top:0.5rem" }, "No AI suggestions returned."));
+      }
+
+      // Bulk bar.
+      if (canEdit && selected.size) {
+        const bp = phaseSelect(""), bs = scopeSelect("");
+        parts.push(el("div", { class: "cs-bulk" }, [
+          el("strong", {}, `${selected.size} selected`), bp, bs,
+          el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: () => applyBulk(bp.value || null, bs.value || null) }, "Apply to selected"),
+          el("button", { class: "btn btn-sm", type: "button", onclick: () => { selected.clear(); render(); } }, "Clear"),
+        ]));
+      }
+
+      // Item list.
+      if (!shown.length) parts.push(el("div", { class: "empty", style: "margin-top:0.6rem" }, state.filter ? "No items in this filter." : "No compliance items yet — add documents or clause interpretations."));
+      else parts.push(el("div", { class: "cs-list" }, shown.map((it) => {
+        const key = `${it.entityType}:${it.id}`;
+        const row = el("div", { class: "cs-row" });
+        if (canEdit) {
+          const cb = el("input", { type: "checkbox", "aria-label": "Select", checked: selected.has(key) ? "checked" : null });
+          cb.addEventListener("change", () => { if (cb.checked) selected.add(key); else selected.delete(key); render(); });
+          row.appendChild(cb);
+        }
+        row.appendChild(el("div", { class: "cs-row-main" }, [
+          el("div", { class: "cs-row-label" }, [el("span", { class: `cs-type cs-type-${it.entityType}` }, it.entityType === "document" ? "DOC" : "CLAUSE"), " ", it.label]),
+          it.sublabel ? el("div", { class: "cs-row-sub muted" }, it.sublabel) : null,
+        ]));
+        if (canEdit) {
+          const ps = phaseSelect(it.lifecycle_phase), ss = scopeSelect(it.scope);
+          ps.addEventListener("change", () => applyOne(it, ps.value || null, ss.value || null));
+          ss.addEventListener("change", () => applyOne(it, ps.value || null, ss.value || null));
+          const cell = el("div", { class: "cs-row-cls" }, [ps, ss]);
+          if (it.ai) cell.appendChild(el("span", { class: "cs-ai", title: "AI-classified — review" }, "AI"));
+          if (it.inherited && (!it.lifecycle_phase || !it.scope)) cell.appendChild(el("span", { class: "cs-inherit", title: "Inherited from parent document" }, "inherited"));
+          row.appendChild(cell);
+        } else {
+          row.appendChild(el("div", { class: "cs-row-cls" }, [
+            el("span", { class: "cs-pill" }, it.effective_phase ? PHASE_LABEL[it.effective_phase] : "—"),
+            el("span", { class: "cs-pill" }, it.effective_scope ? SCOPE_LABEL[it.effective_scope] : "—"),
+          ]));
+        }
+        return row;
+      })));
+
+      mount.replaceChildren(el("div", { class: "cs-matrix card" }, parts));
+    };
+
+    await reload();
+  }
+
   // Full API render for a page: editable readiness + documents + uploads.
   async function renderApi(role, readinessMountId) {
     wireTabs($("#tablist"));
-    const mount = $(readinessMountId);
+    const panel = $(readinessMountId);
+    // The classification matrix lives at the top of Compliance Status and persists
+    // across step reloads; the steps render into their own mount below it.
+    const matrixMount = el("div", { class: "cs-matrix-block" });
+    const stepsMount = el("div");
+    panel.replaceChildren(matrixMount, stepsMount);
+    if (role === "rushroom") renderComplianceMatrix(role, matrixMount);
+    const mount = stepsMount;
     const load = async () => {
       mount.replaceChildren(el("div", { class: "loading" }, "Loading…"));
       let payload;

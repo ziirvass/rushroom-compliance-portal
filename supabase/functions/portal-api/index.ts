@@ -525,6 +525,70 @@ async function buildComplianceGraph(scope: string, passportId: string | null): P
   return { nodes, edges, gaps: [...gapMap.values()] };
 }
 
+// ---- Compliance Status classification (lifecycle phase × scope) ------------
+const LIFECYCLE_PHASES = ["pre_launch", "monitoring"];
+const COMPLIANCE_SCOPES = ["company", "product_services"];
+const CLASS_STATUSES = ["compliant", "deviation", "not_applicable", "pending"];
+
+// Apply one classification change and append to the audit log. phase/scope may be
+// null (unclassify). When set to pre_launch, monitoring fields are nulled to keep
+// the CHECK constraint satisfied.
+async function applyClassification(entityType: string, id: string, phase: string | null, scope: string | null, aiGenerated: boolean, changedBy: string | null): Promise<{ ok: boolean; error?: string }> {
+  const table = entityType === "interpretation" ? "as_operates_interpretations" : "documents";
+  const { data: cur } = await db.from(table).select("lifecycle_phase, scope").eq("id", id).maybeSingle();
+  if (!cur) return { ok: false, error: "not found" };
+  const patch: Record<string, unknown> = { lifecycle_phase: phase, scope, classification_ai_generated: !!aiGenerated, classified_at: new Date().toISOString(), classified_by: changedBy || null };
+  if (phase === "pre_launch") { patch.monitoring_frequency = null; patch.next_due_at = null; patch.last_verified_at = null; }
+  const { error } = await db.from(table).update(patch).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  await db.from("classification_log").insert({
+    entity_type: entityType, entity_id: id,
+    old_lifecycle_phase: cur.lifecycle_phase ?? null, new_lifecycle_phase: phase ?? null,
+    old_scope: cur.scope ?? null, new_scope: scope ?? null,
+    changed_by: changedBy || null, ai_generated: !!aiGenerated,
+  });
+  return { ok: true };
+}
+
+// Load every classifiable item (documents + interpretations) with its own and
+// EFFECTIVE classification (interpretations inherit their parent document's
+// classification when their own is unset — overridable per row).
+async function loadClassificationItems(): Promise<any[]> {
+  const { data: docs } = await db.from("documents").select("id, name, category, kind, lifecycle_phase, scope, classification_ai_generated");
+  const { data: interps } = await db.from("as_operates_interpretations").select("id, compliance_status, clause_id, document_version_id, lifecycle_phase, scope, classification_ai_generated");
+  const docClass = new Map<string, { phase: string | null; scope: string | null }>();
+  const docName = new Map<string, string>();
+  for (const d of docs || []) { docClass.set(d.id, { phase: d.lifecycle_phase, scope: d.scope }); docName.set(d.id, d.name || ""); }
+  const dvIds = [...new Set((interps || []).map((i: any) => i.document_version_id).filter(Boolean))];
+  const dvToDoc = new Map<string, string>();
+  if (dvIds.length) { const { data: dvs } = await db.from("document_versions").select("id, document_id").in("id", dvIds); for (const v of dvs || []) dvToDoc.set(v.id, v.document_id); }
+  const clauseIds = [...new Set((interps || []).map((i: any) => i.clause_id).filter(Boolean))];
+  const clauseMap = new Map<string, any>();
+  if (clauseIds.length) { const { data: cs } = await db.from("standard_clauses").select("id, clause_ref, clause_title").in("id", clauseIds); for (const c of cs || []) clauseMap.set(c.id, c); }
+  const items: any[] = [];
+  for (const d of docs || []) items.push({
+    entityType: "document", id: d.id, label: d.name || "(untitled)", sublabel: [d.category, d.kind].filter(Boolean).join(" · "),
+    lifecycle_phase: d.lifecycle_phase || null, scope: d.scope || null, effective_phase: d.lifecycle_phase || null, effective_scope: d.scope || null,
+    inherited: false, ai: !!d.classification_ai_generated, compliance_status: null,
+  });
+  for (const it of interps || []) {
+    const parentDocId = dvToDoc.get(it.document_version_id);
+    const parent = parentDocId ? docClass.get(parentDocId) : null;
+    const eff_phase = it.lifecycle_phase || (parent ? parent.phase : null) || null;
+    const eff_scope = it.scope || (parent ? parent.scope : null) || null;
+    const inherited = (!it.lifecycle_phase && !!eff_phase) || (!it.scope && !!eff_scope);
+    const cl = clauseMap.get(it.clause_id);
+    items.push({
+      entityType: "interpretation", id: it.id,
+      label: cl ? `${cl.clause_ref}${cl.clause_title ? " — " + cl.clause_title : ""}` : "Interpretation",
+      sublabel: parentDocId ? (docName.get(parentDocId) || "") : "",
+      lifecycle_phase: it.lifecycle_phase || null, scope: it.scope || null, effective_phase: eff_phase, effective_scope: eff_scope,
+      inherited, ai: !!it.classification_ai_generated, compliance_status: it.compliance_status || null,
+    });
+  }
+  return items;
+}
+
 // ---- request handler -------------------------------------------------------
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -2269,6 +2333,150 @@ Be specific: name the exact document and the exact standard (and clause where po
       coverageSummary: { directiveCount: graph.nodes.length, relationCount: graph.edges.length, gapCount: graph.gaps.length, assessedCount: assessed.length, averageCoverage: avg },
       usage: usageOf(apiJson),
     });
+  }
+
+  // ==========================================================================
+  // COMPLIANCE STATUS DIMENSION — lifecycle phase × scope classification
+  // ==========================================================================
+  // Set/update classification on one or many documents/interpretations (bulk).
+  if (action === "setClassification") {
+    if (role !== "rushroom") return json({ error: "Rushroom or Reviewer only" }, 403);
+    const entityType = body.entityType === "interpretation" ? "interpretation" : "document";
+    const ids = Array.isArray(body.ids) ? body.ids.map((x: unknown) => String(x)) : (body.id ? [String(body.id)] : []);
+    if (!ids.length) return json({ error: "ids required" }, 400);
+    const rawPhase = body.lifecyclePhase;
+    const rawScope = body.scope;
+    const phase = rawPhase == null || rawPhase === "" ? null : String(rawPhase);
+    const scope = rawScope == null || rawScope === "" ? null : String(rawScope);
+    if (phase && !LIFECYCLE_PHASES.includes(phase)) return json({ error: "Invalid lifecyclePhase" }, 400);
+    if (scope && !COMPLIANCE_SCOPES.includes(scope)) return json({ error: "Invalid scope" }, 400);
+    const changedBy = (session.uid && /^[0-9a-f-]{36}$/i.test(String(session.uid))) ? String(session.uid) : null;
+    let updated = 0; const errors: any[] = [];
+    for (const id of ids) {
+      const r = await applyClassification(entityType, id, phase, scope, body.aiGenerated === true, changedBy);
+      if (r.ok) updated++; else errors.push({ id, error: r.error });
+    }
+    if (!updated && errors.length) {
+      const msg = errors[0].error || "";
+      if (/does not exist|schema cache|Could not find|column|type/i.test(msg)) return json({ error: "The classification columns aren't set up yet — run the classification SQL first." }, 500);
+    }
+    return json({ ok: true, updated, errors });
+  }
+
+  // Aggregated 2×2 matrix counts (pure aggregation, no LLM).
+  if (action === "getComplianceMatrix") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    let items: any[];
+    try { items = await loadClassificationItems(); }
+    catch (e) { if (/does not exist|schema cache|Could not find|column/i.test((e as Error).message)) return json({ error: "The classification columns aren't set up yet — run the classification SQL first." }, 500); return json({ error: (e as Error).message }, 500); }
+    const blank = () => ({ total: 0, documents: 0, interpretations: 0, statuses: { compliant: 0, deviation: 0, not_applicable: 0, pending: 0 }, statusable: 0 });
+    const quadKeys = ["pre_launch|company", "pre_launch|product_services", "monitoring|company", "monitoring|product_services"];
+    const quadrants: Record<string, any> = {}; for (const k of quadKeys) quadrants[k] = blank();
+    const unclassified = { total: 0, documents: 0, interpretations: 0 };
+    let classified = 0;
+    for (const it of items) {
+      if (!it.effective_phase || !it.effective_scope) {
+        unclassified.total++; unclassified[it.entityType === "interpretation" ? "interpretations" : "documents"]++;
+        continue;
+      }
+      classified++;
+      const q = quadrants[`${it.effective_phase}|${it.effective_scope}`];
+      if (!q) continue;
+      q.total++; q[it.entityType === "interpretation" ? "interpretations" : "documents"]++;
+      if (it.compliance_status && q.statuses[it.compliance_status] !== undefined) { q.statuses[it.compliance_status]++; q.statusable++; }
+    }
+    // Attach a coverage % + colour per quadrant.
+    for (const k of quadKeys) {
+      const q = quadrants[k];
+      q.pct_compliant = q.statusable ? Math.round((q.statuses.compliant / q.statusable) * 100) : null;
+      q.colour = (q.total === 0 || q.statusable === 0) ? "grey" : q.pct_compliant >= 80 ? "green" : q.pct_compliant >= 40 ? "amber" : "red";
+      const [phase, scope] = k.split("|");
+      q.lifecycle_phase = phase; q.scope = scope;
+    }
+    return json({
+      ok: true, quadrants,
+      unclassified,
+      totals: { total: items.length, classified, unclassified: unclassified.total, documents: items.filter((i) => i.entityType === "document").length, interpretations: items.filter((i) => i.entityType === "interpretation").length },
+    });
+  }
+
+  // List classifiable items with optional lifecycle_phase / scope / unclassified filters.
+  if (action === "listClassificationItems") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    let items: any[];
+    try { items = await loadClassificationItems(); }
+    catch (e) { if (/does not exist|schema cache|Could not find|column/i.test((e as Error).message)) return json({ error: "The classification columns aren't set up yet — run the classification SQL first." }, 500); return json({ error: (e as Error).message }, 500); }
+    const fPhase = body.lifecyclePhase ? String(body.lifecyclePhase) : null;
+    const fScope = body.scope ? String(body.scope) : null;
+    const onlyUnclassified = body.unclassified === true;
+    const entityFilter = body.entityType === "document" || body.entityType === "interpretation" ? body.entityType : null;
+    const filtered = items.filter((it) => {
+      if (entityFilter && it.entityType !== entityFilter) return false;
+      if (onlyUnclassified) return !it.effective_phase || !it.effective_scope;
+      if (fPhase && it.effective_phase !== fPhase) return false;
+      if (fScope && it.effective_scope !== fScope) return false;
+      return true;
+    });
+    return json({ ok: true, items: filtered, total: items.length });
+  }
+
+  // AI proposes classifications for unclassified items — returns proposals only,
+  // never writes. Accepted proposals go through setClassification (aiGenerated=true).
+  if (action === "suggestClassifications") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY." }, 400);
+    let items: any[];
+    try { items = await loadClassificationItems(); }
+    catch (e) { if (/does not exist|schema cache|Could not find|column/i.test((e as Error).message)) return json({ error: "The classification columns aren't set up yet — run the classification SQL first." }, 500); return json({ error: (e as Error).message }, 500); }
+    const wanted = Array.isArray(body.ids) && body.ids.length ? new Set(body.ids.map((x: unknown) => String(x))) : null;
+    const unclassified = items.filter((it) => (!it.lifecycle_phase || !it.scope) && (!wanted || wanted.has(it.id))).slice(0, 40);
+    if (!unclassified.length) return json({ ok: true, proposals: [] });
+    const SUGGEST_SCHEMA = {
+      type: "object", additionalProperties: false,
+      properties: {
+        proposals: {
+          type: "array",
+          items: {
+            type: "object", additionalProperties: false,
+            properties: {
+              id: { type: "string" }, entityType: { type: "string", enum: ["document", "interpretation"] },
+              lifecyclePhase: { type: "string", enum: LIFECYCLE_PHASES }, scope: { type: "string", enum: COMPLIANCE_SCOPES },
+              confidence: { type: "number" }, rationale: { type: "string" },
+            },
+            required: ["id", "entityType", "lifecyclePhase", "scope", "confidence", "rationale"],
+          },
+        },
+      },
+      required: ["proposals"],
+    };
+    const system = `You classify EU compliance items for Rushroom AB into a 2×2 matrix.
+LIFECYCLE PHASE:
+- pre_launch: one-time requirements that must be cleared BEFORE market launch (testing, technical file, EPREL registration, DoC, CE marking, initial risk assessment).
+- monitoring: ongoing obligations AFTER launch (market surveillance, recurring/annual reporting, re-verification, standard-change re-assessment).
+SCOPE:
+- company: organisation-level obligations (producer registrations, WEEE/packaging producer responsibility, insurance, management-system, records retention).
+- product_services: per-product/service obligations (CE conformity, Declaration of Conformity, product standards compliance, Digital Product Passport, labelling, installation/service requirements).
+For each item, choose exactly one lifecyclePhase and one scope, with a confidence 0.0–1.0 and a one-line rationale. Base it on the title, category and any clause text. Echo back the item id and entityType exactly.`;
+    const list = unclassified.map((it) => `- id=${it.id} type=${it.entityType} | ${it.label}${it.sublabel ? ` (${it.sublabel})` : ""}`).join("\n");
+    let apiJson: any;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model: SCAN_MODEL, max_tokens: 4000, thinking: { type: "adaptive" }, output_config: { effort: "low", format: { type: "json_schema", schema: SUGGEST_SCHEMA } }, system, messages: [{ role: "user", content: [{ type: "text", text: `Classify these ${unclassified.length} unclassified items:\n${list}` }] }] }),
+      });
+      apiJson = await res.json();
+      if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
+    } catch (e) { return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502); }
+    if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to classify these items." }, 502);
+    const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
+    let parsed: any; try { parsed = JSON.parse(textBlock?.text || "{}"); } catch { return json({ error: "The AI response could not be parsed." }, 502); }
+    const validIds = new Map(unclassified.map((it) => [it.id, it]));
+    const proposals = (parsed.proposals || []).filter((p: any) => validIds.has(String(p.id)) && LIFECYCLE_PHASES.includes(p.lifecyclePhase) && COMPLIANCE_SCOPES.includes(p.scope)).map((p: any) => {
+      const it = validIds.get(String(p.id));
+      return { id: String(p.id), entityType: it.entityType, label: it.label, sublabel: it.sublabel, lifecyclePhase: p.lifecyclePhase, scope: p.scope, confidence: Math.max(0, Math.min(1, Number(p.confidence) || 0.5)), rationale: String(p.rationale || "").slice(0, 300) };
+    });
+    return json({ ok: true, proposals, usage: usageOf(apiJson) });
   }
 
   return json({ error: `Unknown action: ${action}` }, 400);

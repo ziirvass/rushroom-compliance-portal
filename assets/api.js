@@ -260,6 +260,14 @@
     getComplianceCoverage: (token, directiveId) => call({ action: "getComplianceCoverage", token, directiveId }),
     generateComplianceNarrative: (token, { scope, passportId, language } = {}) =>
       call({ action: "generateComplianceNarrative", token, scope, passportId, language }),
+
+    // ---- Compliance Status classification (lifecycle phase × scope) ----
+    getComplianceMatrix: (token) => call({ action: "getComplianceMatrix", token }),
+    listClassificationItems: (token, { lifecyclePhase, scope, unclassified, entityType } = {}) =>
+      call({ action: "listClassificationItems", token, lifecyclePhase, scope, unclassified, entityType }),
+    setClassification: (token, { entityType, ids, id, lifecyclePhase, scope, aiGenerated } = {}) =>
+      call({ action: "setClassification", token, entityType, ids, id, lifecyclePhase, scope, aiGenerated }),
+    suggestClassifications: (token, ids) => call({ action: "suggestClassifications", token, ids }),
   };
 
   window.PortalAPI = API;
