@@ -378,6 +378,21 @@
     return collapsibleSection("__overview__", "Progress by phase", null, list);
   }
 
+  // Jump to a step's row in the phase sections: expand its phase, scroll it into
+  // view, and briefly flash it.
+  function goToStep(stepNo) {
+    const row = document.getElementById(`step-${stepNo}`);
+    if (!row) return;
+    const details = row.closest("details.phase");
+    if (details && !details.open) details.open = true;
+    requestAnimationFrame(() => {
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      row.classList.remove("step-flash"); void row.offsetWidth; // restart the animation
+      row.classList.add("step-flash");
+      setTimeout(() => row.classList.remove("step-flash"), 2200);
+    });
+  }
+
   function blockersPanel(steps) {
     const open = steps.filter((s) => s.presale && !s.done).sort((a, b) => a.step - b.step);
     if (!open.length) {
@@ -386,11 +401,15 @@
     }
     const ul = el("ul", { class: "blockers" });
     for (const s of open) {
-      ul.appendChild(el("li", {}, [
+      const li = el("li", { class: "blocker-link", role: "link", tabindex: "0", title: `Go to step #${s.step}` }, [
         el("span", { class: "step-no" }, `#${s.step}`),
         el("span", {}, [s.action, " "]),
         statusBadge(s),
-      ]));
+        el("span", { class: "blocker-go", "aria-hidden": "true" }, "→"),
+      ]);
+      li.addEventListener("click", () => goToStep(s.step));
+      li.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); goToStep(s.step); } });
+      ul.appendChild(li);
     }
     return collapsibleSection("__blockers__", "Pre-sale blockers", `${open.length} open`, ul);
   }
@@ -434,7 +453,7 @@
         onEditStep ? actionBtn("Edit", "edit", { onClick: () => onEditStep(s) }) : null,
         onDeleteStep ? actionBtn("Delete", "trash", { danger: true, onClick: () => onDeleteStep(s) }) : null,
       ]));
-      tbody.appendChild(el("tr", {}, cells));
+      tbody.appendChild(el("tr", { id: `step-${s.step}`, class: "step-row" }, cells));
     }
     return el("div", { class: "table-wrap" },
       el("table", {}, [

@@ -831,3 +831,15 @@ body:has(#portal-app:not([hidden])) .brand:hover .brand-mark { filter: brightnes
   mark.diff-add { background: #ffe27a !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .brand-mark { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* Clickable pre-sale blocker → jumps to its step row */
+.blockers li.blocker-link { cursor: pointer; transition: border-color 0.12s ease, background 0.12s ease; }
+.blockers li.blocker-link:hover, .blockers li.blocker-link:focus-visible { border-color: var(--accent); background: var(--panel-2); outline: none; }
+.blockers li.blocker-link .step-no { color: var(--accent); font-weight: 700; }
+.blocker-go { margin-left: auto; color: var(--muted); font-weight: 700; transition: transform 0.12s ease, color 0.12s ease; }
+.blockers li.blocker-link:hover .blocker-go, .blockers li.blocker-link:focus-visible .blocker-go { color: var(--accent); transform: translateX(3px); }
+
+/* Flash the target step row when navigated to */
+@keyframes step-flash-kf { 0% { background: rgba(94, 224, 143, 0.30); } 100% { background: transparent; } }
+tr.step-flash > td { animation: step-flash-kf 2.2s ease-out; }
+@media (prefers-reduced-motion: reduce) { tr.step-flash > td { animation: none; box-shadow: inset 0 0 0 2px var(--accent); } }
