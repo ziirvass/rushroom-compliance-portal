@@ -247,6 +247,19 @@
       call({ action: "linkPassportInterpretation", token, passportId, interpretationId, relevanceNote }),
     unlinkPassportInterpretation: (token, { passportId, interpretationId }) =>
       call({ action: "unlinkPassportInterpretation", token, passportId, interpretationId }),
+
+    // ---- EU Directive relationship analyser (CELLAR) ----
+    listDirectives: (token, passportId) => call({ action: "listDirectives", token, passportId }),
+    addDirective: (token, { celexNumber, shortName, appliesToCompany }) =>
+      call({ action: "addDirective", token, celexNumber, shortName, appliesToCompany }),
+    syncDirectiveRelations: (token, directiveId) => call({ action: "syncDirectiveRelations", token, directiveId }),
+    inferDirectiveRelations: (token, directiveId) => call({ action: "inferDirectiveRelations", token, directiveId }),
+    analyseComplianceGraph: (token, { scope, passportId } = {}) => call({ action: "analyseComplianceGraph", token, scope, passportId }),
+    setDirectiveApplicability: (token, { passportId, directiveId, status, rationale }) =>
+      call({ action: "setDirectiveApplicability", token, passportId, directiveId, status, rationale }),
+    getComplianceCoverage: (token, directiveId) => call({ action: "getComplianceCoverage", token, directiveId }),
+    generateComplianceNarrative: (token, { scope, passportId, language } = {}) =>
+      call({ action: "generateComplianceNarrative", token, scope, passportId, language }),
   };
 
   window.PortalAPI = API;

@@ -2573,6 +2573,302 @@
     ]));
   }
 
+  /* ---------------- EU Directive Relationship Analyser (D3) ---------------- */
+  const D3_CDN = "https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js";
+  // Node colour by compliance coverage; edge style by relation type / source.
+  const dgCoverageColor = (pct) => pct == null ? "#8a94a6" : pct > 80 ? "#3fb56b" : pct >= 40 ? "#d9a441" : "#e0564f";
+  const dgCoverageLabel = (pct) => pct == null ? "Not assessed" : `${pct}%`;
+  // Solid = requires/implements; dashed = amends/supersedes/supplements/references; dotted = ai_inferred.
+  const dgEdgeDash = (e) => e.sourceKind === "ai_inferred" ? "2 4" : (["requires", "implements"].includes(e.relationType) ? null : "6 4");
+  const REL_LABELS = { requires: "requires", supplements: "supplements", implements: "implements", amends: "amends", supersedes: "supersedes", references: "references", conflicts_with: "conflicts with", defines_terms_for: "defines terms for" };
+
+  async function renderDirectiveGraph(role, mount) {
+    if (role !== "rushroom") { mount.replaceChildren(el("div", { class: "empty" }, "The directive graph is available to Rushroom users.")); return; }
+    mount.replaceChildren(el("div", { class: "loading" }, "Loading directive graph…"));
+    let d3;
+    try { await loadScript(D3_CDN); d3 = window.d3; if (!d3) throw new Error("d3 missing"); }
+    catch { mount.replaceChildren(el("div", { class: "error" }, "Couldn't load the graph library (offline?). Reconnect and reload.")); return; }
+
+    const state = { scope: "company", passportId: null, passports: [], graph: null };
+    try { const pp = await API.listProductPassports(API.getToken()); state.passports = pp.passports || []; } catch { /* passports optional */ }
+
+    // ---- controls ----
+    const scopeSel = el("select", { class: "up-text", "aria-label": "Graph scope" }, [
+      el("option", { value: "company" }, "Company view — applies to Rushroom AB"),
+      el("option", { value: "product" }, "Product view — applies to a product"),
+    ]);
+    const productSel = el("select", { class: "up-text", "aria-label": "Product", hidden: "" }, [
+      el("option", { value: "" }, state.passports.length ? "— choose a product —" : "No product passports yet"),
+      ...state.passports.map((p) => el("option", { value: p.id }, p.product_name || p.product_model || "Untitled product")),
+    ]);
+    const status = el("span", { class: "up-status", role: "status", "aria-live": "polite", style: "margin:0" }, "");
+    const syncBtn = actionBtn("Sync from CELLAR", "refresh", { onClick: () => syncAll() });
+    const addBtn = actionBtn("Add directive", "plus", { primary: true, onClick: () => addDirectiveModal() });
+    const narrativeBtn = actionBtn("Generate narrative", "sparkles", { onClick: () => narrativeModal() });
+    const controls = el("div", { class: "row-tools", style: "flex-wrap:wrap; gap:0.5rem; align-items:center" }, [
+      el("span", { class: "form-label", style: "margin:0" }, "View"), scopeSel, productSel,
+      el("span", { class: "spacer" }), status, addBtn, syncBtn, narrativeBtn,
+    ]);
+
+    // ---- legend ----
+    const legend = el("div", { class: "dg-legend" }, [
+      el("span", { class: "dg-leg" }, [el("i", { class: "dg-dot", style: "background:#3fb56b" }), "Coverage >80%"]),
+      el("span", { class: "dg-leg" }, [el("i", { class: "dg-dot", style: "background:#d9a441" }), "40–80%"]),
+      el("span", { class: "dg-leg" }, [el("i", { class: "dg-dot", style: "background:#e0564f" }), "<40%"]),
+      el("span", { class: "dg-leg" }, [el("i", { class: "dg-dot", style: "background:#8a94a6" }), "Not assessed"]),
+      el("span", { class: "dg-leg" }, [el("i", { class: "dg-line solid" }), "requires / implements"]),
+      el("span", { class: "dg-leg" }, [el("i", { class: "dg-line dashed" }), "references / amends"]),
+      el("span", { class: "dg-leg" }, [el("i", { class: "dg-line dotted" }), "AI-inferred"]),
+    ]);
+
+    const svgWrap = el("div", { class: "dg-canvas" });
+    const sidebar = el("div", { class: "dg-sidebar" }, el("div", { class: "muted", style: "padding:1rem" }, "Click a directive to see its scope, coverage and relationships."));
+    const stage = el("div", { class: "dg-stage" }, [svgWrap, sidebar]);
+    const gapsMount = el("div", { style: "margin-top:1rem" });
+    const wrap = el("div", {}, [
+      el("div", { class: "notice" }, "How the EU directives that apply to Rushroom relate to one another, drawn from the EU Publications Office (CELLAR). Node colour shows clause-level compliance coverage; edges show how directives require, implement or reference each other. Use “Sync from CELLAR” to pull the latest relations."),
+      controls, legend, stage, gapsMount,
+    ]);
+    mount.replaceChildren(wrap);
+
+    // ---- data + draw ----
+    const load = async () => {
+      status.className = "up-status"; status.textContent = "Loading…";
+      if (state.scope === "product" && !state.passportId) {
+        state.graph = { nodes: [], edges: [], gaps: [] };
+        svgWrap.replaceChildren(el("div", { class: "empty" }, "Choose a product to see the directives assessed for it."));
+        gapsMount.replaceChildren(); sidebar.replaceChildren(el("div", { class: "muted", style: "padding:1rem" }, "Choose a product above.")); status.textContent = ""; return;
+      }
+      try {
+        const g = await API.analyseComplianceGraph(API.getToken(), { scope: state.scope, passportId: state.passportId });
+        state.graph = { nodes: g.nodes || [], edges: g.edges || [], gaps: g.gaps || [] };
+        status.textContent = "";
+      } catch (ex) {
+        svgWrap.replaceChildren(el("div", { class: "error", style: "padding:1rem" }, `Couldn't load the graph: ${ex.message}`));
+        status.textContent = ""; return;
+      }
+      drawGraph();
+      drawGaps();
+      // First-load convenience: if the graph has directives but no relations yet,
+      // pull them from CELLAR once per session (never blocks; may be a no-op offline).
+      if (state.graph.nodes.length && !state.graph.edges.length) {
+        const flag = `dg_synced_${state.scope}_${state.passportId || "co"}`;
+        try { if (!sessionStorage.getItem(flag)) { sessionStorage.setItem(flag, "1"); syncAll(true); } } catch { /* ignore */ }
+      }
+    };
+
+    const drawGraph = () => {
+      const { nodes, edges } = state.graph;
+      svgWrap.replaceChildren();
+      if (!nodes.length) { svgWrap.replaceChildren(el("div", { class: "empty" }, state.scope === "company" ? "No directives marked as applying to the company yet. Add one, or mark one via Add directive." : "No applicable directives for this product yet.")); return; }
+      const W = Math.max(520, svgWrap.clientWidth || 640), H = 460;
+      const maxClauses = Math.max(1, ...nodes.map((n) => (n.coverage && n.coverage.total_clauses) || 0));
+      const rOf = (n) => 16 + 14 * Math.sqrt(((n.coverage && n.coverage.total_clauses) || 0) / maxClauses);
+      // D3 mutates copies (so our state stays clean).
+      const N = nodes.map((n) => ({ ...n }));
+      const byId = new Map(N.map((n) => [n.id, n]));
+      const L = edges.filter((e) => byId.has(e.source) && byId.has(e.target)).map((e) => ({ ...e, source: e.source, target: e.target }));
+
+      const svg = d3.create("svg").attr("viewBox", `0 0 ${W} ${H}`).attr("class", "dg-svg").attr("width", "100%").attr("height", H);
+      svg.append("defs").append("marker").attr("id", "dg-arrow").attr("viewBox", "0 -5 10 10").attr("refX", 22).attr("refY", 0).attr("markerWidth", 6).attr("markerHeight", 6).attr("orient", "auto")
+        .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#7a8699");
+      const root = svg.append("g");
+      svg.call(d3.zoom().scaleExtent([0.3, 3]).on("zoom", (ev) => root.attr("transform", ev.transform)));
+
+      const sim = d3.forceSimulation(N)
+        .force("link", d3.forceLink(L).id((d) => d.id).distance(130).strength(0.4))
+        .force("charge", d3.forceManyBody().strength(-420))
+        .force("center", d3.forceCenter(W / 2, H / 2))
+        .force("collide", d3.forceCollide().radius((d) => rOf(d) + 8));
+
+      const link = root.append("g").attr("stroke-opacity", 0.75).selectAll("line").data(L).join("line")
+        .attr("stroke", (d) => d.sourceKind === "ai_inferred" ? "#8a6fd0" : "#7a8699")
+        .attr("stroke-width", (d) => 1 + 1.5 * (d.confidence || 1))
+        .attr("stroke-dasharray", (d) => dgEdgeDash(d))
+        .attr("marker-end", "url(#dg-arrow)")
+        .style("cursor", "pointer")
+        .on("click", (ev, d) => { ev.stopPropagation(); showEdge(d, byId); });
+      link.append("title").text((d) => `${byId.get(d.source.id || d.source)?.shortName || ""} ${REL_LABELS[d.relationType] || d.relationType} ${byId.get(d.target.id || d.target)?.shortName || ""}`);
+
+      const node = root.append("g").selectAll("g").data(N).join("g").style("cursor", "pointer")
+        .on("click", (ev, d) => { ev.stopPropagation(); showNode(d); })
+        .call(d3.drag()
+          .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+          .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+          .on("end", (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+      node.append("circle").attr("r", rOf).attr("fill", (d) => dgCoverageColor(d.complianceCoverage)).attr("stroke", "#0d1017").attr("stroke-width", 2)
+        .attr("opacity", (d) => d.applicabilityStatus === "partial" || d.applicabilityStatus === "under_review" ? 0.6 : 1);
+      node.append("text").text((d) => d.shortName).attr("text-anchor", "middle").attr("dy", "0.32em").attr("class", "dg-node-label").attr("pointer-events", "none");
+      node.append("title").text((d) => `${d.shortName} (${d.celex}) — ${dgCoverageLabel(d.complianceCoverage)}`);
+
+      svg.on("click", () => sidebar.replaceChildren(el("div", { class: "muted", style: "padding:1rem" }, "Click a directive to see its scope, coverage and relationships.")));
+      sim.on("tick", () => {
+        link.attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y).attr("x2", (d) => d.target.x).attr("y2", (d) => d.target.y);
+        node.attr("transform", (d) => `translate(${d.x},${d.y})`);
+      });
+      svgWrap.replaceChildren(svg.node());
+    };
+
+    const showNode = (n) => {
+      const rel = state.graph.edges.filter((e) => e.source === n.id || e.target === n.id);
+      const byId = new Map(state.graph.nodes.map((x) => [x.id, x]));
+      const cov = n.coverage || {};
+      const bar = el("div", { class: "dg-cov-track" }, el("div", { class: "dg-cov-fill", style: `width:${n.complianceCoverage || 0}%; background:${dgCoverageColor(n.complianceCoverage)}` }));
+      sidebar.replaceChildren(el("div", { class: "dg-side-inner" }, [
+        el("div", { class: "dg-side-head" }, [el("h3", {}, n.shortName), el("span", { class: "dg-celex" }, n.celex)]),
+        el("p", { class: "muted", style: "margin:0.2rem 0 0.6rem" }, n.title || ""),
+        n.applicabilityStatus ? el("span", { class: "dg-pill" }, `Applicability: ${n.applicabilityStatus}`) : null,
+        el("div", { class: "dg-side-block" }, [
+          el("div", { class: "dg-side-label" }, `Compliance coverage — ${dgCoverageLabel(n.complianceCoverage)}`),
+          bar,
+          el("div", { class: "muted", style: "font-size:0.78rem; margin-top:0.3rem" }, cov.total_clauses ? `${cov.covered_clauses}/${cov.total_clauses} clauses compliant · ${cov.deviation_count} deviation(s) · ${cov.pending_count} pending` : "No clause-level interpretations mapped to this directive yet."),
+        ]),
+        el("div", { class: "dg-side-block" }, [
+          el("div", { class: "dg-side-label" }, `Related directives (${rel.length})`),
+          rel.length ? el("ul", { class: "dg-rel-list" }, rel.map((e) => {
+            const otherId = e.source === n.id ? e.target : e.source;
+            const other = byId.get(otherId);
+            const dir = e.source === n.id ? "→" : "←";
+            return el("li", {}, [el("strong", {}, other ? other.shortName : "?"), ` ${dir} ${REL_LABELS[e.relationType] || e.relationType}`, e.sourceKind === "ai_inferred" ? el("span", { class: "dg-conf" }, ` AI · ${Math.round((e.confidence || 0) * 100)}%`) : null]);
+          })) : el("div", { class: "muted", style: "font-size:0.8rem" }, "No relations synced yet — use “Sync from CELLAR”."),
+        ]),
+        el("div", { class: "dg-side-actions" }, [
+          n.celex ? el("a", { class: "btn btn-sm", href: `https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:${n.celex}`, target: "_blank", rel: "noopener" }, "Open in EUR-Lex") : null,
+          actionBtn("Standards register", "layers", { onClick: () => { const t = $("#tab-standards"); if (t) { t.click(); t.focus(); } } }),
+          state.scope === "product" && state.passportId ? actionBtn("Set applicability", "edit", { onClick: () => applicabilityModal(n) }) : null,
+        ]),
+      ]));
+    };
+
+    const showEdge = (e, byId) => {
+      const s = byId.get(e.source.id || e.source), t = byId.get(e.target.id || e.target);
+      sidebar.replaceChildren(el("div", { class: "dg-side-inner" }, [
+        el("div", { class: "dg-side-head" }, [el("h3", {}, `${s?.shortName || "?"} → ${t?.shortName || "?"}`)]),
+        el("div", { class: "dg-kv" }, [el("span", {}, "Relation"), el("strong", {}, REL_LABELS[e.relationType] || e.relationType)]),
+        e.clauses && e.clauses.source ? el("div", { class: "dg-kv" }, [el("span", {}, "Source clause"), el("strong", {}, e.clauses.source)]) : null,
+        e.clauses && e.clauses.target ? el("div", { class: "dg-kv" }, [el("span", {}, "Target clause"), el("strong", {}, e.clauses.target)]) : null,
+        el("div", { class: "dg-kv" }, [el("span", {}, "Source"), el("strong", {}, e.sourceKind === "cellar_sparql" ? "CELLAR (SPARQL)" : e.sourceKind === "akn_ref_element" ? "CELLAR (text cross-ref)" : "AI-inferred")]),
+        el("div", { class: "dg-kv" }, [el("span", {}, "Confidence"), el("strong", { style: `color:${(e.confidence || 1) >= 0.8 ? "#3fb56b" : "#d9a441"}` }, `${Math.round((e.confidence != null ? e.confidence : 1) * 100)}%`)]),
+        e.description ? el("p", { class: "muted", style: "margin:0.5rem 0 0; font-size:0.82rem" }, e.description) : null,
+        e.sourceKind === "ai_inferred" ? el("div", { class: "notice warn", style: "margin-top:0.5rem; font-size:0.8rem" }, "AI-inferred relationship — verify before relying on it.") : null,
+      ]));
+    };
+
+    const drawGaps = () => {
+      const gaps = state.graph.gaps || [];
+      if (!gaps.length) { gapsMount.replaceChildren(); return; }
+      const rows = gaps.map((g) => el("tr", {}, [
+        el("td", {}, el("code", {}, g.celex)),
+        el("td", {}, g.shortName || (g.inRegistry ? "—" : el("span", { class: "muted" }, "not in portal"))),
+        el("td", { class: "muted", style: "font-size:0.82rem" }, g.reason),
+        el("td", {}, actionBtn("Add to portal", "plus", { primary: true, onClick: (ev) => { const b = ev.currentTarget; addGapDirective(g, b); } })),
+      ]));
+      gapsMount.replaceChildren(el("div", { class: "card" }, [
+        el("h3", { style: "margin:0 0 0.2rem" }, `Gaps — referenced directives not yet in scope (${gaps.length})`),
+        el("p", { class: "muted", style: "margin:0 0 0.7rem; font-size:0.85rem" }, "Directives referenced by applicable ones that aren’t in the portal (or aren’t assessed). Add them to complete the picture."),
+        el("table", { class: "dg-gap-table" }, [
+          el("thead", {}, el("tr", {}, [el("th", {}, "CELEX"), el("th", {}, "Name"), el("th", {}, "Why"), el("th", {}, "")])),
+          el("tbody", {}, rows),
+        ]),
+      ]));
+    };
+
+    const addGapDirective = async (g, btn) => {
+      if (btn) btn.disabled = true;
+      status.className = "up-status"; status.textContent = `Adding ${g.celex} from CELLAR…`;
+      try {
+        const r = await API.addDirective(API.getToken(), { celexNumber: g.celex, shortName: g.shortName || "", appliesToCompany: state.scope === "company" });
+        if (r.id) { try { await API.syncDirectiveRelations(API.getToken(), r.id); } catch { /* offline */ } }
+        status.className = "up-status ok"; status.textContent = `Added ${g.celex}.`;
+        await load();
+      } catch (ex) { if (btn) btn.disabled = false; status.className = "up-status err"; status.textContent = `Couldn't add: ${ex.message}`; }
+    };
+
+    const syncAll = async (silent) => {
+      const nodes = (state.graph && state.graph.nodes) || [];
+      if (!nodes.length) { if (!silent) { status.className = "up-status warn"; status.textContent = "No directives to sync yet."; } return; }
+      status.className = "up-status"; status.textContent = `Syncing ${nodes.length} directive(s) from CELLAR…`;
+      let found = 0, offline = 0;
+      await Promise.all(nodes.map(async (n) => {
+        try { const r = await API.syncDirectiveRelations(API.getToken(), n.id); found += r.relationsFound || 0; if (r.offline) offline++; } catch { offline++; }
+      }));
+      if (offline === nodes.length && !found) { status.className = "up-status warn"; status.textContent = "CELLAR returned no relations (endpoint unreachable or no data yet)."; if (silent) return; }
+      else { status.className = "up-status ok"; status.textContent = `Synced — ${found} relation(s) found.`; }
+      await load();
+    };
+
+    // ---- modals ----
+    const addDirectiveModal = () => {
+      const celex = el("input", { type: "text", class: "up-text", placeholder: "CELEX number, e.g. 32014L0035" });
+      const short = el("input", { type: "text", class: "up-text", placeholder: "Short name, e.g. LVD (optional)" });
+      const company = el("input", { type: "checkbox", checked: state.scope === "company" ? "checked" : null });
+      const note = el("p", { class: "up-status", role: "status" }, "");
+      const save = el("button", { class: "btn btn-primary", type: "button" }, "Add from CELLAR");
+      const close = openModal("Add an EU directive / regulation", el("div", { class: "step-form" }, [
+        el("p", { class: "muted", style: "margin:0" }, "Enter the CELEX number — the metadata (title, type, date) is fetched from CELLAR. Find CELEX numbers on EUR-Lex."),
+        el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "CELEX"), celex]),
+        el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Short name"), short]),
+        el("label", { class: "aud-check" }, [company, " Applies to the company (show in Company view)"]),
+        note, el("div", { style: "margin-top:0.5rem" }, save),
+      ]));
+      save.addEventListener("click", async () => {
+        if (!celex.value.trim()) { note.className = "up-status warn"; note.textContent = "Enter a CELEX number."; return; }
+        save.disabled = true; note.className = "up-status"; note.textContent = "Fetching from CELLAR…";
+        try {
+          const r = await API.addDirective(API.getToken(), { celexNumber: celex.value.trim(), shortName: short.value.trim(), appliesToCompany: company.checked });
+          if (r.id) { try { await API.syncDirectiveRelations(API.getToken(), r.id); } catch { /* offline */ } }
+          if (state.scope === "product" && state.passportId) { try { await API.setDirectiveApplicability(API.getToken(), { passportId: state.passportId, directiveId: r.id, status: "applicable", rationale: "" }); } catch { /* optional */ } }
+          close(); await load();
+        } catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
+      });
+    };
+
+    const applicabilityModal = (n) => {
+      const sel = el("select", { class: "up-text" }, ["applicable", "partial", "under_review", "not_applicable"].map((s) => el("option", { value: s, selected: n.applicabilityStatus === s ? "selected" : null }, s.replace(/_/g, " "))));
+      const rationale = el("textarea", { rows: "3", placeholder: "Why (optional)" });
+      const note = el("p", { class: "up-status", role: "status" }, "");
+      const save = el("button", { class: "btn btn-primary", type: "button" }, "Save");
+      const close = openModal(`Applicability — ${n.shortName}`, el("div", { class: "step-form" }, [
+        el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Status"), sel]),
+        el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Rationale"), rationale]),
+        note, el("div", { style: "margin-top:0.5rem" }, save),
+      ]));
+      save.addEventListener("click", async () => {
+        save.disabled = true; note.className = "up-status"; note.textContent = "Saving…";
+        try { await API.setDirectiveApplicability(API.getToken(), { passportId: state.passportId, directiveId: n.id, status: sel.value, rationale: rationale.value }); close(); await load(); }
+        catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
+      });
+    };
+
+    const narrativeModal = () => {
+      const lang = el("select", { class: "up-text" }, [el("option", { value: "en" }, "English"), el("option", { value: "sv" }, "Swedish")]);
+      const out = el("div", { class: "dg-narrative", style: "white-space:pre-wrap; margin-top:0.7rem; min-height:3rem" }, "");
+      const note = el("p", { class: "up-status", role: "status" }, "");
+      const gen = el("button", { class: "btn btn-primary", type: "button" }, "✨ Generate");
+      const copy = el("button", { class: "btn btn-sm", type: "button", hidden: "" }, "Copy");
+      openModal("Compliance narrative", el("div", { class: "step-form" }, [
+        el("p", { class: "muted", style: "margin:0" }, `AI-written summary of how the ${state.scope === "product" ? "product's" : "company's"} directives relate, for a DoC or product passport.`),
+        el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Language"), lang]),
+        el("div", {}, [gen, " ", copy]), note, out,
+      ]));
+      gen.addEventListener("click", async () => {
+        gen.disabled = true; note.className = "up-status"; note.textContent = "Generating…"; out.textContent = "";
+        try {
+          const r = await API.generateComplianceNarrative(API.getToken(), { scope: state.scope, passportId: state.passportId, language: lang.value });
+          out.textContent = r.narrative || "(empty)"; copy.hidden = false;
+          const cs = r.coverageSummary;
+          note.className = "up-status ok"; note.textContent = cs ? `${cs.directiveCount} directives · ${cs.relationCount} relations · ${cs.gapCount} gaps` : "Done.";
+        } catch (ex) { note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
+        finally { gen.disabled = false; }
+      });
+      copy.addEventListener("click", () => { try { navigator.clipboard.writeText(out.textContent); copy.textContent = "Copied ✓"; setTimeout(() => copy.textContent = "Copy", 1500); } catch { /* ignore */ } });
+    };
+
+    scopeSel.addEventListener("change", () => { state.scope = scopeSel.value; productSel.hidden = state.scope !== "product"; state.passportId = state.scope === "product" ? (productSel.value || null) : null; load(); });
+    productSel.addEventListener("change", () => { state.passportId = productSel.value || null; load(); });
+    await load();
+  }
+
   // Full API render for a page: editable readiness + documents + uploads.
   async function renderApi(role, readinessMountId) {
     wireTabs($("#tablist"));
@@ -2660,6 +2956,8 @@
     if (acctPanel && API.isAdmin()) renderAccounts(role, acctPanel);
     const l2Panel = $("#level2-panel");
     if (l2Panel && role === "rushroom") renderLevel2(role, l2Panel);
+    const dgPanel = $("#directives-panel");
+    if (dgPanel && role === "rushroom") renderDirectiveGraph(role, dgPanel);
   }
 
   // Hide tabs/panels the signed-in user isn't entitled to.
@@ -2671,6 +2969,7 @@
     };
     gate("tab-deviations", "deviations-panel", role === "rushroom");
     gate("tab-level2", "level2-panel", role === "rushroom");
+    gate("tab-directives", "directives-panel", role === "rushroom");
     gate("tab-accounts", "accounts-panel", !!admin);
   }
 

@@ -22,6 +22,7 @@ import * as JSZipNS from "https://esm.sh/jszip@3.10.1";
 // jszip ships an export-assignment type (no default export); unwrap for Deno.
 const JSZip: any = (JSZipNS as any).default ?? JSZipNS;
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
+import { createCellarService } from "./cellar-service.ts";
 
 const BUCKET = "supplier-uploads";
 const DOC_BUCKET = "documents";
@@ -201,6 +202,8 @@ async function insertDocumentVersion(row: Record<string, unknown>) {
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const SCAN_MODEL = "claude-opus-4-8";
+// EU Publications Office (CELLAR) integration — directive metadata + relations.
+const cellar = createCellarService(db, ANTHROPIC_API_KEY);
 // Token usage from a Claude response — surfaced in the UI so the team can see
 // how much AI each operation costs (front-end turns tokens into an estimate).
 const usageOf = (j: any) => ({
@@ -372,6 +375,99 @@ async function summarizeRequirementSource(bucket: string, path: string, fileName
   } catch {
     return `- ${label}: could not summarize automatically`;
   }
+}
+
+// ---- EU directive graph helpers -------------------------------------------
+const DIRECTIVE_RELATION_TYPES = ["requires", "supplements", "implements", "amends", "supersedes", "references", "conflicts_with", "defines_terms_for"];
+const APPLICABILITY_STATUSES = ["applicable", "not_applicable", "partial", "under_review"];
+
+// Compliance coverage for a directive: we tie a directive to the standards in the
+// register whose DOMAIN (category) or code matches the directive's short name, then
+// count clause-level interpretations by status. No matching standards → not assessed
+// (coverage_pct = null → grey node).
+async function coverageForDirective(dir: any): Promise<{ total_clauses: number; covered_clauses: number; coverage_pct: number | null; pending_count: number; deviation_count: number; standard_ids: string[] }> {
+  const zero = { total_clauses: 0, covered_clauses: 0, coverage_pct: null as number | null, pending_count: 0, deviation_count: 0, standard_ids: [] as string[] };
+  try {
+    const shortU = String(dir.short_name || "").toUpperCase();
+    if (!shortU) return zero;
+    const { data: stds } = await db.from("standards").select("id, code, category, reg_type, title");
+    const related = (stds || []).filter((s: any) => {
+      const hay = `${s.category || ""} ${s.code || ""} ${s.title || ""}`.toUpperCase();
+      return hay.includes(shortU);
+    });
+    const relIds = related.map((s: any) => s.id);
+    if (!relIds.length) return zero;
+    const { data: vers } = await db.from("standard_versions").select("id, standard_id, created_at").in("standard_id", relIds).order("created_at", { ascending: false });
+    const latestByStd = new Map<string, string>();
+    for (const v of vers || []) if (!latestByStd.has(v.standard_id)) latestByStd.set(v.standard_id, v.id);
+    const versionIds = [...latestByStd.values()];
+    if (!versionIds.length) return { ...zero, standard_ids: relIds };
+    const { data: clauses } = await db.from("standard_clauses").select("id").in("standard_version_id", versionIds);
+    const clauseIds = (clauses || []).map((c: any) => c.id);
+    const total = clauseIds.length;
+    if (!total) return { ...zero, standard_ids: relIds };
+    const { data: interps } = await db.from("as_operates_interpretations").select("compliance_status, clause_id").in("clause_id", clauseIds);
+    const statusByClause = new Map<string, string>();
+    for (const it of interps || []) statusByClause.set(it.clause_id, it.compliance_status);
+    let covered = 0, deviation = 0;
+    for (const st of statusByClause.values()) { if (st === "compliant") covered++; else if (st === "deviation") deviation++; }
+    const pending = total - covered - deviation;
+    return { total_clauses: total, covered_clauses: covered, coverage_pct: Math.round((covered / total) * 100), pending_count: pending, deviation_count: deviation, standard_ids: relIds };
+  } catch { return zero; }
+}
+
+// Build the directive relationship graph for a scope: nodes (directives + coverage),
+// edges (relations between in-scope directives) and gaps (referenced directives not
+// in scope / not in the portal).
+async function buildComplianceGraph(scope: string, passportId: string | null): Promise<{ nodes: any[]; edges: any[]; gaps: any[] }> {
+  let directives: any[] = [];
+  const applicabilityByDir = new Map<string, string>();
+  if (scope === "product" && passportId) {
+    const { data: appl } = await db.from("product_directive_applicability").select("*").eq("passport_id", passportId);
+    for (const a of appl || []) applicabilityByDir.set(a.directive_id, a.applicability_status);
+    const dirIds = (appl || []).filter((a: any) => a.applicability_status !== "not_applicable").map((a: any) => a.directive_id);
+    if (dirIds.length) { const { data } = await db.from("eu_directives").select("*").in("id", dirIds); directives = data || []; }
+  } else {
+    const { data } = await db.from("eu_directives").select("*").eq("applies_to_company", true);
+    directives = data || [];
+  }
+  const { data: allDirs } = await db.from("eu_directives").select("id, celex_number, short_name, applies_to_company, status, directive_type, official_title");
+  const regById = new Map<string, any>(); const regByCelex = new Map<string, any>();
+  for (const d of allDirs || []) { regById.set(d.id, d); regByCelex.set(String(d.celex_number).toUpperCase(), d); }
+  const nodeIds = new Set(directives.map((d) => d.id));
+
+  const nodes: any[] = [];
+  for (const d of directives) {
+    const cov = await coverageForDirective(d);
+    nodes.push({
+      id: d.id, celex: d.celex_number, shortName: d.short_name, title: d.official_title || "",
+      status: d.status || "active", directiveType: d.directive_type || "", appliesToCompany: !!d.applies_to_company,
+      applicabilityStatus: applicabilityByDir.get(d.id) || null, complianceCoverage: cov.coverage_pct, coverage: cov,
+    });
+  }
+
+  let rels: any[] = [];
+  if (nodeIds.size) { const { data } = await db.from("directive_relations").select("*").in("source_directive_id", [...nodeIds]); rels = data || []; }
+  const edges: any[] = []; const gapMap = new Map<string, any>();
+  for (const r of rels) {
+    const targetInScope = r.target_directive_id && nodeIds.has(r.target_directive_id);
+    if (targetInScope) {
+      edges.push({
+        id: r.id, source: r.source_directive_id, target: r.target_directive_id, relationType: r.relation_type,
+        clauses: { source: r.source_clause_ref || "", target: r.target_clause_ref || "" },
+        description: r.relation_description || "", confidence: r.confidence, sourceKind: r.source, verified: !!r.verified,
+      });
+    } else {
+      const tCelex = String(r.target_celex || "").toUpperCase();
+      if (!tCelex) continue;
+      const known = regByCelex.get(tCelex);
+      const reason = known
+        ? (scope === "product" ? "Referenced by an applicable directive but not assessed for this product" : "Referenced but not marked as applying to the company")
+        : "Referenced by an applicable directive but not yet in the portal";
+      if (!gapMap.has(tCelex)) gapMap.set(tCelex, { celex: tCelex, reason, inRegistry: !!known, shortName: known?.short_name || null, viaShortName: regById.get(r.source_directive_id)?.short_name || null, relationType: r.relation_type });
+    }
+  }
+  return { nodes, edges, gaps: [...gapMap.values()] };
 }
 
 // ---- request handler -------------------------------------------------------
@@ -1943,6 +2039,179 @@ Be specific: name the exact document and the exact standard (and clause where po
     const { error } = await db.from("passport_interpretation_links").delete().eq("passport_id", passport_id).eq("interpretation_id", interpretation_id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
+  }
+
+  // ==========================================================================
+  // EU DIRECTIVE RELATIONSHIP ANALYSER (CELLAR)
+  // ==========================================================================
+  if (action === "listDirectives") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const { data, error } = await db.from("eu_directives").select("*").order("short_name", { ascending: true });
+    if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The directive tables aren't set up yet — run the directive SQL first." : error.message }, 500);
+    let applicability: any[] = [];
+    const passportId = String(body.passportId ?? "").trim();
+    if (passportId) { const { data: appl } = await db.from("product_directive_applicability").select("*").eq("passport_id", passportId); applicability = appl || []; }
+    return json({ ok: true, directives: data || [], applicability });
+  }
+
+  if (action === "addDirective") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const celexNumber = cellar.cleanCelex(String(body.celexNumber ?? ""));
+    const shortName = String(body.shortName ?? "").trim().slice(0, 40);
+    if (!cellar.isCelex(celexNumber)) return json({ error: "Enter a valid CELEX number (e.g. 32014L0035)." }, 400);
+    const meta = await cellar.fetchDirectiveMetadata(celexNumber); // may be null if CELLAR is unreachable
+    const row: Record<string, unknown> = {
+      celex_number: celexNumber,
+      short_name: shortName || (meta?.officialTitle ? meta.officialTitle.slice(0, 24) : celexNumber),
+      official_title: meta?.officialTitle || null,
+      directive_type: meta?.directiveType || cellar.directiveTypeFromCelex(celexNumber),
+      status: meta?.status || "active",
+      in_force_date: meta?.inForceDate || null,
+      eur_lex_url: `https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:${celexNumber}`,
+      applies_to_company: body.appliesToCompany === true,
+    };
+    const { data, error } = await db.from("eu_directives").upsert(row, { onConflict: "celex_number" }).select("id, official_title").maybeSingle();
+    if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The directive tables aren't set up yet — run the directive SQL first." : error.message }, 500);
+    return json({ ok: true, id: data?.id, title: data?.official_title || row.official_title || celexNumber });
+  }
+
+  if (action === "syncDirectiveRelations") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const directiveId = String(body.directiveId ?? "").trim();
+    if (!directiveId) return json({ error: "directiveId required" }, 400);
+    const { data: dir } = await db.from("eu_directives").select("*").eq("id", directiveId).maybeSingle();
+    if (!dir) return json({ error: "Directive not found" }, 404);
+    const { data: allDirs } = await db.from("eu_directives").select("id, celex_number");
+    const idByCelex = new Map<string, string>();
+    for (const d of allDirs || []) idByCelex.set(String(d.celex_number).toUpperCase(), d.id);
+
+    let rels: any[] = [], refs: any[] = [];
+    try { rels = await cellar.fetchDirectiveRelations(dir.celex_number); } catch { /* offline */ }
+    try { refs = await cellar.fetchDirectiveFullText(dir.celex_number); } catch { /* offline */ }
+    const relationsFound = rels.length + refs.length;
+    let inserted = 0, skipped = 0;
+    const upsertRel = async (row: Record<string, unknown>) => {
+      const { error } = await db.from("directive_relations").upsert(row, { onConflict: "source_directive_id,target_celex,relation_type,source_clause_ref", ignoreDuplicates: true });
+      if (error && error.code !== "23505") skipped++; else inserted++;
+    };
+    for (const r of rels) {
+      await upsertRel({ source_directive_id: directiveId, target_directive_id: idByCelex.get(r.targetCelex) || null, target_celex: r.targetCelex, source_clause_ref: "", target_clause_ref: "", relation_type: r.relationType, relation_description: "", source: "cellar_sparql", confidence: r.confidence, verified: true });
+    }
+    for (const ref of refs) {
+      const tc = String(ref.targetCelex).toUpperCase();
+      await upsertRel({ source_directive_id: directiveId, target_directive_id: idByCelex.get(tc) || null, target_celex: tc, source_clause_ref: String(ref.sourceClauses || "").slice(0, 120), target_clause_ref: String(ref.targetClauseRef || "").slice(0, 120), relation_type: "references", relation_description: String(ref.rawText || "").slice(0, 500), source: "akn_ref_element", confidence: 1.0, verified: true });
+    }
+    return json({ ok: true, relationsFound, inserted, skipped, offline: relationsFound === 0 });
+  }
+
+  // On-demand AI inference of implicit relations (never runs automatically — cost control).
+  if (action === "inferDirectiveRelations") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY." }, 400);
+    const directiveId = String(body.directiveId ?? "").trim();
+    if (!directiveId) return json({ error: "directiveId required" }, 400);
+    const { data: dir } = await db.from("eu_directives").select("*").eq("id", directiveId).maybeSingle();
+    if (!dir) return json({ error: "Directive not found" }, 404);
+    const { data: allDirs } = await db.from("eu_directives").select("id, celex_number");
+    const idByCelex = new Map<string, string>();
+    for (const d of allDirs || []) idByCelex.set(String(d.celex_number).toUpperCase(), d.id);
+    // Fetch the directive text (best-effort) and let Claude surface implicit relations.
+    let text = "";
+    try {
+      const res = await fetch(`https://publications.europa.eu/resource/celex/${dir.celex_number}`, { headers: { Accept: "text/html, application/xhtml+xml" } });
+      if (res.ok) text = (await res.text()).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    } catch { /* offline */ }
+    if (!text) return json({ error: "Couldn't fetch the directive text from CELLAR to infer relations." }, 502);
+    const inferred = await cellar.extractImplicitRelations(dir.celex_number, text.slice(0, 12000));
+    let inserted = 0;
+    for (const rel of inferred) {
+      const { error } = await db.from("directive_relations").upsert({
+        source_directive_id: directiveId, target_directive_id: idByCelex.get(rel.targetCelex) || null, target_celex: rel.targetCelex,
+        source_clause_ref: rel.sourceClauseRef || "", target_clause_ref: rel.targetClauseRef || "", relation_type: rel.relationType,
+        relation_description: rel.relationDescription, source: "ai_inferred", confidence: rel.confidence, verified: false,
+      }, { onConflict: "source_directive_id,target_celex,relation_type,source_clause_ref", ignoreDuplicates: true });
+      if (!error || error.code === "23505") inserted++;
+    }
+    return json({ ok: true, inferred: inferred.length, inserted });
+  }
+
+  if (action === "analyseComplianceGraph") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const scope = body.scope === "product" ? "product" : "company";
+    const passportId = String(body.passportId ?? "").trim() || null;
+    if (scope === "product" && !passportId) return json({ error: "passportId required for product scope" }, 400);
+    try {
+      const graph = await buildComplianceGraph(scope, passportId);
+      return json({ ok: true, scope, passportId, ...graph });
+    } catch (e) {
+      if (/does not exist|schema cache|Could not find the table/i.test((e as Error).message)) return json({ error: "The directive tables aren't set up yet — run the directive SQL first." }, 500);
+      return json({ error: (e as Error).message }, 500);
+    }
+  }
+
+  if (action === "setDirectiveApplicability") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const passport_id = String(body.passportId ?? "").trim();
+    const directive_id = String(body.directiveId ?? "").trim();
+    const status = String(body.status ?? "applicable");
+    if (!passport_id || !directive_id) return json({ error: "passportId and directiveId required" }, 400);
+    if (!APPLICABILITY_STATUSES.includes(status)) return json({ error: "Invalid status" }, 400);
+    const { error } = await db.from("product_directive_applicability").upsert({
+      passport_id, directive_id, applicability_status: status,
+      rationale: String(body.rationale ?? "").slice(0, 2000),
+      assessed_by: session.email || session.urole || "rushroom", assessed_at: new Date().toISOString(),
+    }, { onConflict: "passport_id,directive_id" });
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  if (action === "getComplianceCoverage") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const directiveId = String(body.directiveId ?? "").trim();
+    if (!directiveId) return json({ error: "directiveId required" }, 400);
+    const { data: dir } = await db.from("eu_directives").select("*").eq("id", directiveId).maybeSingle();
+    if (!dir) return json({ error: "Directive not found" }, 404);
+    const cov = await coverageForDirective(dir);
+    return json({ ok: true, ...cov });
+  }
+
+  if (action === "generateComplianceNarrative") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY." }, 400);
+    const scope = body.scope === "product" ? "product" : "company";
+    const passportId = String(body.passportId ?? "").trim() || null;
+    const language = body.language === "sv" ? "sv" : "en";
+    if (scope === "product" && !passportId) return json({ error: "passportId required for product scope" }, 400);
+    const graph = await buildComplianceGraph(scope, passportId);
+    let subject = "Rushroom AB";
+    if (scope === "product" && passportId) { const { data: pp } = await db.from("product_passports").select("product_name").eq("id", passportId).maybeSingle(); subject = pp?.product_name || "the product"; }
+    // Compact the graph for the model.
+    const byId = new Map(graph.nodes.map((n: any) => [n.id, n]));
+    const nodeLines = graph.nodes.map((n: any) => `- ${n.shortName} (${n.celex}): ${n.title || ""} — coverage ${n.complianceCoverage == null ? "not assessed" : n.complianceCoverage + "%"}${n.applicabilityStatus ? `, ${n.applicabilityStatus}` : ""}`).join("\n");
+    const edgeLines = graph.edges.map((e: any) => `- ${byId.get(e.source)?.shortName || "?"} ${e.relationType} ${byId.get(e.target)?.shortName || "?"}${e.clauses?.source ? ` (${e.clauses.source})` : ""}${e.sourceKind === "ai_inferred" ? ` [AI, conf ${e.confidence}]` : ""}`).join("\n");
+    const gapLines = graph.gaps.map((g: any) => `- ${g.celex}${g.shortName ? ` (${g.shortName})` : ""}: ${g.reason}`).join("\n");
+    const system = `You are a compliance writer for Rushroom AB. Write a clear, factual compliance narrative in ${language === "sv" ? "Swedish" : "English"} describing how the EU directives below relate to each other and to ${subject}. Reference directives by short name and the parenthetical legal number (e.g. LVD (2014/35/EU)). Explain the primary applicable directive(s), how they require or supplement one another, coverage status, and note any gaps. Keep it 2–4 short paragraphs, suitable for inclusion in a Declaration of Conformity or product passport. Do not invent relationships beyond those listed; treat AI-inferred edges as tentative.`;
+    const user = `Scope: ${scope}\nSubject: ${subject}\n\nDIRECTIVES:\n${nodeLines || "(none)"}\n\nRELATIONSHIPS:\n${edgeLines || "(none captured)"}\n\nGAPS:\n${gapLines || "(none)"}`;
+    let apiJson: any;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model: SCAN_MODEL, max_tokens: 2000, thinking: { type: "adaptive" }, output_config: { effort: "medium" }, system, messages: [{ role: "user", content: [{ type: "text", text: user }] }] }),
+      });
+      apiJson = await res.json();
+      if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
+    } catch (e) { return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502); }
+    if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to generate the narrative." }, 502);
+    const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
+    const narrative = String(textBlock?.text || "").trim();
+    const assessed = graph.nodes.filter((n: any) => n.complianceCoverage != null);
+    const avg = assessed.length ? Math.round(assessed.reduce((s: number, n: any) => s + n.complianceCoverage, 0) / assessed.length) : null;
+    return json({
+      ok: true, narrative, generatedAt: new Date().toISOString(),
+      coverageSummary: { directiveCount: graph.nodes.length, relationCount: graph.edges.length, gapCount: graph.gaps.length, assessedCount: assessed.length, averageCoverage: avg },
+      usage: usageOf(apiJson),
+    });
   }
 
   return json({ error: `Unknown action: ${action}` }, 400);

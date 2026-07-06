@@ -1390,9 +1390,50 @@
             </div>
         </div>
 
+        <!-- EU DIRECTIVE RELATIONSHIP ANALYSER -->
+        <div class="section page-break">
+            <h2>12. EU Directive Relationship Analyser (CELLAR) <span class="doc-new-badge">New module</span></h2>
+
+            <p>A dedicated module that maps and visualises how EU directives/regulations relate to each other — at <strong>company level</strong> (which apply to Rushroom AB as a business) and at <strong>product level</strong> (which apply to a specific product passport, e.g. the LED wardrobe system). Relationship data is drawn from the EU Publications Office <strong>CELLAR</strong> repository (public SPARQL + REST, no auth) and, on demand, from Claude AI inference.</p>
+
+            <h3>Data sources</h3>
+            <ul style="margin-left:20px">
+                <li><strong>SPARQL endpoint:</strong> <code>https://publications.europa.eu/webapi/rdf/sparql</code> — queried for <code>cdm:resource_legal_based_on</code>, <code>_implements</code>, <code>_amends</code>, <code>_repeals</code> and <code>cdm:work_cites_work</code> triples (mapped to relation types requires/implements/amends/supersedes/references, confidence 1.0).</li>
+                <li><strong>REST content API:</strong> <code>https://publications.europa.eu/resource/celex/{CELEX}</code> — Akoma Ntoso / XHTML parsed for explicit <code>&lt;ref&gt;</code> cross-references, attributed to the nearest article (<code>akn_ref_element</code>, confidence 1.0).</li>
+                <li><strong>AI inference (on demand only):</strong> Claude reads article text and surfaces <em>implicit</em> relations (<code>ai_inferred</code>, confidence 0.0–1.0, always shown in the UI). Never runs automatically — cost control.</li>
+            </ul>
+
+            <h3>New tables (<code>supabase/schema.sql</code>)</h3>
+            <ul style="margin-left:20px">
+                <li><code>eu_directives</code> — registry (celex_number, short_name, official_title, directive_type, status, in_force_date, scope_description, eur_lex_url, applies_to_company). Seeded with the 7 directives relevant to the LED wardrobe system (LVD, EMC, RoHS, WEEE, Machinery, Batteries, ESPR).</li>
+                <li><code>directive_relations</code> — source/target directive links (relation_type, source/target clause refs, source = cellar_sparql | akn_ref_element | ai_inferred, confidence, verified). <code>target_celex</code> is kept even when the target isn't in the registry yet (a gap).</li>
+                <li><code>product_directive_applicability</code> — directive applicability per product passport (applicable | not_applicable | partial | under_review + rationale).</li>
+                <li><code>cellar_cache</code> — raw CELLAR results by (celex_number, query_type); re-fetched only if older than <strong>7 days</strong>.</li>
+            </ul>
+            <p>All four tables have RLS enabled (deny-all); access is only via the edge function's service role.</p>
+
+            <h3>CELLAR service (<code>portal-api/cellar-service.ts</code>)</h3>
+            <p><code>createCellarService(db, anthropicKey)</code> exposes <code>fetchDirectiveMetadata</code>, <code>fetchDirectiveRelations</code>, <code>fetchDirectiveFullText</code> and <code>extractImplicitRelations</code>. All CELLAR access is rate-limited (max 5 concurrent), retried with exponential backoff on 429/503, bounded by a 60s timeout, and 7-day cached. A failure degrades gracefully (null/[]) so the portal keeps working when CELLAR is unreachable.</p>
+
+            <h3>New API actions (edge function)</h3>
+            <ul style="margin-left:20px">
+                <li><code>listDirectives</code> — registry (+ applicability for a passport).</li>
+                <li><code>addDirective</code> {celexNumber, shortName, appliesToCompany} — fetches CELLAR metadata, upserts.</li>
+                <li><code>syncDirectiveRelations</code> {directiveId} — SPARQL + AKN <code>&lt;ref&gt;</code> relations upserted; returns {relationsFound, inserted, skipped}.</li>
+                <li><code>inferDirectiveRelations</code> {directiveId} — on-demand AI inference (never automatic).</li>
+                <li><code>analyseComplianceGraph</code> {scope, passportId?} — returns {nodes[{id,shortName,status,complianceCoverage}], edges[{source,target,relationType,clauses}], gaps[{celex,reason}]}.</li>
+                <li><code>setDirectiveApplicability</code> {passportId, directiveId, status, rationale}.</li>
+                <li><code>getComplianceCoverage</code> {directiveId} — clause-level coverage (total/covered/pct/pending/deviation), tied to standards whose domain matches the directive short-name.</li>
+                <li><code>generateComplianceNarrative</code> {scope, passportId?, language: sv|en} — Claude writes a human-readable narrative from the graph, for a DoC / passport.</li>
+            </ul>
+
+            <h3>Visualisation (Directive Graph tab, Rushroom only)</h3>
+            <p>A <strong>D3.js 7.9.0</strong> force-directed graph (CDN). Nodes = directives, sized by number of applicable clauses, coloured by compliance coverage (green &gt;80%, amber 40–80%, red &lt;40%, grey not assessed). Edges styled by relation type (solid requires/implements, dashed references/amends, dotted AI-inferred) with confidence-scaled width. Click a node → sidebar (title, scope, coverage bar, related directives, EUR-Lex + standards-register links); click an edge → relation type, clauses, description, confidence, source. A <strong>Company / Product</strong> toggle (product selector in product mode), a <strong>gaps table</strong> ("Add to portal" per referenced-but-missing directive), and an AI <strong>compliance narrative</strong> export complete the view.</p>
+        </div>
+
         <!-- PROPOSALS & DRAFTS SECTION -->
         <div class="section page-break">
-            <h2>12. Proposals & Drafts — Future Enhancements</h2>
+            <h2>13. Proposals & Drafts — Future Enhancements</h2>
             
             <p>This section catalogs proposed features, improvements, and enhancements. Each proposal includes:</p>
             <ul style="margin-left: 20px; margin-bottom: 20px;">

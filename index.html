@@ -18,7 +18,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./assets/styles.css?v=77" />
+  <link rel="stylesheet" href="./assets/styles.css?v=78" />
   <script>
     /* Keep the sticky tab bar pinned right below the sticky header, whatever
        height the header renders at (responsive / wrapped). */
@@ -89,6 +89,8 @@
                 aria-controls="deviations-panel" tabindex="-1">Deviation Monitoring</button>
         <button class="tab" id="tab-level2" role="tab" aria-selected="false"
                 aria-controls="level2-panel" tabindex="-1">Clauses &amp; DPP</button>
+        <button class="tab" id="tab-directives" role="tab" aria-selected="false"
+                aria-controls="directives-panel" tabindex="-1">Directive Graph</button>
         <button class="tab tab-admin" id="tab-accounts" role="tab" aria-selected="false"
                 aria-controls="accounts-panel" tabindex="-1">Accounts</button>
       </div>
@@ -113,6 +115,10 @@
         <div class="loading">Loading clauses & passports…</div>
       </section>
 
+      <section id="directives-panel" role="tabpanel" aria-labelledby="tab-directives" tabindex="0" hidden>
+        <div class="loading">Loading directive graph…</div>
+      </section>
+
       <section id="accounts-panel" role="tabpanel" aria-labelledby="tab-accounts" tabindex="0" hidden>
         <div class="loading">Loading accounts…</div>
       </section>
@@ -126,10 +132,10 @@
   </footer>
 
   <script src="https://accounts.google.com/gsi/client" async></script>
-  <script src="./assets/config.js?v=77"></script>
-  <script src="./assets/api.js?v=77"></script>
-  <script src="./assets/gdocs.js?v=77"></script>
-  <script src="./assets/viewer.js?v=77"></script>
-  <script src="./assets/app.js?v=77"></script>
+  <script src="./assets/config.js?v=78"></script>
+  <script src="./assets/api.js?v=78"></script>
+  <script src="./assets/gdocs.js?v=78"></script>
+  <script src="./assets/viewer.js?v=78"></script>
+  <script src="./assets/app.js?v=78"></script>
 </body>
 </html>
