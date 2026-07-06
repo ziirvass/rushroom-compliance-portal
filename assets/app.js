@@ -721,6 +721,7 @@
     collapse: svg('<polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/>'),
     diff: svg('<line x1="12" y1="3" x2="12" y2="21"/><polyline points="8 8 4 12 8 16"/><polyline points="16 8 20 12 16 16"/>'),
     tag: svg('<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>'),
+    graph: svg('<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6.5" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M6.9 7.4l3.6 8.2M17.2 8.2l-4 6.9M7.3 6.2h9.4"/>'),
   };
   // File action chip (View / Open) — subtle pill; label hides on narrow screens.
   function fileActionBtn(label, iconKey, opts = {}) {
@@ -754,7 +755,7 @@
 
   // Sub-tabs within a panel (e.g. Library vs Add). Remembers the active tab
   // per key so it survives re-renders (reload after an add).
-  const paneSubTab = { documents: "list", standards: "list", level2: "clauses" };
+  const paneSubTab = { documents: "list", standards: "list", level2: "clauses", deviations: "monitoring" };
   function subTabs(key, tabs) {
     const bar = el("div", { class: "subtabs", role: "tablist" });
     const body = el("div", { class: "subtab-body" });
@@ -2951,14 +2952,18 @@
     await load();
     const stdPanel = $("#standards-panel");
     if (stdPanel) renderStandards(role, stdPanel);
+    // Deviation Monitoring hosts two sub-tabs: the AI scan and the Directive Graph.
     const devPanel = $("#deviations-panel");
-    if (devPanel && role === "rushroom") renderDeviations(role, devPanel);
+    if (devPanel && role === "rushroom") {
+      devPanel.replaceChildren(subTabs("deviations", [
+        { id: "monitoring", label: "Monitoring", icon: "eye", build: () => { const m = el("div", {}, el("div", { class: "loading" }, "Loading deviation monitoring…")); renderDeviations(role, m); return m; } },
+        { id: "graph", label: "Directive Graph", icon: "graph", build: () => { const m = el("div", {}, el("div", { class: "loading" }, "Loading directive graph…")); renderDirectiveGraph(role, m); return m; } },
+      ]));
+    }
     const acctPanel = $("#accounts-panel");
     if (acctPanel && API.isAdmin()) renderAccounts(role, acctPanel);
     const l2Panel = $("#level2-panel");
     if (l2Panel && role === "rushroom") renderLevel2(role, l2Panel);
-    const dgPanel = $("#directives-panel");
-    if (dgPanel && role === "rushroom") renderDirectiveGraph(role, dgPanel);
   }
 
   // Hide tabs/panels the signed-in user isn't entitled to.
@@ -2970,7 +2975,6 @@
     };
     gate("tab-deviations", "deviations-panel", role === "rushroom");
     gate("tab-level2", "level2-panel", role === "rushroom");
-    gate("tab-directives", "directives-panel", role === "rushroom");
     gate("tab-accounts", "accounts-panel", !!admin);
   }
 
