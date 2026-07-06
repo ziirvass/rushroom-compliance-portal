@@ -71,13 +71,18 @@ create index if not exists uploads_step_idx on public.uploads (step);
 
 -- Standards & Regulations register, with per-standard version history.
 create table if not exists public.standards (
-  id         uuid primary key default gen_random_uuid(),
-  code       text not null default '',   -- e.g. "EN 60598-1"
-  title      text not null default '',
-  category   text default '',            -- e.g. "LVD", "EMC", "Materials"
-  audience   text[] not null default array['internal']::text[],
-  created_at timestamptz not null default now()
+  id           uuid primary key default gen_random_uuid(),
+  code         text not null default '',   -- e.g. "EN 60598-1"
+  title        text not null default '',
+  category     text default '',            -- DOMAIN tag: "LVD", "EMC", "Materials"
+  reg_type     text default '',            -- TYPE/level: EU Directive | EU Regulation | Harmonised Standard (EN) | National Standard | International (IEC/ISO) | Other
+  jurisdiction text default '',            -- EU | International | a member-state country (e.g. Germany)
+  audience     text[] not null default array['internal']::text[],
+  created_at   timestamptz not null default now()
 );
+-- For projects created before the type/jurisdiction columns existed:
+alter table public.standards add column if not exists reg_type text default '';
+alter table public.standards add column if not exists jurisdiction text default '';
 create table if not exists public.standard_versions (
   id             uuid primary key default gen_random_uuid(),
   standard_id    uuid not null references public.standards(id) on delete cascade,

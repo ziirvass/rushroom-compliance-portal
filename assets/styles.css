@@ -843,3 +843,15 @@ body:has(#portal-app:not([hidden])) .brand:hover .brand-mark { filter: brightnes
 @keyframes step-flash-kf { 0% { background: rgba(94, 224, 143, 0.30); } 100% { background: transparent; } }
 tr.step-flash > td { animation: step-flash-kf 2.2s ease-out; }
 @media (prefers-reduced-motion: reduce) { tr.step-flash > td { animation: none; box-shadow: inset 0 0 0 2px var(--accent); } }
+
+/* Standards taxonomy: regulatory-type + jurisdiction badges and filters */
+.std-meta { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; margin-top: 0.3rem; }
+.reg-badge { display: inline-flex; align-items: center; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.02em; padding: 0.12rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+.reg-eu   { color: #4b83e5; border-color: rgba(75,131,229,0.45);  background: rgba(75,131,229,0.12); }
+.reg-harm { color: #37b26b; border-color: rgba(55,178,107,0.45);  background: rgba(55,178,107,0.12); }
+.reg-nat  { color: #e58b3b; border-color: rgba(229,139,59,0.45);  background: rgba(229,139,59,0.12); }
+.reg-intl { color: #a06be0; border-color: rgba(160,107,224,0.45); background: rgba(160,107,224,0.12); }
+.reg-other{ color: var(--muted); background: var(--panel-2); }
+.jur-badge { display: inline-flex; align-items: center; font-size: 0.68rem; padding: 0.12rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); white-space: nowrap; }
+.std-filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem; }
+.std-filters select { max-width: 260px; }

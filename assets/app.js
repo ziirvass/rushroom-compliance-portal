@@ -1716,10 +1716,54 @@
     try { await API.deleteStandardVersion(API.getToken(role), v.id); await reload(); } catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
   }
 
+  /* ---- Standards taxonomy: regulatory type + jurisdiction ----
+   * Two dimensions so it's obvious what you're looking at: the TYPE/level
+   * (an EU directive vs a national standard) and WHERE it applies. */
+  const REG_TYPES = ["EU Directive", "EU Regulation", "Harmonised Standard (EN)", "National Standard", "International (IEC/ISO)", "Other"];
+  const REG_TYPE_CLASS = { "EU Directive": "eu", "EU Regulation": "eu", "Harmonised Standard (EN)": "harm", "National Standard": "nat", "International (IEC/ISO)": "intl", "Other": "other" };
+  const EU_COUNTRIES = ["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus", "Czechia", "Denmark", "Estonia", "Finland", "France", "Germany", "Greece", "Hungary", "Ireland", "Italy", "Latvia", "Lithuania", "Luxembourg", "Malta", "Netherlands", "Poland", "Portugal", "Romania", "Slovakia", "Slovenia", "Spain", "Sweden"];
+  const JURISDICTIONS = ["EU", "International", ...EU_COUNTRIES, "Iceland", "Liechtenstein", "Norway", "Switzerland", "United Kingdom"];
+  const JUR_FLAG = { EU: "🇪🇺", International: "🌐", Austria: "🇦🇹", Belgium: "🇧🇪", Bulgaria: "🇧🇬", Croatia: "🇭🇷", Cyprus: "🇨🇾", Czechia: "🇨🇿", Denmark: "🇩🇰", Estonia: "🇪🇪", Finland: "🇫🇮", France: "🇫🇷", Germany: "🇩🇪", Greece: "🇬🇷", Hungary: "🇭🇺", Ireland: "🇮🇪", Italy: "🇮🇹", Latvia: "🇱🇻", Lithuania: "🇱🇹", Luxembourg: "🇱🇺", Malta: "🇲🇹", Netherlands: "🇳🇱", Poland: "🇵🇱", Portugal: "🇵🇹", Romania: "🇷🇴", Slovakia: "🇸🇰", Slovenia: "🇸🇮", Spain: "🇪🇸", Sweden: "🇸🇪", Iceland: "🇮🇸", Liechtenstein: "🇱🇮", Norway: "🇳🇴", Switzerland: "🇨🇭", "United Kingdom": "🇬🇧" };
+  const jurFlag = (j) => JUR_FLAG[j] || "";
+  const jurLabel = (j) => `${jurFlag(j) ? jurFlag(j) + " " : ""}${j}`;
+  const regTypeBadge = (t) => t ? el("span", { class: `reg-badge reg-${REG_TYPE_CLASS[t] || "other"}`, title: "Regulatory type" }, t) : null;
+  const jurBadge = (j) => j ? el("span", { class: "jur-badge", title: "Jurisdiction" }, jurLabel(j)) : null;
+
+  // Standards register: grouped by regulatory type, then by jurisdiction, honouring the filters.
+  function buildStandardsBrowser(standards, role, reload, filterType, filterJur) {
+    const filtered = standards.filter((s) =>
+      (!filterType || (s.reg_type || "") === filterType) &&
+      (!filterJur || (s.jurisdiction || "") === filterJur));
+    if (!filtered.length) return el("div", { class: "empty" }, "No standards match the current filter.");
+    const toItem = (s) => ({
+      id: s.id,
+      name: s.code || s.title || "Standard",
+      ftypeHint: (s.versions && s.versions[0] && (s.versions[0].file_name || s.versions[0].storage_path)) || "",
+      sub: [s.category, (s.title && s.code) ? s.title : null].filter(Boolean).join(" · ") || `${(s.versions || []).length} version${(s.versions || []).length === 1 ? "" : "s"}`,
+      keywords: `${s.code || ""} ${s.title || ""} ${s.category || ""} ${s.reg_type || ""} ${s.jurisdiction || ""}`,
+      data: s,
+    });
+    const byType = new Map();
+    for (const s of filtered) { const t = s.reg_type || "Uncategorised"; if (!byType.has(t)) byType.set(t, []); byType.get(t).push(s); }
+    const order = [...REG_TYPES, ...[...byType.keys()].filter((t) => !REG_TYPES.includes(t))];
+    const tree = [];
+    for (const t of order) {
+      const list = byType.get(t); if (!list) continue;
+      const byJur = new Map();
+      for (const s of list) { const j = s.jurisdiction || "—"; if (!byJur.has(j)) byJur.set(j, []); byJur.get(j).push(s); }
+      const cats = [...byJur].sort((a, b) => a[0].localeCompare(b[0])).map(([jname, jlist]) => ({ name: jname === "—" ? "Unspecified" : jurLabel(jname), items: jlist.map(toItem) }));
+      tree.push({ heading: t, count: list.length, categories: cats });
+    }
+    return twoPaneBrowser("standards", tree, (item) => standardCard(item.data, role, reload),
+      { navLabel: "Standards & regulations", emptyDetail: "Select a standard on the left.", searchPlaceholder: "Search code, title, category, type, country…" });
+  }
+
   function addStandardCard(role, reload) {
     const code = el("input", { type: "text", class: "up-text", placeholder: "Code (e.g. EN 60598-1)" });
     const title = el("input", { type: "text", class: "up-text", placeholder: "Title" });
-    const category = el("input", { type: "text", class: "up-text", placeholder: "Category (e.g. LVD, EMC)" });
+    const category = el("input", { type: "text", class: "up-text", placeholder: "Domain (e.g. LVD, EMC)" });
+    const regType = el("select", { class: "up-text", "aria-label": "Regulatory type" }, [el("option", { value: "" }, "— regulatory type —"), ...REG_TYPES.map((t) => el("option", { value: t }, t))]);
+    const jurisdiction = el("select", { class: "up-text", "aria-label": "Jurisdiction" }, [el("option", { value: "" }, "— jurisdiction —"), ...JURISDICTIONS.map((j) => el("option", { value: j }, jurLabel(j)))]);
     const version = el("input", { type: "text", class: "up-text", placeholder: "Version (e.g. 2015+A1:2022)" });
     const eff = el("input", { type: "text", class: "up-text", placeholder: "Effective date (optional)" });
     const auds = ["internal", "supplier", "reviewer", "installer"].map((a) => {
@@ -1742,6 +1786,8 @@
         if (meta.code) code.value = meta.code;
         if (meta.title) title.value = meta.title;
         if (meta.category) category.value = meta.category;
+        if (meta.regType && REG_TYPES.includes(meta.regType)) regType.value = meta.regType;
+        if (meta.jurisdiction && JURISDICTIONS.includes(meta.jurisdiction)) jurisdiction.value = meta.jurisdiction;
         if (meta.version) version.value = meta.version;
         if (meta.effectiveDate) eff.value = meta.effectiveDate;
         status.className = "up-status ok";
@@ -1757,12 +1803,12 @@
       btn.disabled = true; status.className = "up-status"; status.textContent = "Saving…";
       try {
         const up = zone.getUploaded(); // attach the uploaded file, if any
-        const { id } = await API.addStandard(API.getToken(role), { code: code.value, title: title.value, category: category.value, audience: audience.length ? audience : ["internal"] });
+        const { id } = await API.addStandard(API.getToken(role), { code: code.value, title: title.value, category: category.value, regType: regType.value, jurisdiction: jurisdiction.value, audience: audience.length ? audience : ["internal"] });
         if (up && id) {
           await API.addStandardVersionRecord(API.getToken(role), { standardId: id, version: version.value, effectiveDate: eff.value, notes: "", path: up.path, fileName: up.fileName });
         }
         flash(id);
-        code.value = title.value = category.value = version.value = eff.value = ""; zone.reset();
+        code.value = title.value = category.value = version.value = eff.value = ""; regType.value = jurisdiction.value = ""; zone.reset();
         paneSubTab.standards = "list"; // show the new standard (blinking) in the register
         await reload();
       } catch (ex) { btn.disabled = false; status.className = "up-status err"; status.textContent = `Failed: ${ex.message}`; }
@@ -1770,10 +1816,11 @@
 
     return el("div", { class: "card upload-card" }, [
       el("h3", {}, "Add a standard / regulation"),
-      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload the standard file — the AI reads its code, title, category and version for you. Review the fields, then approve to add it. Every upload is kept for a full revision trail."),
+      el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload the standard file — the AI reads its code, title, domain, regulatory type, jurisdiction and version for you. Review the fields, then approve. Every upload is kept for a full revision trail."),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Standard file"), zone.el]),
       el("div", { style: "margin:0.5rem 0 0.9rem" }, autofill),
       el("div", { class: "upload-fields" }, [code, title, category]),
+      el("div", { class: "upload-fields", style: "margin-top:0.5rem" }, [regType, jurisdiction]),
       el("div", { class: "upload-fields", style: "margin-top:0.5rem" }, [version, eff]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
       el("div", { style: "margin-top:0.75rem" }, btn),
@@ -1822,8 +1869,10 @@
       el("div", {}, [
         el("div", { class: "std-title" }, [el("strong", {}, s.code || "(no code)"), s.title ? el("span", { class: "muted" }, ` — ${s.title}`) : null]),
         el("div", { class: "std-meta" }, [
+          regTypeBadge(s.reg_type),
+          jurBadge(s.jurisdiction),
           s.category ? el("span", { class: "pill-priority" }, s.category) : null,
-          el("span", { class: "muted" }, ` ${versions.length} version${versions.length === 1 ? "" : "s"}`),
+          el("span", { class: "muted" }, `${versions.length} version${versions.length === 1 ? "" : "s"}`),
         ]),
       ]),
       manage ? el("div", { class: "std-actions" }, [
@@ -1876,31 +1925,25 @@
     }
     const standards = payload.standards || [];
     const reload = () => renderStandards(role, mount);
-    let browser;
-    if (standards.length) {
-      const cats = new Map();
-      for (const s of standards) { const c = s.category || "Uncategorised"; if (!cats.has(c)) cats.set(c, []); cats.get(c).push(s); }
-      const categories = [...cats].map(([name, list]) => ({
-        name,
-        items: list.map((s) => ({
-          id: s.id,
-          name: s.code || s.title || "Standard",
-          ftypeHint: (s.versions && s.versions[0] && (s.versions[0].file_name || s.versions[0].storage_path)) || "",
-          sub: s.title && s.code ? s.title : `${(s.versions || []).length} version${(s.versions || []).length === 1 ? "" : "s"}`,
-          keywords: `${s.code || ""} ${s.title || ""} ${s.category || ""}`,
-          data: s,
-        })),
-      }));
-      browser = twoPaneBrowser("standards", [{ heading: "Register", count: standards.length, categories }],
-        (item) => standardCard(item.data, role, reload),
-        { navLabel: "Standards & regulations", emptyDetail: "Select a standard on the left.", searchPlaceholder: "Search code, title, category…" });
-    } else {
-      browser = el("div", { class: "empty" }, role === "rushroom" ? "No standards yet — add one above." : "No standards shared with you yet.");
-    }
-    const registerTab = () => el("div", {}, [
-      el("div", { class: "notice" }, "Version-controlled register of the standards and regulations this product must meet. Every uploaded revision is kept, so the history stays fully traceable."),
-      browser,
-    ]);
+    const registerTab = () => {
+      const wrap = el("div");
+      const presentTypes = [...new Set(standards.map((s) => s.reg_type).filter(Boolean))].sort((a, b) => REG_TYPES.indexOf(a) - REG_TYPES.indexOf(b));
+      const presentJurs = [...new Set(standards.map((s) => s.jurisdiction).filter(Boolean))].sort();
+      const typeSel = el("select", { class: "up-text", "aria-label": "Filter by regulatory type" }, [el("option", { value: "" }, "All types"), ...presentTypes.map((t) => el("option", { value: t }, t))]);
+      const jurSel = el("select", { class: "up-text", "aria-label": "Filter by jurisdiction" }, [el("option", { value: "" }, "All jurisdictions"), ...presentJurs.map((j) => el("option", { value: j }, jurLabel(j)))]);
+      const bmount = el("div", { style: "margin-top:0.7rem" });
+      const rebuild = () => bmount.replaceChildren(standards.length
+        ? buildStandardsBrowser(standards, role, reload, typeSel.value, jurSel.value)
+        : el("div", { class: "empty" }, role === "rushroom" ? "No standards yet — add one in the Add standard tab." : "No standards shared with you yet."));
+      typeSel.addEventListener("change", rebuild); jurSel.addEventListener("change", rebuild);
+      wrap.append(
+        el("div", { class: "notice" }, "Version-controlled register, grouped by regulatory type and jurisdiction. EU directives & regulations set the EU-wide framework; harmonised (EN) standards give presumption of conformity; national standards add member-state specifics on top. Filter to see what applies where."),
+        standards.length ? el("div", { class: "std-filters" }, [el("span", { class: "form-label", style: "margin:0" }, "Filter"), typeSel, jurSel]) : null,
+        bmount,
+      );
+      rebuild();
+      return wrap;
+    };
     if (role === "rushroom") {
       mount.replaceChildren(subTabs("standards", [
         { id: "list", label: "Register", icon: "layers", build: registerTab },

@@ -247,11 +247,13 @@ const STANDARD_META_SCHEMA = {
     code: { type: "string" },
     title: { type: "string" },
     category: { type: "string" },
+    reg_type: { type: "string" },
+    jurisdiction: { type: "string" },
     version: { type: "string" },
     effective_date: { type: "string" },
     summary: { type: "string" },
   },
-  required: ["code", "title", "category", "version", "effective_date", "summary"],
+  required: ["code", "title", "category", "reg_type", "jurisdiction", "version", "effective_date", "summary"],
 };
 const FILE_META_SCHEMA = {
   type: "object",
@@ -996,11 +998,19 @@ Deno.serve(async (req) => {
     const title = String(body.title ?? "").trim();
     if (!code && !title) return json({ error: "code or title required" }, 400);
     const audience = Array.isArray(body.audience) && body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
-    const { data, error } = await db.from("standards").insert({
+    const row: Record<string, unknown> = {
       code: code.slice(0, 120), title: title.slice(0, 300), category: String(body.category ?? "").slice(0, 80), audience,
-    }).select("id").maybeSingle();
-    if (error) return json({ error: error.message }, 500);
-    return json({ ok: true, id: data?.id });
+      reg_type: String(body.regType ?? "").slice(0, 60),
+      jurisdiction: String(body.jurisdiction ?? "").slice(0, 60),
+    };
+    let res = await db.from("standards").insert(row).select("id").maybeSingle();
+    // Self-heal if the optional reg_type / jurisdiction columns aren't added yet.
+    if (res.error && /reg_type|jurisdiction/.test(res.error.message || "")) {
+      const { reg_type: _r, jurisdiction: _j, ...base } = row;
+      res = await db.from("standards").insert(base).select("id").maybeSingle();
+    }
+    if (res.error) return json({ error: res.error.message }, 500);
+    return json({ ok: true, id: res.data?.id });
   }
 
   if (action === "deleteStandard") {
@@ -1055,7 +1065,9 @@ Deno.serve(async (req) => {
     const system = `You are a compliance librarian reading a single standard or regulation document. Extract its catalogue metadata precisely from the document itself — do not invent values. Return a JSON object:
 - code: the official designation exactly as published (e.g. "EN 60598-1", "2014/35/EU", "(EU) 2019/2020", "EN IEC 63000"). If none is visible, "".
 - title: the official document title.
-- category: a short classifying tag for a compliance register — one of LVD, EMC, RoHS, REACH, Ecodesign, Energy labelling, Packaging/PPWR, WEEE, Batteries, Radio/RED, CPR, Machinery, or another concise domain tag if none fit.
+- category: a short classifying DOMAIN tag for a compliance register — one of LVD, EMC, RoHS, REACH, Ecodesign, Energy labelling, Packaging/PPWR, WEEE, Batteries, Radio/RED, CPR, Machinery, or another concise domain tag if none fit.
+- reg_type: the regulatory TYPE/level — exactly one of "EU Directive", "EU Regulation", "Harmonised Standard (EN)", "National Standard", "International (IEC/ISO)", or "Other". Infer from the designation: "2014/35/EU" → EU Directive; "(EU) 2019/2020" → EU Regulation; a code starting "EN " → Harmonised Standard (EN); "IEC …"/"ISO …" → International (IEC/ISO); a national code (e.g. "DIN …", "BS …", "NF …", "SS …", "UNE …") → National Standard. If unclear, "".
+- jurisdiction: where it applies — "EU" for EU directives/regulations and harmonised EN standards; "International" for IEC/ISO; or the specific country for a national standard (e.g. "Germany", "France", "Sweden"). If unclear, "".
 - version: the edition / amendment / year that identifies this revision (e.g. "2015+A1:2022", "Rev 3", "2014"). If none is visible, "".
 - effective_date: the date the document applies from if explicitly stated (ISO or as printed), else "".
 - summary: one sentence on what the document covers.`;
@@ -1094,6 +1106,8 @@ Deno.serve(async (req) => {
       code: String(parsed.code || ""),
       title: String(parsed.title || ""),
       category: String(parsed.category || ""),
+      regType: String(parsed.reg_type || ""),
+      jurisdiction: String(parsed.jurisdiction || ""),
       version: String(parsed.version || ""),
       effectiveDate: String(parsed.effective_date || ""),
       summary: String(parsed.summary || ""),
