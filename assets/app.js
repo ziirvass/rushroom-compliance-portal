@@ -2901,7 +2901,10 @@
         try { await API.deleteStep(API.getToken(role), s.step); await load(); }
         catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
       };
+      // One toolbar: Expand/Collapse all sit alongside Refresh / Add step / Print.
       const tools = el("div", { class: "row-tools" }, [
+        actionBtn("Expand all", "expand", { onClick: () => setAllPhases(true) }),
+        actionBtn("Collapse all", "collapse", { onClick: () => setAllPhases(false) }),
         actionBtn("Refresh", "refresh", { onClick: load }),
         role === "rushroom" ? actionBtn("Add step", "plus", { primary: true, onClick: () => saveStep(null) }) : null,
         actionBtn("Print / Save PDF", "printer", { onClick: () => window.print() }),
@@ -2909,9 +2912,8 @@
         el("span", { class: "updated" }, `Live · ${(API.session() && (API.session().name || API.session().urole)) || role} · ${new Date().toLocaleTimeString("en-GB")}`),
       ]);
       const frag = el("div", {}, [
-        tools,
         summaryTiles(steps),
-        phaseToolbar(),
+        tools,
         phaseOverview(steps),
         blockersPanel(steps),
         el("h2", { class: "visually-hidden" }, "Steps by phase"),
@@ -3122,6 +3124,8 @@
     try {
       const { steps, source } = await loadSteps();
       const tools = el("div", { class: "row-tools" }, [
+        actionBtn("Expand all", "expand", { onClick: () => setAllPhases(true) }),
+        actionBtn("Collapse all", "collapse", { onClick: () => setAllPhases(false) }),
         actionBtn("Reload status", "refresh", { onClick: refreshReadiness }),
         actionBtn("Print / Save PDF", "printer", { onClick: () => window.print() }),
         CFG.statusSheetViewUrl ? actionBtn("Open the plan", "external", { href: CFG.statusSheetViewUrl }) : null,
@@ -3130,9 +3134,8 @@
       ]);
       const frag = el("div", {}, [
         sourceNotice(source),
-        tools,
         summaryTiles(steps),
-        phaseToolbar(),
+        tools,
         phaseOverview(steps),
         blockersPanel(steps),
         el("h2", { class: "visually-hidden" }, "Steps by phase"),
