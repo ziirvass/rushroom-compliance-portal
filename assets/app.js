@@ -2362,9 +2362,36 @@
     const wrap = el("div");
     const stdVers = flattenStdVersions(ctx.standards);
     if (!stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "No standard versions yet — upload a standard file under “Standards & regulations” first.")); return wrap; }
-    const sel = el("select", { class: "up-text" }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
+    const sel = el("select", { class: "up-text" }, stdVers.map((o) => {
+      const opt = el("option", { value: o.id, "data-base-label": o.label }, `${o.label} [Checking...]`);
+      return opt;
+    }));
     const out = el("div", { style: "margin-top:0.8rem" });
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    // Show per-row extraction status directly in the dropdown labels.
+    const setOptionProcessedState = (versionId, state, clauseCount) => {
+      const opt = [...sel.options].find((o) => o.value === versionId);
+      if (!opt) return;
+      const base = opt.getAttribute("data-base-label") || opt.textContent || "";
+      if (state === "processed") opt.textContent = `${base} [Processed${typeof clauseCount === "number" ? `: ${clauseCount}` : ""}]`;
+      else if (state === "not_processed") opt.textContent = `${base} [Not processed]`;
+      else if (state === "unknown") opt.textContent = `${base} [Status unavailable]`;
+      else opt.textContent = `${base} [Checking...]`;
+    };
+    async function updateProcessedBadges() {
+      const current = sel.value;
+      stdVers.forEach((o) => setOptionProcessedState(o.id, "checking"));
+      await Promise.all(stdVers.map(async (o) => {
+        try {
+          const r = await API.getClausesForStandard(ctx.token, o.id);
+          const count = (r.clauses || []).length;
+          setOptionProcessedState(o.id, count > 0 ? "processed" : "not_processed", count);
+        } catch {
+          setOptionProcessedState(o.id, "unknown");
+        }
+      }));
+      sel.value = current;
+    }
     const load = async () => {
       out.replaceChildren(el("div", { class: "loading" }, "Loading clauses…"));
       try {
@@ -2414,7 +2441,13 @@
     };
     const extract = actionBtn("Extract clauses (AI)", "sparkles", { primary: true, onClick: async () => {
       status.className = "up-status"; status.textContent = "Reading the standard file with AI — this can take a minute…";
-      try { const r = await API.extractStandardClauses(ctx.token, { standardVersionId: sel.value }); status.className = "up-status ok"; status.replaceChildren(document.createTextNode(`Extracted ${r.inserted} clause(s). `), usageChip(r.usage) || document.createTextNode("")); await load(); }
+      try {
+        const r = await API.extractStandardClauses(ctx.token, { standardVersionId: sel.value });
+        status.className = "up-status ok";
+        status.replaceChildren(document.createTextNode(`Extracted ${r.inserted} clause(s). `), usageChip(r.usage) || document.createTextNode(""));
+        setOptionProcessedState(sel.value, "processed", typeof r.inserted === "number" ? r.inserted : undefined);
+        await load();
+      }
       catch (ex) { status.className = "up-status err"; status.textContent = ex.message; }
     } });
     sel.addEventListener("change", load);
@@ -2423,6 +2456,7 @@
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [el("span", { class: "form-label" }, "Standard"), sel, extract]),
       status, out,
     );
+    updateProcessedBadges();
     load();
     return wrap;
   }
@@ -2465,11 +2499,39 @@
     const docVers = flattenDocVersions(ctx.documents);
     if (!stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "No standard versions yet — upload a standard and extract its clauses first.")); return wrap; }
 
-    const stdSel = el("select", { class: "up-text" }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
+    const stdSel = el("select", { class: "up-text" }, stdVers.map((o) => {
+      const opt = el("option", { value: o.id, "data-base-label": o.label }, `${o.label} [Checking...]`);
+      return opt;
+    }));
     const clauseSel = el("select", { class: "up-text" }, [el("option", { value: "" }, "— select a clause —")]);
     const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const panel = el("div", { style: "margin-top:0.8rem" });
     let clauses = [];
+
+    // Show per-row extraction status directly in the standard dropdown labels.
+    const setOptionProcessedState = (versionId, state, clauseCount) => {
+      const opt = [...stdSel.options].find((o) => o.value === versionId);
+      if (!opt) return;
+      const base = opt.getAttribute("data-base-label") || opt.textContent || "";
+      if (state === "processed") opt.textContent = `${base} [Processed${typeof clauseCount === "number" ? `: ${clauseCount}` : ""}]`;
+      else if (state === "not_processed") opt.textContent = `${base} [Not processed]`;
+      else if (state === "unknown") opt.textContent = `${base} [Status unavailable]`;
+      else opt.textContent = `${base} [Checking...]`;
+    };
+    async function updateProcessedBadges() {
+      const current = stdSel.value;
+      stdVers.forEach((o) => setOptionProcessedState(o.id, "checking"));
+      await Promise.all(stdVers.map(async (o) => {
+        try {
+          const r = await API.getClausesForStandard(ctx.token, o.id);
+          const count = (r.clauses || []).length;
+          setOptionProcessedState(o.id, count > 0 ? "processed" : "not_processed", count);
+        } catch {
+          setOptionProcessedState(o.id, "unknown");
+        }
+      }));
+      stdSel.value = current;
+    }
 
     const loadClauses = async () => {
       clauseSel.replaceChildren(el("option", { value: "" }, "Loading…"));
@@ -2503,6 +2565,7 @@
       ]),
       status, panel,
     );
+    updateProcessedBadges();
     loadClauses();
     return wrap;
   }
