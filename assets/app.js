@@ -343,15 +343,15 @@
         el("h3", {}, "Overall compliance status"),
         el("div", { class: "value" }, `${pct}%`),
         el("div", { class: "progress", "aria-hidden": "true" }, el("span", { style: `width:${pct}%` })),
-        el("div", { class: "sub" }, `${done} of ${total} steps complete`),
+        el("div", { class: "sub" }, `${done} of ${total} actions complete`),
       ]),
       el("div", { class: "card stat" }, [
         el("h3", {}, "Pre-sale blockers"),
         el("div", { class: "value", style: presaleOpen ? "color:var(--amber)" : "" }, String(presaleOpen)),
-        el("div", { class: "sub" }, presaleOpen ? "must clear before first sale" : "all pre-sale steps clear"),
+        el("div", { class: "sub" }, presaleOpen ? "must clear before first sale" : "all pre-sale actions clear"),
       ]),
       el("div", { class: "card stat" }, [
-        el("h3", {}, "Blocked steps"),
+        el("h3", {}, "Blocked actions"),
         el("div", { class: "value", style: blocked ? "color:var(--red)" : "" }, String(blocked)),
         el("div", { class: "sub" }, blocked ? "need action to unblock" : "nothing blocked"),
       ]),
@@ -397,11 +397,11 @@
     const open = steps.filter((s) => s.presale && !s.done).sort((a, b) => a.step - b.step);
     if (!open.length) {
       return collapsibleSection("__blockers__", "Pre-sale blockers", "all clear",
-        el("p", { class: "muted", style: "margin:0" }, "None — every pre-sale step is complete."));
+        el("p", { class: "muted", style: "margin:0" }, "None — every pre-sale action is complete."));
     }
     const ul = el("ul", { class: "blockers" });
     for (const s of open) {
-      const li = el("li", { class: "blocker-link", role: "link", tabindex: "0", title: `Go to step #${s.step}` }, [
+      const li = el("li", { class: "blocker-link", role: "link", tabindex: "0", title: `Go to action #${s.step}` }, [
         el("span", { class: "step-no" }, `#${s.step}`),
         el("span", {}, [s.action, " "]),
         statusBadge(s),
@@ -424,7 +424,7 @@
   function statusSelect(s, onStatus) {
     const opts = STATUS_OPTIONS.slice();
     if (s.status && !opts.some((o) => o.toLowerCase() === norm(s.status))) opts.unshift(s.status);
-    const sel = el("select", { class: `status-select ${s.cls}`, "aria-label": `Status for step ${s.step}` },
+    const sel = el("select", { class: `status-select ${s.cls}`, "aria-label": `Status for action ${s.step}` },
       opts.map((o) => el("option", { value: o, selected: norm(o) === norm(s.status) ? "selected" : null }, o)));
     sel.addEventListener("change", () => onStatus(s.step, sel.value, sel));
     return sel;
@@ -1131,8 +1131,8 @@
 
   function uploadCard(role, steps) {
     const zone = uploadZone(role, "uploads", { ariaLabel: "Choose a file to upload", processing: true });
-    const stepSel = el("select", { class: "up-step", "aria-label": "Related step (optional)" }, [
-      el("option", { value: "" }, "— related step (optional) —"),
+    const stepSel = el("select", { class: "up-step", "aria-label": "Related action (optional)" }, [
+      el("option", { value: "" }, "— related action (optional) —"),
       ...steps.map((s) => el("option", { value: String(s.step) }, `#${s.step} · ${s.action.slice(0, 60)}`)),
     ]);
     const who = role === "supplier"
@@ -1161,7 +1161,7 @@
       el("h3", {}, "Upload a document"),
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, role === "supplier"
         ? "Submit your signed declaration, test reports, datasheets, or RoHS/REACH declarations. The AI reads the file and suggests a note automatically."
-        : "Attach a file to the technical file or a specific step. The AI reads the file and suggests a note automatically."),
+        : "Attach a file to the technical file or a specific action. The AI reads the file and suggests a note automatically."),
       zone.el,
       el("div", { class: "upload-fields", style: "margin-top:0.6rem" }, [stepSel, who, note].filter(Boolean)),
       el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.6rem" }, btn),
@@ -1755,7 +1755,7 @@
             ? el("button", { class: "linklike", type: "button", onclick: () => window.PortalViewer.open({ name: u.file_name, open_url: u.download_url, storage_path: u.file_name }) }, u.file_name)
             : (u.download_url ? el("a", { href: u.download_url, target: "_blank", rel: "noopener" }, u.file_name) : el("span", {}, u.file_name)),
           fileTypeChip(u.file_name),
-          el("span", { class: "muted" }, ` — ${u.supplier_label || u.uploaded_role}${u.step ? ` · step #${u.step}` : ""}${u.note ? ` · ${u.note}` : ""}`),
+          el("span", { class: "muted" }, ` — ${u.supplier_label || u.uploaded_role}${u.step ? ` · action #${u.step}` : ""}${u.note ? ` · ${u.note}` : ""}`),
           canView ? el("span", { class: "muted" }, [" · ", el("a", { href: u.download_url, target: "_blank", rel: "noopener" }, "download")]) : null,
           u.id ? el("span", {}, [" · ", el("button", { class: "linklike std-del", type: "button", onclick: () => onDelete(u) }, "delete")]) : null,
         ]));
@@ -3048,7 +3048,7 @@
           cb.addEventListener("change", () => { if (cb.checked) selected.add(key); else selected.delete(key); render(); });
           row.appendChild(cb);
         }
-        const typeTag = it.entityType === "document" ? "DOC" : it.entityType === "step" ? "STEP" : "CLAUSE";
+        const typeTag = it.entityType === "document" ? "DOC" : it.entityType === "step" ? "ACTION" : "CLAUSE";
         row.appendChild(el("div", { class: "cs-row-main" }, [
           el("div", { class: "cs-row-label" }, [el("span", { class: `cs-type cs-type-${it.entityType}` }, typeTag), " ", it.label]),
           it.sublabel ? el("div", { class: "cs-row-sub muted" }, it.sublabel) : null,
@@ -3058,7 +3058,7 @@
           ps.addEventListener("change", () => applyOne(it, ps.value || null, ss.value || null));
           ss.addEventListener("change", () => applyOne(it, ps.value || null, ss.value || null));
           const cell = el("div", { class: "cs-row-cls" }, [ps, ss]);
-          if (it.entityType === "step" && opts.onEditStep) cell.appendChild(el("button", { class: "btn btn-sm", type: "button", title: "Edit this step", onclick: () => opts.onEditStep(it) }, "Edit"));
+          if (it.entityType === "step" && opts.onEditStep) cell.appendChild(el("button", { class: "btn btn-sm", type: "button", title: "Edit this action", onclick: () => opts.onEditStep(it) }, "Edit"));
           if (it.ai) cell.appendChild(el("span", { class: "cs-ai", title: "AI-classified — review" }, "AI"));
           if (it.inherited && (!it.lifecycle_phase || !it.scope)) cell.appendChild(el("span", { class: "cs-inherit", title: "Inherited from parent document" }, "inherited"));
           row.appendChild(cell);
@@ -3092,7 +3092,7 @@
       const active = state.cell === key;
       return el("button", { class: `map-cell map-${q.colour}${active ? " active" : ""}`, type: "button", onclick: () => { state.cell = active ? null : key; render(); } }, [
         el("div", { class: "map-count" }, String(q.total)),
-        el("div", { class: "map-break muted" }, `${q.steps} steps · ${q.documents} docs · ${q.interpretations} clauses`),
+        el("div", { class: "map-break muted" }, `${q.steps} actions · ${q.documents} docs · ${q.interpretations} clauses`),
         el("div", { class: "map-bar" }, el("div", { class: `map-bar-fill map-fill-${q.colour}`, style: `width:${q.pct_compliant || 0}%` })),
         el("div", { class: "map-pct" }, q.total === 0 ? "no items" : (q.pct_compliant == null ? "not rated" : `${q.pct_compliant}% done`)),
       ]);
@@ -3107,7 +3107,7 @@
         el("div", { style: "display:flex; align-items:center; gap:0.5rem" }, [el("h3", { style: "margin:0" }, `${title} — ${inCell.length} item(s)`), el("span", { class: "spacer" }), el("button", { class: "btn btn-sm", type: "button", onclick: () => { state.cell = null; render(); } }, "Close")]),
         inCell.length ? el("div", { class: "cs-list", style: "margin-top:0.6rem" }, inCell.map((it) => el("div", { class: "cs-row" }, [
           el("div", { class: "cs-row-main" }, [
-            el("div", { class: "cs-row-label" }, [el("span", { class: `cs-type cs-type-${it.entityType}` }, it.entityType === "document" ? "DOC" : it.entityType === "step" ? "STEP" : "CLAUSE"), " ", it.label]),
+            el("div", { class: "cs-row-label" }, [el("span", { class: `cs-type cs-type-${it.entityType}` }, it.entityType === "document" ? "DOC" : it.entityType === "step" ? "ACTION" : "CLAUSE"), " ", it.label]),
             it.sublabel ? el("div", { class: "cs-row-sub muted" }, it.sublabel) : null,
           ]),
           it.compliance_status ? el("span", { class: `map-status map-st-${it.compliance_status}` }, it.compliance_status.replace(/_/g, " ")) : null,
@@ -3130,10 +3130,10 @@
       ]);
       const unc = u.total
         ? el("button", { class: `map-unclassified${state.cell === "__unc__" ? " active" : ""}`, type: "button", onclick: () => { state.cell = state.cell === "__unc__" ? null : "__unc__"; render(); } }, [
-            el("strong", {}, `${u.total} unclassified`), el("span", { class: "muted" }, ` — ${u.steps} steps · ${u.documents} docs · ${u.interpretations} clauses (classify them in the step / document forms)`),
+            el("strong", {}, `${u.total} unclassified`), el("span", { class: "muted" }, ` — ${u.steps} actions · ${u.documents} docs · ${u.interpretations} clauses (classify them in the action / document forms)`),
           ])
         : el("div", { class: "muted", style: "margin-top:0.6rem; font-size:0.85rem" }, "✓ All items are classified.");
-      const summary = el("div", { class: "map-summary muted" }, `${t.classified || 0} of ${t.total || 0} items classified · ${t.steps || 0} steps · ${t.documents || 0} docs · ${t.interpretations || 0} clauses. Green ≥80% done · amber 40–79% · red <40% · grey not rated. Click a cell to list its items.`);
+      const summary = el("div", { class: "map-summary muted" }, `${t.classified || 0} of ${t.total || 0} items classified · ${t.steps || 0} actions · ${t.documents || 0} docs · ${t.interpretations || 0} clauses. Green ≥80% done · amber 40–79% · red <40% · grey not rated. Click a cell to list its items.`);
       gridMount.replaceChildren(el("div", {}, [grid, unc, summary]));
       renderList();
     };
@@ -3206,7 +3206,7 @@
         tools,
         phaseOverview(steps),
         blockersPanel(steps),
-        el("h2", { class: "visually-hidden" }, "Steps by phase"),
+        el("h2", { class: "visually-hidden" }, "Actions by phase"),
         phaseSections(steps, role === "rushroom"
           ? { editable: true, onStatus, onEditStep: saveStep, onDeleteStep }
           : { editable: true, onStatus }),
@@ -3438,7 +3438,7 @@
         tools,
         phaseOverview(steps),
         blockersPanel(steps),
-        el("h2", { class: "visually-hidden" }, "Steps by phase"),
+        el("h2", { class: "visually-hidden" }, "Actions by phase"),
         phaseSections(steps),
       ]);
       mount.replaceChildren(...frag.childNodes);

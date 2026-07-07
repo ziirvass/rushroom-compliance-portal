@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Supplier View · Rushroom Compliance Portal</title>
-  <meta name="description" content="Supplier view: supplier documents and the status of supplier compliance steps for Rushroom AB." />
+  <meta name="description" content="Supplier view: supplier documents and the status of supplier compliance actions for Rushroom AB." />
   <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg?v=67" />
   <meta name="theme-color" content="#12161e" media="(prefers-color-scheme: dark)" />
   <meta name="theme-color" content="#2fa564" media="(prefers-color-scheme: light)" />
   <script>
     (function () { try { var t = localStorage.getItem("rushroom_theme"); if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"; document.documentElement.setAttribute("data-theme", t); } catch (e) {} })();
   </script>
-  <link rel="stylesheet" href="./assets/styles.css?v=89" />
+  <link rel="stylesheet" href="./assets/styles.css?v=90" />
   <script>
     (function () {
       function setHeaderH() {
@@ -38,7 +38,7 @@
         <div class="brand-text">
           <span class="badge">Rushroom AB · Suppliers</span>
           <h1>Supplier View</h1>
-          <p class="tagline">Your documents and the status of supplier compliance steps</p>
+          <p class="tagline">Your documents and the status of supplier compliance actions</p>
         </div>
       </div>
       <div class="header-tools">
@@ -71,7 +71,7 @@
     <div id="portal-app" hidden>
       <div class="tabs" id="tablist" role="tablist" aria-label="Supplier sections">
         <button class="tab" id="tab-steps" role="tab" aria-selected="true"
-                aria-controls="steps-panel" tabindex="0">Supplier Steps</button>
+                aria-controls="steps-panel" tabindex="0">Supplier Actions</button>
         <button class="tab" id="tab-documents" role="tab" aria-selected="false"
                 aria-controls="documents-panel" tabindex="-1">Supplier Documents</button>
         <button class="tab" id="tab-standards" role="tab" aria-selected="false"
@@ -99,10 +99,10 @@
     </div>
   </footer>
 
-  <script src="./assets/config.js?v=89"></script>
-  <script src="./assets/api.js?v=89"></script>
-  <script src="./assets/viewer.js?v=89"></script>
-  <script src="./assets/app.js?v=89"></script>
-  <script src="./assets/supplier.js?v=89"></script>
+  <script src="./assets/config.js?v=90"></script>
+  <script src="./assets/api.js?v=90"></script>
+  <script src="./assets/viewer.js?v=90"></script>
+  <script src="./assets/app.js?v=90"></script>
+  <script src="./assets/supplier.js?v=90"></script>
 </body>
 </html>

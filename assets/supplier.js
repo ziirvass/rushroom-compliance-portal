@@ -44,7 +44,7 @@
       const { steps, source } = await loadSteps();
       const supplierSteps = steps.filter((s) => s.audience.includes("supplier"));
       if (!supplierSteps.length) {
-        mount.replaceChildren(el("div", { class: "empty" }, "No supplier steps are defined yet."));
+        mount.replaceChildren(el("div", { class: "empty" }, "No supplier actions are defined yet."));
         return;
       }
       const tools = el("div", { class: "row-tools" }, [
