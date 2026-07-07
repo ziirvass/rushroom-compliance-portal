@@ -337,7 +337,6 @@
     const done = steps.filter((s) => s.done).length;
     const pct = total ? Math.round((done / total) * 100) : 0;
     const presaleOpen = steps.filter((s) => s.presale && !s.done).length;
-    const blocked = steps.filter((s) => norm(s.status) === "blocked").length;
     return el("div", { class: "summary" }, [
       el("div", { class: "card stat" }, [
         el("h3", {}, "Overall compliance status"),
@@ -350,10 +349,12 @@
         el("div", { class: "value", style: presaleOpen ? "color:var(--amber)" : "" }, String(presaleOpen)),
         el("div", { class: "sub" }, presaleOpen ? "must clear before first sale" : "all pre-sale actions clear"),
       ]),
+      // Compliance Forecasting — placeholder tile. The old "Blocked actions"
+      // logic was removed; new forecasting functionality is coming later.
       el("div", { class: "card stat" }, [
-        el("h3", {}, "Blocked actions"),
-        el("div", { class: "value", style: blocked ? "color:var(--red)" : "" }, String(blocked)),
-        el("div", { class: "sub" }, blocked ? "need action to unblock" : "nothing blocked"),
+        el("h3", {}, "Compliance Forecasting"),
+        el("div", { class: "value muted" }, "—"),
+        el("div", { class: "sub" }, "coming soon"),
       ]),
     ]);
   }
