@@ -844,6 +844,38 @@
             })),
           ])
         : null;
+      // Requirement links pointing at this document's versions (Rushroom only,
+      // lazy-loaded per opened document; hidden entirely when there are none).
+      const linkBox = el("div", { class: "rl-docbox" });
+      if (opts.manage && versions.length) {
+        const verIds = versions.map((v) => v.id).filter(Boolean);
+        if (verIds.length) {
+          const verLabel = new Map(versions.map((v, vi) => [v.id, `v${versions.length - vi}`]));
+          API.listRequirementLinksForDocumentVersions(API.getToken(), verIds).then((r) => {
+            const links = r.links || [];
+            if (!links.length) { linkBox.replaceChildren(); return; }
+            const items = links.map((l) => {
+              const isFrom = l.from && l.from.type === "document_version" && verIds.includes(l.from.id);
+              const mine = isFrom ? l.from : l.to;
+              return { l, other: isFrom ? l.to : l.from, ver: verLabel.get(mine && mine.id) || "" };
+            });
+            linkBox.replaceChildren(el("details", { class: "rl-doclinks", open: "open" }, [
+              el("summary", {}, `Linked requirements (${items.length})`),
+              el("div", { class: "rl-inline" }, items.map(({ l, other, ver }) => el("span", { class: "rl-inline-item" }, [
+                rlTypeChip(l.link_type),
+                el("span", { class: "rl-arrow", "aria-hidden": "true" }, "→"),
+                el("span", { class: "rl-target" }, [
+                  el("strong", {}, (other && other.label) || "(removed)"),
+                  el("span", { class: "rl-kind" }, other && other.type === "document_version" ? "doc" : "clause"),
+                ]),
+                ver ? el("span", { class: "rl-kind" }, ver) : null,
+                rlStatusChip(l.status),
+              ]))),
+              el("div", { class: "muted", style: "font-size:0.78rem; margin-top:0.3rem" }, "Manage in Clauses & DPP → Links."),
+            ]));
+          }).catch(() => linkBox.replaceChildren());
+        }
+      }
       const link = d.open_url || d.url;
       const viewAction = link
         ? el("span", { class: "file-actions" }, [
@@ -861,6 +893,7 @@
       return el("div", { class: "doc doc-op" }, [
         el("div", {}, [el("div", { class: "name" }, [el("span", {}, d.name), fileTypeChip((current && (current.file_name || current.storage_path)) || d.storage_path || d.url || d.name)]), el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`)]),
         currentRow,
+        linkBox,
         history,
         el("div", { class: "doc-actions" }, actions),
       ]);

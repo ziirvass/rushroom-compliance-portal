@@ -2154,6 +2154,22 @@ Be specific: name the exact document and the exact standard (and clause where po
       for (const l of [...(a.data ?? []), ...(b.data ?? [])]) { if (!seen.has(l.id)) { seen.add(l.id); merged.push(l); } }
       return json({ links: await labelEndpoints(merged) });
     }
+
+    // Batch: every link touching any of the given document versions (for the As-Operated side).
+    if (action === "listRequirementLinksForDocumentVersions") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const verIds = (Array.isArray(body.documentVersionIds) ? body.documentVersionIds : []).map((v: unknown) => String(v ?? "")).filter(isUuid);
+      if (!verIds.length) return json({ links: [] });
+      const [a, b] = await Promise.all([
+        db.from("requirement_links").select("*").eq("from_type", "document_version").in("from_id", verIds),
+        db.from("requirement_links").select("*").eq("to_type", "document_version").in("to_id", verIds),
+      ]);
+      if (a.error) return json({ error: a.error.message }, 500);
+      if (b.error) return json({ error: b.error.message }, 500);
+      const seen = new Set<string>(), merged: any[] = [];
+      for (const l of [...(a.data ?? []), ...(b.data ?? [])]) { if (!seen.has(l.id)) { seen.add(l.id); merged.push(l); } }
+      return json({ links: await labelEndpoints(merged) });
+    }
   }
 
   if (action === "exportProductPassport") {

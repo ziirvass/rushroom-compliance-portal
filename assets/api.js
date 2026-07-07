@@ -242,6 +242,8 @@
       call({ action: "listRequirementLinks", token, entityType, entityId }),
     listRequirementLinksForClauses: (token, clauseIds) =>
       call({ action: "listRequirementLinksForClauses", token, clauseIds }),
+    listRequirementLinksForDocumentVersions: (token, documentVersionIds) =>
+      call({ action: "listRequirementLinksForDocumentVersions", token, documentVersionIds }),
     createRequirementLink: (token, fields) =>
       call({ action: "createRequirementLink", token, ...fields }),
     setRequirementLinkStatus: (token, id, status, reviewedBy) =>
