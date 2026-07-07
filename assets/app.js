@@ -928,6 +928,8 @@
         audience: Array.isArray(r.audience) ? r.audience.join(", ") : (r.audience || ""),
       });
       n.updatedBy = r.updated_by || "";
+      n.lifecycle_phase = r.lifecycle_phase || null;
+      n.scope = r.scope || null;
       return n;
     });
   }
@@ -1684,12 +1686,16 @@
       const cb = el("input", { type: "checkbox", value: a, checked: (v.audience || ["internal"]).includes(a) ? "checked" : null });
       return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
     });
+    // Compliance-matrix classification: lifecycle phase × scope.
+    const lifePhase = phaseSelect(v.lifecycle_phase);
+    const cScope = scopeSelect(v.scope);
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, existing ? "Save changes" : "Add step");
     const form = el("div", { class: "step-form" }, [
       phaseList, prioList,
       row("Phase", phase), row("Action", action), row("Owner", owner),
       row("Priority", priority), row("Status", status), row("Evidence", evidence), row("Where / how", where),
+      el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Compliance quadrant"), el("div", { class: "cs-quad-picker" }, [lifePhase, cScope])]),
       el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Audience"), el("div", { class: "aud-checks" }, auds.map((c) => c.label))]),
       note, el("div", { style: "margin-top:0.5rem" }, save),
     ]);
@@ -1699,7 +1705,7 @@
       const actionText = action.value.trim();
       if (!actionText) { note.className = "up-status warn"; note.textContent = "Action text is required."; return; }
       const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
-      const fields = { phase: phase.value.trim(), actionText, owner: owner.value.trim(), priority: priority.value.trim(), status: status.value, evidence: evidence.value.trim(), where: where.value.trim(), audience: audience.length ? audience : ["internal"] };
+      const fields = { phase: phase.value.trim(), actionText, owner: owner.value.trim(), priority: priority.value.trim(), status: status.value, evidence: evidence.value.trim(), where: where.value.trim(), audience: audience.length ? audience : ["internal"], lifecyclePhase: lifePhase.value || null, scope: cScope.value || null };
       save.disabled = true; note.className = "up-status"; note.textContent = "Saving…";
       try { await onSave(fields); close(); }
       catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
@@ -2889,7 +2895,7 @@
     el("option", { value: "product_services", selected: val === "product_services" ? "selected" : null }, "Product & Services"),
   ]);
 
-  async function renderComplianceMatrix(role, mount) {
+  async function renderComplianceMatrix(role, mount, opts = {}) {
     const canEdit = role === "rushroom";
     const token = () => API.getToken();
     let matrix = null, items = [];
@@ -2909,6 +2915,7 @@
       }
       render();
     };
+    mount.__reload = reload;   // let the steps view refresh the matrix after step edits
 
     const setFilter = (f) => { state.filter = f; render(); };
 
@@ -3019,8 +3026,9 @@
           cb.addEventListener("change", () => { if (cb.checked) selected.add(key); else selected.delete(key); render(); });
           row.appendChild(cb);
         }
+        const typeTag = it.entityType === "document" ? "DOC" : it.entityType === "step" ? "STEP" : "CLAUSE";
         row.appendChild(el("div", { class: "cs-row-main" }, [
-          el("div", { class: "cs-row-label" }, [el("span", { class: `cs-type cs-type-${it.entityType}` }, it.entityType === "document" ? "DOC" : "CLAUSE"), " ", it.label]),
+          el("div", { class: "cs-row-label" }, [el("span", { class: `cs-type cs-type-${it.entityType}` }, typeTag), " ", it.label]),
           it.sublabel ? el("div", { class: "cs-row-sub muted" }, it.sublabel) : null,
         ]));
         if (canEdit) {
@@ -3028,6 +3036,7 @@
           ps.addEventListener("change", () => applyOne(it, ps.value || null, ss.value || null));
           ss.addEventListener("change", () => applyOne(it, ps.value || null, ss.value || null));
           const cell = el("div", { class: "cs-row-cls" }, [ps, ss]);
+          if (it.entityType === "step" && opts.onEditStep) cell.appendChild(el("button", { class: "btn btn-sm", type: "button", title: "Edit this step", onclick: () => opts.onEditStep(it) }, "Edit"));
           if (it.ai) cell.appendChild(el("span", { class: "cs-ai", title: "AI-classified — review" }, "AI"));
           if (it.inherited && (!it.lifecycle_phase || !it.scope)) cell.appendChild(el("span", { class: "cs-inherit", title: "Inherited from parent document" }, "inherited"));
           row.appendChild(cell);
@@ -3055,8 +3064,19 @@
     const matrixMount = el("div", { class: "cs-matrix-block" });
     const stepsMount = el("div");
     panel.replaceChildren(matrixMount, stepsMount);
-    if (role === "rushroom") renderComplianceMatrix(role, matrixMount);
     const mount = stepsMount;
+    // Editing a step from the matrix opens the full step editor, then refreshes both.
+    let latestSteps = [], latestPhases = [];
+    const refreshMatrix = () => (matrixMount.__reload ? matrixMount.__reload() : null);
+    const editStepItem = (item) => {
+      const existing = latestSteps.find((s) => String(s.step) === String(item.id));
+      if (!existing) return;
+      stepEditor(existing, latestPhases, async (fields) => {
+        await API.updateStep(API.getToken(role), existing.step, fields);
+        await load(); await refreshMatrix();
+      });
+    };
+    if (role === "rushroom") renderComplianceMatrix(role, matrixMount, { onEditStep: editStepItem });
     const load = async () => {
       mount.replaceChildren(el("div", { class: "loading" }, "Loading…"));
       let payload;
@@ -3069,18 +3089,19 @@
       const steps = stepsFromApi(payload.steps);
       const onStatus = async (step, status, sel) => {
         sel.disabled = true;
-        try { await API.setStatus(API.getToken(role), step, status); await load(); }
+        try { await API.setStatus(API.getToken(role), step, status); await load(); await refreshMatrix(); }
         catch (ex) { sel.disabled = false; alert(`Couldn't save: ${ex.message}`); }
       };
       const phases = [...new Set(steps.map((s) => s.phase))];
+      latestSteps = steps; latestPhases = phases;    // for the matrix's Edit-step action
       const saveStep = (existing) => stepEditor(existing, phases, async (fields) => {
         if (existing) await API.updateStep(API.getToken(role), existing.step, fields);
         else await API.addStep(API.getToken(role), fields);
-        await load();
+        await load(); await refreshMatrix();
       });
       const onDeleteStep = async (s) => {
         if (!confirm(`Delete step #${s.step}: “${(s.action || "").slice(0, 60)}”?`)) return;
-        try { await API.deleteStep(API.getToken(role), s.step); await load(); }
+        try { await API.deleteStep(API.getToken(role), s.step); await load(); await refreshMatrix(); }
         catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
       };
       // One toolbar: Expand/Collapse all sit alongside Refresh / Add step / Print.

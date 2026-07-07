@@ -460,3 +460,13 @@ create table if not exists public.classification_log (
 create index if not exists classification_log_entity_idx on public.classification_log (entity_type, entity_id);
 
 alter table public.classification_log enable row level security;
+
+-- ---- Classification on STEPS (same lifecycle_phase × scope 2×2 as documents) ----
+-- Lets action-plan steps be designed/edited per quadrant. Enums are reused from
+-- the classification section above. classification_log gains an integer entity_step
+-- (steps have an integer PK) and entity_id becomes nullable for step entries.
+alter table public.steps add column if not exists lifecycle_phase public.lifecycle_phase;
+alter table public.steps add column if not exists scope public.compliance_scope;
+alter table public.steps add column if not exists classification_ai_generated boolean not null default false;
+alter table public.classification_log alter column entity_id drop not null;
+alter table public.classification_log add column if not exists entity_step integer;

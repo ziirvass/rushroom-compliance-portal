@@ -534,6 +534,17 @@ const CLASS_STATUSES = ["compliant", "deviation", "not_applicable", "pending"];
 // null (unclassify). When set to pre_launch, monitoring fields are nulled to keep
 // the CHECK constraint satisfied.
 async function applyClassification(entityType: string, id: string, phase: string | null, scope: string | null, aiGenerated: boolean, changedBy: string | null): Promise<{ ok: boolean; error?: string }> {
+  if (entityType === "step") {
+    // Steps have an integer PK and no classified_at/by columns; log via entity_step.
+    const stepNo = Number(id);
+    if (!stepNo) return { ok: false, error: "invalid step" };
+    const { data: cur } = await db.from("steps").select("lifecycle_phase, scope").eq("step", stepNo).maybeSingle();
+    if (!cur) return { ok: false, error: "not found" };
+    const { error } = await db.from("steps").update({ lifecycle_phase: phase, scope, classification_ai_generated: !!aiGenerated, updated_at: new Date().toISOString(), updated_by: "classification" }).eq("step", stepNo);
+    if (error) return { ok: false, error: error.message };
+    await db.from("classification_log").insert({ entity_type: "step", entity_step: stepNo, entity_id: null, old_lifecycle_phase: cur.lifecycle_phase ?? null, new_lifecycle_phase: phase ?? null, old_scope: cur.scope ?? null, new_scope: scope ?? null, changed_by: changedBy || null, ai_generated: !!aiGenerated });
+    return { ok: true };
+  }
   const table = entityType === "interpretation" ? "as_operates_interpretations" : "documents";
   const { data: cur } = await db.from(table).select("lifecycle_phase, scope").eq("id", id).maybeSingle();
   if (!cur) return { ok: false, error: "not found" };
@@ -554,6 +565,7 @@ async function applyClassification(entityType: string, id: string, phase: string
 // EFFECTIVE classification (interpretations inherit their parent document's
 // classification when their own is unset — overridable per row).
 async function loadClassificationItems(): Promise<any[]> {
+  const { data: steps } = await db.from("steps").select("step, action, phase, status, lifecycle_phase, scope, classification_ai_generated").order("step");
   const { data: docs } = await db.from("documents").select("id, name, category, kind, lifecycle_phase, scope, classification_ai_generated");
   const { data: interps } = await db.from("as_operates_interpretations").select("id, compliance_status, clause_id, document_version_id, lifecycle_phase, scope, classification_ai_generated");
   const docClass = new Map<string, { phase: string | null; scope: string | null }>();
@@ -566,6 +578,13 @@ async function loadClassificationItems(): Promise<any[]> {
   const clauseMap = new Map<string, any>();
   if (clauseIds.length) { const { data: cs } = await db.from("standard_clauses").select("id, clause_ref, clause_title").in("id", clauseIds); for (const c of cs || []) clauseMap.set(c.id, c); }
   const items: any[] = [];
+  // Steps: their action-plan status maps to a compliance bucket so the matrix % reflects progress.
+  const stepStatus = (st: string) => /done|complete|closed/i.test(st || "") ? "compliant" : /n\/?a|not applicable/i.test(st || "") ? "not_applicable" : "pending";
+  for (const s of steps || []) items.push({
+    entityType: "step", id: String(s.step), label: s.action || `Step ${s.step}`, sublabel: s.phase || "",
+    lifecycle_phase: s.lifecycle_phase || null, scope: s.scope || null, effective_phase: s.lifecycle_phase || null, effective_scope: s.scope || null,
+    inherited: false, ai: !!s.classification_ai_generated, compliance_status: stepStatus(s.status), step: s.step, status: s.status || "",
+  });
   for (const d of docs || []) items.push({
     entityType: "document", id: d.id, label: d.name || "(untitled)", sublabel: [d.category, d.kind].filter(Boolean).join(" · "),
     lifecycle_phase: d.lifecycle_phase || null, scope: d.scope || null, effective_phase: d.lifecycle_phase || null, effective_scope: d.scope || null,
@@ -844,7 +863,9 @@ Deno.serve(async (req) => {
     const { data: maxRow } = await db.from("steps").select("step").order("step", { ascending: false }).limit(1).maybeSingle();
     const step = (maxRow?.step ?? 0) + 1;
     const audience = Array.isArray(body.audience) && body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
-    const { error } = await db.from("steps").insert({
+    const lp = body.lifecyclePhase && LIFECYCLE_PHASES.includes(String(body.lifecyclePhase)) ? String(body.lifecyclePhase) : null;
+    const sc = body.scope && COMPLIANCE_SCOPES.includes(String(body.scope)) ? String(body.scope) : null;
+    const row: Record<string, unknown> = {
       step,
       phase: String(body.phase ?? "Unphased").slice(0, 120) || "Unphased",
       action: action_.slice(0, 1000),
@@ -855,9 +876,15 @@ Deno.serve(async (req) => {
       priority: String(body.priority ?? "").slice(0, 80),
       status: String(body.status ?? "Open").slice(0, 80) || "Open",
       audience,
+      lifecycle_phase: lp, scope: sc,
       updated_by: "rushroom",
-    });
-    if (error) return json({ error: error.message }, 500);
+    };
+    let res = await db.from("steps").insert(row);
+    if (res.error && /lifecycle_phase|scope|classification/i.test(res.error.message || "")) {
+      const clean = { ...row }; delete clean.lifecycle_phase; delete clean.scope;
+      res = await db.from("steps").insert(clean);
+    }
+    if (res.error) return json({ error: res.error.message }, 500);
     return json({ ok: true, step });
   }
 
@@ -871,8 +898,14 @@ Deno.serve(async (req) => {
     if (body.actionText !== undefined) patch.action = String(body.actionText).slice(0, 1000);
     if (body.where !== undefined) patch.where_how = String(body.where).slice(0, 300);
     if (Array.isArray(body.audience)) patch.audience = body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
-    const { error } = await db.from("steps").update(patch).eq("step", step);
-    if (error) return json({ error: error.message }, 500);
+    if (body.lifecyclePhase !== undefined) patch.lifecycle_phase = body.lifecyclePhase && LIFECYCLE_PHASES.includes(String(body.lifecyclePhase)) ? String(body.lifecyclePhase) : null;
+    if (body.scope !== undefined) patch.scope = body.scope && COMPLIANCE_SCOPES.includes(String(body.scope)) ? String(body.scope) : null;
+    let res = await db.from("steps").update(patch).eq("step", step);
+    if (res.error && /lifecycle_phase|scope|classification/i.test(res.error.message || "")) {
+      const clean = { ...patch }; delete clean.lifecycle_phase; delete clean.scope;
+      res = await db.from("steps").update(clean).eq("step", step);
+    }
+    if (res.error) return json({ error: res.error.message }, 500);
     return json({ ok: true, step });
   }
 
@@ -2360,7 +2393,7 @@ Be specific: name the exact document and the exact standard (and clause where po
   // Set/update classification on one or many documents/interpretations (bulk).
   if (action === "setClassification") {
     if (role !== "rushroom") return json({ error: "Rushroom or Reviewer only" }, 403);
-    const entityType = body.entityType === "interpretation" ? "interpretation" : "document";
+    const entityType = ["interpretation", "step"].includes(body.entityType) ? body.entityType : "document";
     const ids = Array.isArray(body.ids) ? body.ids.map((x: unknown) => String(x)) : (body.id ? [String(body.id)] : []);
     if (!ids.length) return json({ error: "ids required" }, 400);
     const rawPhase = body.lifecyclePhase;
