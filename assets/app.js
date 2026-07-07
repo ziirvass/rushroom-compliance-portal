@@ -722,6 +722,7 @@
     diff: svg('<line x1="12" y1="3" x2="12" y2="21"/><polyline points="8 8 4 12 8 16"/><polyline points="16 8 20 12 16 16"/>'),
     tag: svg('<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>'),
     graph: svg('<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6.5" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M6.9 7.4l3.6 8.2M17.2 8.2l-4 6.9M7.3 6.2h9.4"/>'),
+    grid: svg('<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/>'),
   };
   // File action chip (View / Open) — subtle pill; label hides on narrow screens.
   function fileActionBtn(label, iconKey, opts = {}) {
@@ -755,7 +756,7 @@
 
   // Sub-tabs within a panel (e.g. Library vs Add). Remembers the active tab
   // per key so it survives re-renders (reload after an add).
-  const paneSubTab = { documents: "list", standards: "list", level2: "clauses", deviations: "monitoring" };
+  const paneSubTab = { compliance: "status", documents: "list", standards: "list", level2: "clauses", deviations: "monitoring" };
   function subTabs(key, tabs) {
     const bar = el("div", { class: "subtabs", role: "tablist" });
     const body = el("div", { class: "subtab-body" });
@@ -3211,7 +3212,20 @@
           ? { editable: true, onStatus, onEditStep: saveStep, onDeleteStep }
           : { editable: true, onStatus }),
       ]);
-      mount.replaceChildren(...frag.childNodes);
+      // Rushroom sees the Compliance Map as a sub-tab alongside the status
+      // overview; other roles get the status overview on its own.
+      if (role === "rushroom") {
+        mount.replaceChildren(subTabs("compliance", [
+          { id: "status", label: "Status", icon: "layers", build: () => frag },
+          { id: "map", label: "Compliance Map", icon: "grid", build: () => {
+            const m = el("div", {}, el("div", { class: "loading" }, "Loading compliance map…"));
+            renderComplianceMap(role, m);
+            return m;
+          } },
+        ]));
+      } else {
+        mount.replaceChildren(...frag.childNodes);
+      }
 
       const templatesOf = () => (payload.documents || []).filter((d) => (d.kind || "template") === "template" && d.id);
       const onNewVersion = (d) => documentVersionEditor(d, role, load);
@@ -3249,8 +3263,6 @@
       docsPanel.replaceChildren(subTabs("documents", docTabs));
     };
     await load();
-    const mapPanel = $("#map-panel");
-    if (mapPanel && role === "rushroom") renderComplianceMap(role, mapPanel);
     const stdPanel = $("#standards-panel");
     if (stdPanel) renderStandards(role, stdPanel);
     // Deviation Monitoring hosts two sub-tabs: the AI scan and the Directive Graph.
@@ -3274,7 +3286,6 @@
       if (t) t.hidden = !ok;
       if (!ok && p) p.hidden = true;
     };
-    gate("tab-map", "map-panel", role === "rushroom");
     gate("tab-deviations", "deviations-panel", role === "rushroom");
     gate("tab-level2", "level2-panel", role === "rushroom");
     gate("tab-accounts", "accounts-panel", !!admin);
