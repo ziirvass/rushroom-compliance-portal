@@ -15,9 +15,7 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             line-height: 1.6;
             color: #333;
-            background: #fafafa;            git log --oneline -2
-            # f49aca9 docs: add handoff README for Claude Code
-            # 2e7b738 docs: add Implementation Status and Deployment Checklist
+            background: #fafafa;
             padding: 40px;
         }
         
@@ -361,43 +359,64 @@
         <h1>Rushroom Compliance Portal</h1>
         <p class="subtitle">System Overview, Architecture & Data Model</p>
         <p class="subtitle">Document Versioning, Standards Management & AI-Assisted Drafting</p>
-        <p class="subtitle"><span class="doc-changed">Level 2: Structured Clause-Level Interpretations &amp; DPP Preparation</span></p>
-        <p class="doc-legend">🟡 <strong>Yellow</strong> marks content added or changed from the previous (Level 1) version of this document.</p>
+        <p class="subtitle"><span class="doc-changed">Level 2 clause interpretations &amp; DPP · EU Directive Analyser (CELLAR) · Compliance Status dimension (Lifecycle × Scope)</span></p>
+        <p class="doc-legend">🟡 <strong>Yellow</strong> marks content added or changed in this revision of the document (2026-07-07 audit against the live code).</p>
 
         <!-- AS-BUILT STATUS SECTION -->
         <div class="section doc-section-new">
-            <h2>0. As-Built Status <span class="doc-new-badge">Updated to match production</span></h2>
-            <p>This section reflects what is <strong>actually deployed and live</strong> as of 2026-07-05, superseding any "planned/pending" wording later in this document. Frontend is on GitHub Pages (cache-busted assets, currently <code>?v=64</code>); backend is the Supabase <code>portal-api</code> Edge Function (deployed) plus Postgres + Storage.</p>
+            <h2>0. As-Built Status <span class="doc-new-badge">Audited against production 2026-07-07</span></h2>
+            <p>This section reflects what is <strong>actually deployed and live</strong> as of <span class="doc-changed">2026-07-07</span>, superseding any "planned/pending" wording later in this document. Frontend is a no-framework static site on GitHub Pages (cache-busted assets, currently <span class="doc-changed"><code>?v=91</code></span>); backend is the single Supabase <code>portal-api</code> Edge Function (Deno, deployed <code>--no-verify-jwt</code>) plus Postgres + private Storage buckets. The whole document library, action plan, standards register, Level 2 and CELLAR data live in Postgres; the browser never touches the DB directly.</p>
 
-            <h3>Authentication &amp; Accounts <span class="doc-changed">(new)</span></h3>
+            <div class="note"><strong>Single AI model.</strong> <span class="doc-changed">Every server-side AI call — draft generation, deviation scan, clause extraction, interpretations, classification suggestions, directive inference, compliance narrative — uses Anthropic <code>claude-opus-4-8</code></span> (constants <code>SCAN_MODEL</code> in <code>index.ts</code> and <code>CLAUDE_MODEL</code> in <code>cellar-service.ts</code>), via <code>api.anthropic.com/v1/messages</code> with adaptive thinking and JSON-schema structured output. No other model IDs are used.</div>
+
+            <h3 class="doc-changed">Navigation — six top-level tabs</h3>
+            <p><span class="doc-changed">The portal now has six tabs (in order): <strong>Compliance Status</strong>, <strong>Standards &amp; Regulations</strong>, <strong>As Operated</strong>, <strong>Deviation Monitoring</strong>, <strong>Clauses &amp; DPP</strong>, <strong>Accounts</strong>.</span> Deviation Monitoring and Clauses &amp; DPP are Rushroom-only; Accounts is admin-only. Two views that were once their own tabs are now <strong>sub-tabs</strong>: the <strong>Compliance Map</strong> (2×2 board) sits under Compliance Status, and the <strong>Directive Graph</strong> sits under Deviation Monitoring.</p>
+
+            <h3 class="doc-changed">Action plan: "Step" → "Action" (UI wording only)</h3>
+            <div class="note"><span class="doc-changed">The action-plan UI now says <strong>"Action"</strong> throughout (Add action, "Actions by phase", "Delete action #N", the table's <em>Action</em> column). This is a <strong>presentation rename only</strong>: the database table is still <code>steps</code>, the API verbs are still <code>addStep</code>/<code>updateStep</code>/<code>deleteStep</code>/<code>setStatus</code>, and the text field is transmitted as <code>actionText</code>. Wherever this document says "step", read the UI label "action".</span></div>
+
+            <h3>Authentication &amp; Accounts</h3>
             <div class="list-grid">
-                <div class="list-item"><strong>Individual email + password login</strong> (<code>loginUser</code>): PBKDF2-SHA256 hashing, requires a verified email and an approved account; issues an HMAC session token carrying the access tier + admin flag.</div>
-                <div class="list-item"><strong>Self-registration</strong> (role, name, email, phone, WhatsApp, password) → emailed verification link (<code>verify.html</code>); admins review/approve and assign a role in an <strong>Accounts</strong> tab.</div>
+                <div class="list-item"><strong>Individual email + password login</strong> (<code>loginUser</code>): PBKDF2-SHA256 hashing (120k iterations), requires a verified email and an approved account; issues an HMAC session token (<span class="doc-changed">8-hour TTL</span>) carrying the access tier + admin flag.</div>
+                <div class="list-item"><strong>Self-registration</strong> (role, name, email, phone, WhatsApp, password) → emailed verification link (<code>verify.html</code>); admins review/approve and assign a role in the <strong>Accounts</strong> tab.</div>
                 <div class="list-item"><strong>Password reset</strong> via signed link (<code>reset.html</code>); admins can copy/resend verify &amp; reset links.</div>
-                <div class="list-item"><strong>Roles → access tier:</strong> admin/internal/reviewer = full ("rushroom") view; supplier/installer = limited. The <strong>Accounts</strong> tab and admin actions are gated on the admin flag and marked in red in the UI.</div>
-                <div class="list-item"><strong>Shared-password login</strong> is retained as a bootstrap "super admin" fallback.</div>
+                <div class="list-item"><strong>Roles → access tier:</strong> admin/internal/reviewer = full ("rushroom") view; supplier/installer = limited ("supplier"). The <strong>Accounts</strong> tab and admin-only actions (incl. permanent document delete) are gated on the admin flag and marked in red in the UI.</div>
+                <div class="list-item"><strong>Shared-password login</strong> (<code>login</code>) is retained as a bootstrap "super admin" fallback.</div>
                 <div class="list-item"><strong>Email delivery</strong> via Resend (<code>RESEND_API_KEY</code> + <code>MAIL_FROM</code>); admin "Send test email" + status banner. Falls back to copyable links when unset.</div>
             </div>
 
-            <h3>Level 2 (Clauses &amp; DPP) — <span class="doc-changed">shipped</span></h3>
+            <h3 class="doc-changed">New since Level 2 — Compliance Status dimension (Lifecycle × Scope)</h3>
             <div class="list-grid">
-                <div class="list-item"><strong>"Clauses &amp; DPP" tab</strong> (admin) with four views: <em>Clauses</em> (AI-extract + table), <em>Interpretations</em> (AI-generate + edit with audit trail), <em>Compliance Matrix</em> (docs × clauses, colour-coded, click-to-edit), <em>Passports</em> (create, link interpretations, export DPP JSON-LD).</div>
-                <div class="list-item"><strong>Passport CRUD added</strong> (was export-only): <code>listProductPassports</code>, <code>getProductPassport</code>, <code>createProductPassport</code>, <code>updateProductPassport</code>, <code>deleteProductPassport</code>, <code>linkPassportInterpretation</code>, <code>unlinkPassportInterpretation</code>.</div>
-                <div class="list-item"><code>generateInterpretations</code> sends the <strong>document file</strong> to Claude (works for PDFs) and <strong>batches ~10 clauses/call</strong> with structured JSON output.</div>
-                <div class="list-item"><strong>Phase 3 (structured-first deviation scan) is now actually implemented:</strong> <code>runDeviationScan</code> emits instant findings from <code>as_operates_interpretations</code> (source <code>structured</code>) and only calls Claude for documents that have no interpretations (source <code>ai_inference</code>).</div>
+                <div class="list-item"><span class="doc-changed">A <strong>2×2 classification</strong> — lifecycle phase (<code>pre_launch</code> | <code>monitoring</code>) × scope (<code>company</code> | <code>product_services</code>) — now spans documents, action-plan items and clause interpretations. Two Postgres enums plus additive, nullable columns (NULL = unclassified) and an append-only <code>classification_log</code>.</span></div>
+                <div class="list-item"><span class="doc-changed">Classification is captured <strong>at creation time</strong> in the new-action and new-document forms (a "Compliance quadrant" phase/scope picker). The <strong>Compliance Map</strong> sub-tab renders a read-only 2×2 board (per-quadrant counts, % complete, colour, drill-down list of DOC/ACTION/CLAUSE items, plus an Unclassified bucket).</span></div>
+                <div class="list-item"><span class="doc-changed">Endpoints: <code>setClassification</code>, <code>getComplianceMatrix</code>, <code>listClassificationItems</code>, <code>suggestClassifications</code> (AI proposals, never writes). An editable classification workbench (<code>renderComplianceMatrix</code>, with per-row AI Accept/Reject and bulk apply) exists in the code but is <strong>not wired</strong> into the live UI in this revision.</span></div>
             </div>
 
-            <h3>Document &amp; UX features <span class="doc-changed">(new)</span></h3>
+            <h3>EU Directive Relationship Analyser (CELLAR)</h3>
+            <div class="list-grid">
+                <div class="list-item">A <strong>Directive Graph</strong> (now a sub-tab of Deviation Monitoring) maps how EU directives/regulations relate, drawing on the public EU <strong>CELLAR</strong> SPARQL/REST service (7-day cached) plus optional on-demand AI inference. Rushroom only.</div>
+                <div class="list-item">Four tables (<code>eu_directives</code>, <code>directive_relations</code>, <code>product_directive_applicability</code>, <code>cellar_cache</code>) seeded with the 7 acts relevant to the LED wardrobe system (LVD, EMC, RoHS, WEEE, Machinery, Batteries, ESPR). See Section 12.</div>
+            </div>
+
+            <h3>Level 2 (Clauses &amp; DPP) — shipped</h3>
+            <div class="list-grid">
+                <div class="list-item"><strong>"Clauses &amp; DPP" tab</strong> (Rushroom) with four sub-tabs: <em>Clauses</em> (AI-extract + table), <em>Interpretations</em> (AI-generate + edit with audit trail), <em>Matrix</em> (docs × clauses, colour-coded, click-to-edit), <em>Passports</em> (create, link interpretations, export DPP JSON-LD).</div>
+                <div class="list-item"><strong>Passport CRUD:</strong> <code>listProductPassports</code>, <code>getProductPassport</code>, <code>createProductPassport</code>, <code>updateProductPassport</code>, <code>deleteProductPassport</code>, <code>linkPassportInterpretation</code>, <code>unlinkPassportInterpretation</code>.</div>
+                <div class="list-item"><code>generateInterpretations</code> sends the <strong>document file</strong> to Claude (works for PDFs) and <strong>batches ~10 clauses/call</strong> with structured JSON output.</div>
+                <div class="list-item"><strong>Structured-first deviation scan:</strong> <code>runDeviationScan</code> emits instant findings from <code>as_operates_interpretations</code> (source <code>structured</code>) and only calls Claude for documents that have no interpretations (source <code>ai_inference</code>).</div>
+            </div>
+
+            <h3>Document &amp; UX features</h3>
             <div class="list-grid">
                 <div class="list-item"><strong>Version-to-version diff</strong> with <span class="doc-changed">yellow</span> highlighting across document/standard version history, AI drafts, and interpretations — with an <strong>Inline / Side-by-side</strong> toggle. Text extracted client-side (md/txt/html, docx via mammoth, xlsx via SheetJS, pdf via pdf.js).</div>
-                <div class="list-item"><strong>Deviation findings</strong> that are new since the previous scan are yellow-marked (<code>is_new</code>).</div>
-                <div class="list-item"><strong>File-type badges</strong> (PDF/DOCX/XLSX…) everywhere files are listed; type-aware <strong>Edit</strong> (DOCX→Google Docs, XLSX→Google Sheets round-trip; PDFs route to upload/AI-draft).</div>
-                <div class="list-item"><strong>AI token usage + cost estimate</strong> shown on AI operations (extract, generate, scan).</div>
-                <div class="list-item"><strong>Terminology/nav:</strong> the document library is now the <strong>As Operated</strong> tab (after Standards &amp; Regulations); Supplier uploads is its own sub-tab; session controls (badge · Supplier view · Sign out) live in the header.</div>
+                <div class="list-item"><strong>In-app viewer</strong> (<code>assets/viewer.js</code>) renders PDF/DOCX/XLSX/CSV/MD/TXT in the browser; <strong>file-type badges</strong> everywhere files are listed.</div>
+                <div class="list-item"><strong>Deviation findings</strong> that are new since the previous scan are yellow-marked (<code>is_new</code>); AI token usage + cost estimate shown on AI operations.</div>
+                <div class="list-item"><strong>Admin document deletion:</strong> a super-user may permanently delete a document (records + all versions + stored files) via <code>deleteDocument</code>; the button appears only for admins.</div>
+                <div class="list-item"><strong>Terminology/nav:</strong> the document library is the <strong>As Operated</strong> tab; Supplier uploads and a "Labels and Instructions" placeholder are its sub-tabs; session controls (badge · Supplier view · Sign out) live in the header.</div>
             </div>
 
-            <h3>Google Docs integration <span class="doc-changed">changed</span></h3>
-            <p>The former <strong>service-account</strong> approach (and the <code>GOOGLE_SERVICE_ACCOUNT</code> secret / <code>createGoogleDoc</code> / <code>fetchGoogleDocContent</code> edge actions) has been <strong>removed</strong>. Editing now uses <strong>client-side Google Identity Services OAuth</strong> (the user's own Google account, via <code>assets/gdocs.js</code> with a public client ID) — see the correction in Section 5.</p>
+            <h3>Google Docs integration</h3>
+            <p>Editing uses <strong>client-side Google Identity Services OAuth</strong> (the user's own Google account, via <code>assets/gdocs.js</code> with a public client ID). The former <strong>service-account</strong> approach (the <code>GOOGLE_SERVICE_ACCOUNT</code> secret and the <code>createGoogleDoc</code>/<code>fetchGoogleDocContent</code> edge actions) no longer exists — the edge function makes <strong>no</strong> Google API calls. See Section 5.</p>
         </div>
 
         <!-- SYSTEM OVERVIEW SECTION -->
@@ -447,10 +466,10 @@
                 
                 <text x="60" y="130" font-size="12" fill="#333"><tspan font-weight="bold">PK</tspan> id: uuid</text>
                 <text x="60" y="150" font-size="12" fill="#333">kind: 'template' | 'operational'</text>
-                <text x="60" y="170" font-size="12" fill="#333">name: text</text>
-                <text x="60" y="190" font-size="12" fill="#333">category: text</text>
-                <text x="60" y="210" font-size="12" fill="#333">audience: text[]</text>
-                <text x="60" y="230" font-size="12" fill="#333">storage_path: text</text>
+                <text x="60" y="170" font-size="12" fill="#333">name, category, url, sort</text>
+                <text x="60" y="190" font-size="12" fill="#333">audience: text[]</text>
+                <text x="60" y="210" font-size="12" fill="#333">storage_path: text</text>
+                <text x="60" y="230" font-size="12" fill="#ff9800">+ lifecycle_phase, scope</text>
                 <text x="60" y="250" font-size="12" fill="#333">created_at: timestamp</text>
                 
                 <!-- DOCUMENT_VERSIONS table -->
@@ -476,7 +495,7 @@
                 <text x="710" y="130" font-size="12" fill="#333"><tspan font-weight="bold">PK</tspan> id: uuid</text>
                 <text x="710" y="150" font-size="12" fill="#333">code: text (e.g., "EN 60598-1")</text>
                 <text x="710" y="170" font-size="12" fill="#333">title: text</text>
-                <text x="710" y="190" font-size="12" fill="#333">category: text (LVD, EMC, etc.)</text>
+                <text x="710" y="190" font-size="12" fill="#333">category, reg_type, jurisdiction</text>
                 <text x="710" y="210" font-size="12" fill="#333">audience: text[]</text>
                 <text x="710" y="230" font-size="12" fill="#333">created_at: timestamp</text>
                 
@@ -519,53 +538,40 @@
                     </marker>
                 </defs>
             </svg>
-            <p class="diagram-label">Figure 1: Relational Data Model with Provenance Tracking</p>
-            
-            <h3>Key Tables</h3>
-            <table>
-                <tr>
-                    <th>Table</th>
-                    <th>Purpose</th>
-                    <th>Versioned?</th>
-                    <th>Key Fields</th>
-                </tr>
-                <tr>
-                    <td><code>documents</code></td>
-                    <td>Metadata for each document (template or operational)</td>
-                    <td>No</td>
-                    <td>kind, name, category, audience</td>
-                </tr>
-                <tr>
-                    <td><code>document_versions</code></td>
-                    <td>Immutable version history; every upload creates a new row</td>
-                    <td>Yes</td>
-                    <td>document_id, version, storage_path, <strong>source_document_version_id</strong>, <strong>source_standard_version_ids</strong></td>
-                </tr>
-                <tr>
-                    <td><code>standards</code></td>
-                    <td>Regulatory requirement registry (e.g., EN 60598-1)</td>
-                    <td>No</td>
-                    <td>code, title, category, audience</td>
-                </tr>
-                <tr>
-                    <td><code>standard_versions</code></td>
-                    <td>Version history for each standard (2015, 2015+A1, 2015+A1:2022, etc.)</td>
-                    <td>Yes</td>
-                    <td>standard_id, version, effective_date, storage_path</td>
-                </tr>
-                <tr>
-                    <td><code>deviation_scans</code></td>
-                    <td>Results of AI compliance audits (documents vs standards)</td>
-                    <td>No</td>
-                    <td>model, status, summary, docs_scanned, standards_scanned</td>
-                </tr>
-                <tr>
-                    <td><code>deviation_findings</code></td>
-                    <td>Individual audit findings by severity</td>
-                    <td>No</td>
-                    <td>scan_id, severity, title, description, document, standard, recommendation</td>
-                </tr>
+            <p class="diagram-label">Figure 1: Provenance core of the data model (the full schema has 18 tables across six domains — see the table below)</p>
+
+            <div class="note"><strong>Access model:</strong> Row-Level Security is enabled on <strong>every</strong> table with <strong>no policies</strong>, so anon/authenticated clients are denied outright. All reads and writes go through the <code>portal-api</code> Edge Function using the service-role key. Three private Storage buckets hold the files: <code>documents</code>, <code>standards</code>, <code>supplier-uploads</code>.</div>
+
+            <h3 class="doc-changed">Complete Table Inventory (18 tables, by domain)</h3>
+            <table style="font-size: 12px;">
+                <tr><th>Table</th><th>Domain</th><th>Purpose</th><th>Key Fields</th></tr>
+                <tr><td><code>steps</code></td><td>Action plan</td><td>The CE/compliance action plan — one row per numbered action (UI label "Action")</td><td>step (PK int), phase, action, owner, status, priority, audience[], <span class="doc-changed">lifecycle_phase, scope</span></td></tr>
+                <tr><td><code>documents</code></td><td>Documents</td><td>Document library (template / operational)</td><td>kind, name, category, url, storage_path, audience[], <span class="doc-changed">lifecycle_phase, scope, monitoring_*</span></td></tr>
+                <tr><td><code>document_versions</code></td><td>Documents</td><td>Immutable version history (every upload = new row)</td><td>document_id (FK), version, storage_path, <strong>source_document_version_id</strong>, <strong>source_standard_version_ids</strong> (jsonb)</td></tr>
+                <tr><td><code>uploads</code></td><td>Documents</td><td>Files submitted against an action (Rushroom or supplier)</td><td>step (FK), uploaded_role, file_path, file_name, supplier_label</td></tr>
+                <tr><td><code>standards</code></td><td>Standards</td><td>Standards &amp; regulations register</td><td>code, title, category, <span class="doc-changed">reg_type, jurisdiction</span>, audience[]</td></tr>
+                <tr><td><code>standard_versions</code></td><td>Standards</td><td>Per-standard version history with the stored file</td><td>standard_id (FK), version, effective_date, storage_path, file_name</td></tr>
+                <tr><td><code>deviation_scans</code></td><td>Deviation</td><td>AI deviation-scan runs</td><td>model, status, summary, counts (jsonb), docs_scanned, standards_scanned, usage (jsonb)</td></tr>
+                <tr><td><code>deviation_findings</code></td><td>Deviation</td><td>Individual findings by severity</td><td>scan_id (FK), severity, title, description, document, standard, recommendation, <span class="doc-changed">source (structured|ai_inference)</span></td></tr>
+                <tr><td><code>users</code></td><td>Accounts</td><td>Self-registered accounts (verify + admin approval)</td><td>email (unique), password (PBKDF2), requested_role, role, status, email_verified</td></tr>
+                <tr><td><code>standard_clauses</code></td><td>Level 2</td><td>Decomposed atomic clauses of a standard version</td><td>standard_version_id (FK), clause_ref, clause_text, requirement_type, parent_clause_id, ai_generated · unique(standard_version_id, clause_ref)</td></tr>
+                <tr><td><code>as_operates_interpretations</code></td><td>Level 2</td><td>Interpretation per clause × document version</td><td>clause_id (FK), document_version_id (FK), compliance_status, rationale, reviewed_by, ai_generated, <span class="doc-changed">lifecycle_phase, scope</span> · unique(clause_id, document_version_id)</td></tr>
+                <tr><td><code>product_passports</code></td><td>Level 2</td><td>DPP-ready product passport (ESPR 2027)</td><td>product_name, gtin, applicable_standards (jsonb), sustainability_data (jsonb), passport_status</td></tr>
+                <tr><td><code>passport_interpretation_links</code></td><td>Level 2</td><td>M:N passport ↔ interpretation</td><td>passport_id (FK), interpretation_id (FK) · unique pair</td></tr>
+                <tr><td><code>eu_directives</code></td><td>CELLAR</td><td>Registry of tracked EU directives/regulations</td><td>celex_number (unique), short_name, directive_type, status, applies_to_company</td></tr>
+                <tr><td><code>directive_relations</code></td><td>CELLAR</td><td>Links between directives (explicit + AI-inferred)</td><td>source/target_directive_id, target_celex, relation_type, source (cellar_sparql|akn_ref_element|ai_inferred), confidence, verified</td></tr>
+                <tr><td><code>product_directive_applicability</code></td><td>CELLAR</td><td>Which directives apply to a passport</td><td>passport_id (FK), directive_id (FK), applicability_status, rationale</td></tr>
+                <tr><td><code>cellar_cache</code></td><td>CELLAR</td><td>Raw CELLAR query cache (re-fetch after 7 days)</td><td>celex_number, query_type (metadata|relations|fulltext), result_jsonb · unique pair</td></tr>
+                <tr><td><code>classification_log</code></td><td>Classification</td><td>Append-only audit trail of every classification change</td><td>entity_type (document|interpretation|step), entity_id / entity_step, old/new lifecycle_phase &amp; scope, changed_by, ai_generated</td></tr>
             </table>
+
+            <h3 class="doc-changed">Enums &amp; constraints</h3>
+            <div class="list-grid">
+                <div class="list-item"><strong>PostgreSQL enums:</strong> <code>lifecycle_phase</code> (<code>pre_launch</code>, <code>monitoring</code>) and <code>compliance_scope</code> (<code>company</code>, <code>product_services</code>). The classification "quadrant" is the derived (phase × scope) pair — there is <strong>no</strong> <code>quadrant</code> column.</div>
+                <div class="list-item"><strong>CHECK constraints:</strong> on <code>documents</code> and <code>as_operates_interpretations</code>, the monitoring fields (<code>monitoring_frequency</code>, <code>next_due_at</code>, <code>last_verified_at</code>) must be NULL unless <code>lifecycle_phase = 'monitoring'</code>. Those fields are schema-only for now (no due-date/notification logic yet).</div>
+                <div class="list-item"><strong>Immutable versioning:</strong> <code>document_versions</code> and <code>standard_versions</code> are append-only; <code>document_versions.source_document_version_id</code> and <code>source_standard_version_ids[]</code> carry provenance.</div>
+                <div class="list-item"><strong>Progressive enrichment:</strong> all classification columns are nullable (NULL = unclassified), so a pre-existing Level 1/2 database keeps working unchanged after the additive migration.</div>
+            </div>
         </div>
         
         <!-- DOCUMENT LIFECYCLE SECTION -->
@@ -844,13 +850,13 @@
                 <rect x="50" y="60" width="280" height="35" fill="#3498db" stroke="#3498db" stroke-width="2" rx="4"/>
                 <text x="190" y="87" font-weight="bold" fill="white" text-anchor="middle" font-size="14">FRONTEND (Browser)</text>
                 
-                <text x="70" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Static HTML/CSS/JS</text>
-                <text x="80" y="135" fill="#555" font-size="10">assets/index.html</text>
+                <text x="70" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Static site · GitHub Pages (?v=91)</text>
+                <text x="80" y="135" fill="#555" font-size="10">index.html · supplier / verify / reset.html</text>
                 <text x="80" y="155" fill="#555" font-size="10">assets/app.js (portal UI)</text>
-                <text x="80" y="175" fill="#555" font-size="10">assets/api.js (API wrapper)</text>
-                <text x="80" y="195" fill="#555" font-size="10">assets/config.js (secrets hash)</text>
-                <text x="80" y="215" fill="#555" font-size="10">assets/viewer.js (document viewer)</text>
-                <text x="80" y="235" fill="#555" font-size="10">assets/styles.css (UI styling)</text>
+                <text x="80" y="175" fill="#555" font-size="10">assets/api.js (edge-function client)</text>
+                <text x="80" y="195" fill="#555" font-size="10">assets/config.js (function URL, OAuth id)</text>
+                <text x="80" y="215" fill="#555" font-size="10">assets/gdocs.js · viewer.js · styles.css</text>
+                <text x="80" y="235" fill="#555" font-size="10">D3, pdf.js, mammoth, SheetJS via CDN</text>
                 <text x="80" y="255" fill="#555" font-size="10">No framework, no build step</text>
                 
                 <!-- Tier 2: Backend / Edge Function -->
@@ -858,30 +864,30 @@
                 <rect x="370" y="60" width="280" height="35" fill="#2980b9" stroke="#2980b9" stroke-width="2" rx="4"/>
                 <text x="510" y="87" font-weight="bold" fill="white" text-anchor="middle" font-size="14">EDGE FUNCTION (Deno)</text>
                 
-                <text x="390" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Supabase Edge Function</text>
-                <text x="400" y="135" fill="#555" font-size="10">supabase/functions/portal-api/index.ts</text>
-                <text x="400" y="155" fill="#555" font-size="10">• Auth: password hashing, JWT tokens</text>
-                <text x="400" y="175" fill="#555" font-size="10">• Document: CRUD, versioning, drafting</text>
-                <text x="400" y="195" fill="#555" font-size="10">• Standards: registry, version mgmt</text>
-                <text x="400" y="215" fill="#555" font-size="10">• AI: Claude API calls for drafts & scans</text>
-                <text x="400" y="235" fill="#555" font-size="10">• Google Docs: create/fetch via serviceAccount</text>
-                <text x="400" y="255" fill="#555" font-size="10">Response: JSON (never direct DB access)</text>
+                <text x="390" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Supabase Edge Function (portal-api)</text>
+                <text x="400" y="135" fill="#555" font-size="10">index.ts + cellar-service.ts (Deno)</text>
+                <text x="400" y="155" fill="#555" font-size="10">• Auth: PBKDF2 hashing, HMAC tokens (8h)</text>
+                <text x="400" y="175" fill="#555" font-size="10">• Docs/Standards: CRUD, versioning, drafting</text>
+                <text x="400" y="195" fill="#555" font-size="10">• Level 2, DPP, classification, deviation scan</text>
+                <text x="400" y="215" fill="#555" font-size="10">• AI: Claude (claude-opus-4-8) via v1/messages</text>
+                <text x="400" y="235" fill="#555" font-size="10">• CELLAR: EU directive SPARQL/REST</text>
+                <text x="400" y="255" fill="#555" font-size="10">Single POST { action } · JSON out · service role</text>
                 
                 <!-- Tier 3: Database & Storage -->
                 <rect x="690" y="60" width="280" height="220" fill="#f1f8e9" stroke="#27ae60" stroke-width="2" rx="4"/>
                 <rect x="690" y="60" width="280" height="35" fill="#27ae60" stroke="#27ae60" stroke-width="2" rx="4"/>
                 <text x="830" y="87" font-weight="bold" fill="white" text-anchor="middle" font-size="14">DATA TIER (Supabase)</text>
                 
-                <text x="710" y="115" font-weight="bold" fill="#2c3e50" font-size="11">PostgreSQL Database</text>
-                <text x="720" y="135" fill="#555" font-size="10">• documents, document_versions</text>
-                <text x="720" y="155" fill="#555" font-size="10">• standards, standard_versions</text>
-                <text x="720" y="175" fill="#555" font-size="10">• steps (action plan)</text>
-                <text x="720" y="195" fill="#555" font-size="10">• deviation_scans, findings</text>
-                <text x="720" y="215" fill="#555" font-size="10">Row-level security: no direct client access</text>
-                
-                <text x="710" y="240" font-weight="bold" fill="#2c3e50" font-size="11">Cloud Storage Buckets</text>
-                <text x="720" y="260" fill="#555" font-size="10">• documents/ (Word, PDF, Markdown)</text>
-                <text x="720" y="280" fill="#555" font-size="10">• standards/ (regulatory PDFs)</text>
+                <text x="710" y="115" font-weight="bold" fill="#2c3e50" font-size="11">PostgreSQL (18 tables, RLS deny-all)</text>
+                <text x="720" y="135" fill="#555" font-size="10">• steps, documents, document_versions, uploads</text>
+                <text x="720" y="155" fill="#555" font-size="10">• standards, standard_versions, users</text>
+                <text x="720" y="175" fill="#555" font-size="10">• standard_clauses, interpretations, passports</text>
+                <text x="720" y="195" fill="#555" font-size="10">• eu_directives + relations, classification_log</text>
+                <text x="720" y="215" fill="#555" font-size="10">Access only via service role (edge function)</text>
+
+                <text x="710" y="240" font-weight="bold" fill="#2c3e50" font-size="11">Private Storage Buckets</text>
+                <text x="720" y="260" fill="#555" font-size="10">• documents/ · standards/ (Word, PDF, XLSX…)</text>
+                <text x="720" y="280" fill="#555" font-size="10">• supplier-uploads/ · signed URLs only</text>
                 
                 <!-- Connections -->
                 <path d="M 330 160 L 370 160" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowgrey)"/>
@@ -929,12 +935,13 @@
                 <li><strong>Fetch back:</strong> Portal retrieves the edited content and updates the draft before publishing.</li>
             </ul>
             
-            <h3>Role-Based Access Control</h3>
+            <h3 class="doc-changed">Role-Based Access Control</h3>
+            <p>Account roles collapse into two <strong>access tiers</strong> (<code>roleTier()</code>), and admins carry a super-user flag:</p>
             <ul style="margin-left: 20px; margin-bottom: 20px;">
-                <li><strong>Rushroom:</strong> Full edit of documents, standards, action plan, and AI controls.</li>
-                <li><strong>Supplier:</strong> Read-only view of assigned steps; can upload files and see status.</li>
-                <li><strong>Reviewer:</strong> Read-only access to specific documents marked for review.</li>
-                <li><strong>Installer:</strong> Read-only access to installation/deployment guides.</li>
+                <li><strong>"rushroom" tier</strong> — assigned roles <code>admin</code>, <code>internal</code>, <code>reviewer</code>. Full read/write on the action plan, documents, standards, Level 2, CELLAR, classification and AI controls. Sees all six tabs (Deviation Monitoring and Clauses &amp; DPP are tier-gated to rushroom).</li>
+                <li><strong>"supplier" tier</strong> — assigned roles <code>supplier</code>, <code>installer</code>. Read-only view of supplier-audience actions/documents/standards; may upload files and set status on their own actions. Does not see the Rushroom-only tabs.</li>
+                <li><strong>Admin (super-user)</strong> — the <code>admin</code> role (or the shared-password Rushroom login) sets <code>admin: true</code>, which unlocks the <strong>Accounts</strong> tab and permanent document deletion. Admin-only controls are marked in red.</li>
+                <li><strong>Audience tagging:</strong> each action/document/standard has an <code>audience[]</code>; supplier-tier users only ever receive rows whose audience includes <code>supplier</code>.</li>
             </ul>
         </div>
         
@@ -1020,7 +1027,9 @@
         <div class="section">
             <h2>9. API Endpoints (Edge Function Actions)</h2>
             
-            <h3>Document Management</h3>
+            <p class="doc-changed">The function is a single <code>POST</code> handler dispatching on <code>body.action</code>. Public actions (no token): <code>login</code>, <code>loginUser</code>, <code>registerUser</code>, <code>verifyUser</code>, <code>requestPasswordReset</code>, <code>setPassword</code>. Every other action requires a valid HMAC session token; "Rushroom" means the rushroom tier, "Admin" means the super-user flag.</p>
+
+            <h3 class="doc-changed">Action Plan &amp; Document Management</h3>
             <table style="font-size: 12px;">
                 <tr>
                     <th>Action</th>
@@ -1028,36 +1037,22 @@
                     <th>Output</th>
                     <th>Role</th>
                 </tr>
-                <tr>
-                    <td><code>addDocument</code></td>
-                    <td>name, category, kind, audience, storagePath, version</td>
-                    <td>{ok, id}</td>
-                    <td>Rushroom</td>
-                </tr>
-                <tr>
-                    <td><code>createOperationalDocumentFromTemplate</code></td>
-                    <td>templateDocumentId, name, version, notes</td>
-                    <td>{ok, id}</td>
-                    <td>Rushroom</td>
-                </tr>
-                <tr>
-                    <td><code>suggestDocumentVersion</code></td>
-                    <td>documentId, templateDocumentId, notes, sourceStandardVersionIds</td>
-                    <td>{summary, proposedChanges[], draftText, versionHint}</td>
-                    <td>Rushroom</td>
-                </tr>
-                <tr>
-                    <td><code>publishDocumentDraft</code></td>
-                    <td>documentId, draftText, version, approvedChanges, sourceStandardVersionIds</td>
-                    <td>{ok, id}</td>
-                    <td>Rushroom</td>
-                </tr>
-                <tr>
-                    <td><code>addDocumentVersion</code></td>
-                    <td>documentId, version, path, fileName, sourceStandardVersionIds</td>
-                    <td>{ok}</td>
-                    <td>Rushroom</td>
-                </tr>
+                <tr><td><code>data</code></td><td>—</td><td>{role, steps, documents} (supplier sees only supplier-audience rows; docs enriched with versions + 1h signed URLs)</td><td>Supplier / Rushroom</td></tr>
+                <tr><td><code>setStatus</code></td><td>step, status, supplierLabel?</td><td>{ok, step, status}</td><td>Supplier (own) / Rushroom</td></tr>
+                <tr><td><code>addStep</code></td><td>actionText, phase, owner, where, evidence, folder, priority, status, audience[], <span class="doc-changed">lifecyclePhase?, scope?</span></td><td>{ok, step}</td><td>Rushroom</td></tr>
+                <tr><td><code>updateStep</code></td><td>step + any editable field (+ lifecyclePhase/scope)</td><td>{ok, step}</td><td>Rushroom</td></tr>
+                <tr><td><code>deleteStep</code></td><td>step</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>uploadUrl</code> / <code>recordUpload</code></td><td>fileName / path, fileName, step?, note?</td><td>signed upload URL into <code>supplier-uploads</code> / {ok}</td><td>Supplier / Rushroom</td></tr>
+                <tr><td><code>docUploadUrl</code></td><td>fileName</td><td>signed upload URL into <code>documents</code> bucket</td><td>Rushroom</td></tr>
+                <tr><td><code>addDocument</code></td><td>name, category, url?, storagePath?, kind, audience[], version?, fileName?, <span class="doc-changed">lifecyclePhase?, scope?</span></td><td>{ok, id} (seeds a v1 version)</td><td>Rushroom</td></tr>
+                <tr><td><code>createOperationalDocumentFromTemplate</code></td><td>templateDocumentId, name?, version?, notes?</td><td>{ok, id} (links source_document_version_id)</td><td>Rushroom</td></tr>
+                <tr><td><code>suggestDocumentVersion</code></td><td>documentId?/templateDocumentId?, notes?, preferredVersion?, sourceStandardVersionIds[]?</td><td><strong>AI</strong> → {summary, proposedChanges[], draftText, versionHint, fileNameHint, usage}</td><td>Rushroom</td></tr>
+                <tr><td><code>publishDocumentDraft</code></td><td>path, draftText, documentId?/newDocumentName?, version?, approvedChanges[]?, sourceStandardVersionIds[]?</td><td>{ok, id} (new document_versions row)</td><td>Rushroom</td></tr>
+                <tr><td><code>addDocumentVersion</code></td><td>documentId, path, fileName, version?, sourceStandardVersionIds[]?</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>updateDocument</code></td><td>id + kind/name/category/audience</td><td>{ok} (seeds v1 when a template becomes operational)</td><td>Rushroom</td></tr>
+                <tr class="doc-changed"><td><code>deleteDocument</code></td><td>id or ids[]</td><td>{ok, deletedDocuments, deletedFiles} — removes rows (cascade) + stored files</td><td><strong>Admin</strong></td></tr>
+                <tr><td><code>uploads</code> / <code>deleteUpload</code></td><td>— / id</td><td>latest 200 supplier uploads (30-min signed URLs) / {ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>suggestFileMetadata</code></td><td>bucket (documents|standards|uploads), path, fileName</td><td><strong>AI</strong> → {name, category, version, kind, summary, usage}</td><td>Rushroom (supplier for uploads)</td></tr>
             </table>
             
             <h3 class="doc-changed">Google Docs Integration — client-side (no edge actions)</h3>
@@ -1097,27 +1092,16 @@
                     <th>Output</th>
                     <th>Role</th>
                 </tr>
-                <tr>
-                    <td><code>addStandard</code></td>
-                    <td>code, title, category, audience</td>
-                    <td>{ok, id}</td>
-                    <td>Rushroom</td>
-                </tr>
-                <tr>
-                    <td><code>addStandardVersion</code></td>
-                    <td>standardId, version, effectiveDate, notes, storagePath, fileName</td>
-                    <td>{ok}</td>
-                    <td>Rushroom</td>
-                </tr>
-                <tr>
-                    <td><code>standards</code></td>
-                    <td>none</td>
-                    <td>{standards: [{id, code, title, versions: [{...}]}]}</td>
-                    <td>Any</td>
-                </tr>
+                <tr><td><code>standards</code></td><td>—</td><td>{role, standards:[{id, code, title, versions[…]}]} (supplier sees only supplier-audience)</td><td>Supplier / Rushroom</td></tr>
+                <tr><td><code>addStandard</code></td><td>code/title, category, audience[], <span class="doc-changed">regType, jurisdiction</span></td><td>{ok, id}</td><td>Rushroom</td></tr>
+                <tr><td><code>updateStandard</code></td><td>id + code/title/category/regType/jurisdiction/audience</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>deleteStandard</code></td><td>id</td><td>{ok} (removes standard + version files)</td><td>Rushroom</td></tr>
+                <tr><td><code>stdUploadUrl</code></td><td>fileName</td><td>signed upload URL into <code>standards</code> bucket</td><td>Rushroom</td></tr>
+                <tr><td><code>addStandardVersion</code> / <code>deleteStandardVersion</code></td><td>standardId, path, fileName, version?, effectiveDate?, notes? / id</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>suggestStandardMetadata</code></td><td>path, fileName</td><td><strong>AI</strong> → {code, title, category, regType, jurisdiction, version, effectiveDate, summary, usage}</td><td>Rushroom</td></tr>
             </table>
-            
-            <h3>AI Compliance Auditing</h3>
+
+            <h3>AI Compliance Auditing (Deviation Scan)</h3>
             <table style="font-size: 12px;">
                 <tr>
                     <th>Action</th>
@@ -1128,15 +1112,37 @@
                 <tr>
                     <td><code>runDeviationScan</code></td>
                     <td>none</td>
-                    <td>{ok, scanId, status, summary}</td>
+                    <td>Two-phase: <span class="doc-changed">Phase A structured findings from interpretations (no LLM), Phase B <code>claude-opus-4-8</code> only for docs lacking interpretations</span>. → {ok, scan, findings, structuredCount, aiCount, usage}</td>
                     <td>Rushroom</td>
                 </tr>
                 <tr>
                     <td><code>deviations</code></td>
                     <td>none</td>
-                    <td>{scan, findings: [{severity, title, description, document, standard, recommendation}]}</td>
+                    <td>{scan, findings:[{severity, title, description, document, standard, recommendation, source}], hasPrevious} (flags <code>is_new</code>)</td>
                     <td>Rushroom</td>
                 </tr>
+            </table>
+
+            <h3 class="doc-changed">EU Directive Analyser (CELLAR) <span class="doc-new-badge">actions</span></h3>
+            <table style="font-size: 12px;">
+                <tr><th>Action</th><th>Input</th><th>Output</th><th>Role</th></tr>
+                <tr><td><code>listDirectives</code></td><td>passportId?</td><td>{ok, directives, applicability}</td><td>Rushroom</td></tr>
+                <tr><td><code>addDirective</code></td><td>celexNumber, shortName?, appliesToCompany?</td><td>{ok, id, title} (enriches via CELLAR metadata)</td><td>Rushroom</td></tr>
+                <tr><td><code>syncDirectiveRelations</code></td><td>directiveId</td><td>{ok, relationsFound, inserted, skipped} (SPARQL + Akoma-Ntoso refs, verified)</td><td>Rushroom</td></tr>
+                <tr><td><code>inferDirectiveRelations</code></td><td>directiveId</td><td><strong>AI</strong> {ok, inferred, inserted} (on-demand only; verified=false)</td><td>Rushroom</td></tr>
+                <tr><td><code>analyseComplianceGraph</code></td><td>scope (all|company|product), passportId?</td><td>{ok, nodes, edges, gaps}</td><td>Rushroom</td></tr>
+                <tr><td><code>getComplianceCoverage</code></td><td>directiveId</td><td>{total_clauses, covered_clauses, coverage_pct, pending_count, deviation_count}</td><td>Rushroom</td></tr>
+                <tr><td><code>setDirectiveApplicability</code></td><td>passportId, directiveId, status, rationale?</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>generateComplianceNarrative</code></td><td>scope, passportId?, language (en|sv)</td><td><strong>AI</strong> → {ok, narrative, coverageSummary, usage}</td><td>Rushroom</td></tr>
+            </table>
+
+            <h3 class="doc-changed">Compliance-Status Classification (Lifecycle × Scope) <span class="doc-new-badge">actions</span></h3>
+            <table style="font-size: 12px;">
+                <tr><th>Action</th><th>Input</th><th>Output</th><th>Role</th></tr>
+                <tr><td><code>setClassification</code></td><td>entityType (document|interpretation|step), id/ids[], lifecyclePhase?, scope?, aiGenerated?</td><td>{ok, updated, errors} (writes classification_log)</td><td>Rushroom</td></tr>
+                <tr><td><code>getComplianceMatrix</code></td><td>—</td><td>{ok, quadrants, unclassified, totals} (pure aggregation, no LLM)</td><td>Rushroom</td></tr>
+                <tr><td><code>listClassificationItems</code></td><td>lifecyclePhase?, scope?, unclassified?, entityType?</td><td>{ok, items, total} (interps inherit parent-doc classification)</td><td>Rushroom</td></tr>
+                <tr><td><code>suggestClassifications</code></td><td>ids[]?</td><td><strong>AI</strong> → {ok, proposals, usage} (proposals only, never writes)</td><td>Rushroom</td></tr>
             </table>
         </div>
         
@@ -1177,11 +1183,22 @@
                     <td>re_… &nbsp;·&nbsp; "Rushroom Compliance &lt;noreply@…&gt;"</td>
                 </tr>
                 <tr class="doc-changed">
+                    <td><code>APP_BASE_URL</code></td>
+                    <td><span class="doc-changed">Optional. Base URL used in verification/reset email links. Defaults to <code>https://ziirvass.github.io/rushroom-compliance-portal</code>.</span></td>
+                    <td>https://…</td>
+                </tr>
+                <tr>
+                    <td><code>SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code></td>
+                    <td>Auto-injected by Supabase — do not set manually.</td>
+                    <td>—</td>
+                </tr>
+                <tr class="doc-changed">
                     <td style="text-decoration: line-through;"><code>GOOGLE_SERVICE_ACCOUNT</code></td>
                     <td><span class="doc-changed">Removed — Google editing is now client-side OAuth (no server secret).</span></td>
                     <td>—</td>
                 </tr>
             </table>
+            <p class="doc-changed">Project ref <code>iwoqujpwhsoywudjtsnj</code>; function URL <code>https://iwoqujpwhsoywudjtsnj.supabase.co/functions/v1/portal-api</code> (set in <code>assets/config.js</code>). The read-only shared-access gate keeps a separate SHA-256 <code>passwordHash</code> in <code>config.js</code>; the role passwords themselves live only as the <code>*_PW_HASH</code> secrets, never in the frontend.</p>
 
             <h3 class="doc-changed">Deployment Steps (as built)</h3>
             <ol style="margin-left: 20px; margin-bottom: 20px;">
@@ -1453,8 +1470,10 @@
                 <li><code>suggestClassifications</code> — Claude proposes phase + scope for unclassified items (title/category/clause) with a confidence; returns proposals only, never writes. Accepted proposals persist via <code>setClassification</code> with <code>classification_ai_generated = true</code>.</li>
             </ul>
 
-            <h3>UI (Compliance Status section)</h3>
-            <p>A 2×2 quadrant overview (Pre Launch/Monitoring × Company/Product&nbsp;&amp;&nbsp;Services), each card showing item count, % compliant and a status colour (green/amber/red; grey when empty), plus a distinct <strong>unclassified</strong> indicator. Clicking a quadrant (or the unclassified card) filters the item list below. Each row has compact phase/scope selects (Rushroom/Reviewer) or read-only pills (other roles), multi-select + bulk apply, and an AI-suggestion flow with per-row Accept/Reject and an AI badge on accepted rows. The matrix persists across step reloads.</p>
+            <h3 class="doc-changed">UI — capture at creation + the Compliance Map sub-tab</h3>
+            <p><span class="doc-changed">In the shipped UI, classification is captured <strong>at creation time</strong>: the new-action and new-document forms include a "Compliance quadrant" picker (lifecycle-phase + scope dropdowns) that flows through as <code>lifecyclePhase</code>/<code>scope</code> on <code>addStep</code>/<code>addDocument</code>. Existing items keep their classification untouched on edit.</span></p>
+            <p><span class="doc-changed">The <strong>Compliance Map</strong> — now a <strong>sub-tab under Compliance Status</strong> (Rushroom only; the other sub-tab is the action-plan "Status" view) — renders a read-only 2×2 board (<code>renderComplianceMap</code>): a grid of Pre&nbsp;Launch/Monitoring × Company/Product&nbsp;&amp;&nbsp;Services cells, each showing a total, a "N actions · N docs · N clauses" breakdown, a coloured progress bar and % done (green ≥80, amber 40–79, red &lt;40, grey unrated). Clicking a cell lists its items (DOC/ACTION/CLAUSE tags + compliance-status pills); an <strong>Unclassified</strong> button lists the rest.</span></p>
+            <div class="note"><span class="doc-changed"><strong>Not yet wired:</strong> a richer editable classification workbench (<code>renderComplianceMatrix</code>) — quadrant cards, per-item phase/scope selects, multi-select + bulk apply, and an AI "✨ Suggest classifications" flow with per-row Accept/Reject backed by <code>suggestClassifications</code> — is fully implemented in <code>app.js</code> but is <strong>not currently mounted</strong> into any tab. The live Compliance Map sub-tab uses the read-only board above.</span></div>
         </div>
 
         <!-- PROPOSALS & DRAFTS SECTION -->
@@ -1470,8 +1489,21 @@
                 <li><strong>Implementation:</strong> Track which proposals were implemented and in which commits</li>
             </ul>
             
+            <div class="highlight doc-changed">
+                <strong>Shipped since this backlog was written (as of 2026-07-07):</strong>
+                <ul style="margin-top: 8px; margin-left: 20px;">
+                    <li><strong>Level 2 UI</strong> (Clauses / Interpretations / Matrix / Passports) — PROP-001, live.</li>
+                    <li><strong>EU Directive Relationship Analyser (CELLAR)</strong> — new module, see Section 12.</li>
+                    <li><strong>Compliance Status dimension (Lifecycle × Scope)</strong> + Compliance Map board — new module, see Section 13.</li>
+                    <li><strong>AI-Suggested Compliance Status</strong> (PROP-006) — delivered as AI clause-status on interpretations + the <code>suggestClassifications</code> endpoint.</li>
+                    <li><strong>Interpretation diff view</strong> (PROP-008) — delivered via <code>previous_interpretation_text</code> + the client-side version diff.</li>
+                    <li>Plus: admin document deletion, "Step → Action" UI rename, per-phase dropdown editor, and the Compliance Map / Directive Graph moving into sub-tabs.</li>
+                </ul>
+                The individual cards below are kept as the original backlog; those marked DRAFT that aren't in the list above remain unbuilt.
+            </div>
+
             <h3>Active Proposals (sorted by priority)</h3>
-            
+
             <div class="proposal-card implemented">
                 <div class="proposal-header">
                     <div style="display: flex; align-items: center;">
@@ -1663,12 +1695,12 @@
                         <div class="proposal-id">PROP-006</div>
                         <div class="proposal-title">AI-Suggested Compliance Status</div>
                     </div>
-                    <span class="proposal-status status-draft">DRAFT</span>
+                    <span class="proposal-status status-implemented">IMPLEMENTED</span>
                 </div>
                 <div class="proposal-meta">
                     <span>Priority: <span class="priority-low">LOW</span></span>
                     <span>Effort: 2 hours</span>
-                    <span>Completion: 0%</span>
+                    <span>Completion: 100%</span>
                     <span>Proposed: 2026-07-05</span>
                 </div>
                 <div class="cause-box">
@@ -1688,12 +1720,12 @@
                         <div class="proposal-id">PROP-008</div>
                         <div class="proposal-title">Version Control for Interpretations (Diff View)</div>
                     </div>
-                    <span class="proposal-status status-draft">DRAFT</span>
+                    <span class="proposal-status status-implemented">IMPLEMENTED</span>
                 </div>
                 <div class="proposal-meta">
                     <span>Priority: <span class="priority-medium">MEDIUM</span></span>
                     <span>Effort: 5 hours</span>
-                    <span>Completion: 0%</span>
+                    <span>Completion: 100%</span>
                     <span>Proposed: 2026-07-05</span>
                 </div>
                 <div class="cause-box">
@@ -1782,37 +1814,35 @@
         <div class="section">
             <h2>Conclusion</h2>
             
-            <p>The Rushroom Compliance Portal is a comprehensive, audit-trail-enabled document management system designed for evolving compliance requirements. <strong>Level 1</strong> emphasizes versioning and provenance; <strong>Level 2</strong> adds structured interpretations and DPP readiness.</p>
-            
-            <p><strong>Level 1 capabilities:</strong></p>
+            <p>The Rushroom Compliance Portal is a comprehensive, audit-trail-enabled compliance system for the LED system-furniture product. It layers up: <strong>Level 1</strong> versioning &amp; provenance → <strong>Level 2</strong> structured clause interpretations &amp; DPP readiness → the <strong>EU Directive Analyser (CELLAR)</strong> → the <strong>Compliance Status dimension (Lifecycle × Scope)</strong>. All four are live in production as of 2026-07-07.</p>
+
+            <p><strong>Core (Level 1) capabilities:</strong></p>
             <ul style="margin-left: 20px; margin-bottom: 15px;">
-                <li>Immutable document versioning with full audit trail</li>
-                <li>AI-assisted drafting with human review checkboxes</li>
-                <li>Provenance tracking (which standards informed each version)</li>
-                <li>Standards register with version control and effective dates</li>
-                <li>Google Docs integration for full document editing</li>
-                <li>AI-powered compliance deviation scanning</li>
+                <li>Immutable document &amp; standard versioning with full audit trail and provenance</li>
+                <li>AI-assisted drafting (<code>claude-opus-4-8</code>) with human review before publish</li>
+                <li>Standards &amp; regulations register with type/jurisdiction, versions and effective dates</li>
+                <li>Client-side Google Docs/Sheets editing round-trip (user's own account)</li>
+                <li>Two-phase AI deviation scan (structured findings first, Claude for the rest)</li>
+                <li>Role-based access (rushroom / supplier tiers + admin super-user), self-registration, email verification</li>
             </ul>
-            
-            <p><strong>Level 2 capabilities (new):</strong></p>
+
+            <p><strong class="doc-changed">Advanced modules (Level 2 and beyond):</strong></p>
             <ul style="margin-left: 20px; margin-bottom: 15px;">
-                <li>Decomposed, clause-level interpretations (AI-assisted or manual)</li>
-                <li>Queryable compliance data (vs. prose in documents)</li>
-                <li>Atomic human review tracking per clause</li>
-                <li>Compliance matrix visualization (docs × clauses grid)</li>
-                <li>DPP export in JSON-LD (schema.org + ESPR extensions)</li>
-                <li>Structured deviation scanning (50x faster, 50x cheaper)</li>
-                <li>Progressive enrichment (system smarter as interpretations added)</li>
+                <li>Decomposed, clause-level interpretations (AI-assisted or manual), queryable per clause</li>
+                <li>Compliance matrix (docs × clauses) and DPP export in JSON-LD (schema.org + ESPR extensions)</li>
+                <li><span class="doc-changed">EU Directive Relationship Analyser — CELLAR-sourced graph with AI inference, coverage colouring and an EN/SV compliance narrative</span></li>
+                <li><span class="doc-changed">Compliance Status dimension — Lifecycle × Scope 2×2 classification captured at creation, with the Compliance Map board</span></li>
+                <li>Progressive enrichment — every classification/interpretation column is nullable, so the system gets smarter without a big migration</li>
             </ul>
-            
-            <div class="highlight">
-                <strong>Next Steps:</strong>
+
+            <div class="highlight doc-changed">
+                <strong>Operating the system day-to-day:</strong>
                 <ol style="margin-top: 10px; margin-left: 20px;">
-                    <li><strong>Immediate:</strong> Extract clauses from existing standards (run <code>extractStandardClauses</code> for each standard version)</li>
-                    <li><strong>Week 1:</strong> Generate interpretations for your main As Operates documents (run <code>generateInterpretations</code>)</li>
-                    <li><strong>Week 2:</strong> Human review and approve all interpretations (use <code>saveInterpretation</code> with reviewed_by)</li>
-                    <li><strong>Week 3:</strong> Build compliance matrix UI and test DPP export</li>
-                    <li><strong>Ongoing:</strong> Add new interpretations as standards change or new deviations are discovered</li>
+                    <li>Keep the <strong>action plan</strong> current in Compliance Status; classify new actions/documents by quadrant as you add them.</li>
+                    <li>Extract clauses (<code>extractStandardClauses</code>) and generate interpretations (<code>generateInterpretations</code>) for the main As-Operated documents, then human-review them.</li>
+                    <li>Run the <strong>deviation scan</strong> periodically; triage findings by severity and the NEW-since-last-scan markers.</li>
+                    <li>Maintain the <strong>Directive Graph</strong> (sync CELLAR relations, mark applicability per passport) and export the compliance narrative when a DoC/passport is needed.</li>
+                    <li>To deploy changes: push the frontend (bump <code>?v=N</code>), <code>supabase functions deploy portal-api</code>, and paste <code>schema.sql</code> into the SQL Editor if the schema changed.</li>
                 </ol>
             </div>
         </div>

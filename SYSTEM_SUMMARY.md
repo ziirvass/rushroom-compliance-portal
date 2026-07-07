@@ -1,348 +1,161 @@
-# Summary: Proposal Drafting & Tracking System Implementation
+# Rushroom Compliance Portal — System Summary
 
-**Date Implemented:** 2026-07-05  
-**Status:** ✅ Complete and ready to use  
-**Created by:** GitHub Copilot  
+**Last updated:** 2026-07-07
+**Status:** Live in production
+**Scope:** LED system-furniture (the "LED wardrobe system") compliance for Rushroom AB
 
----
-
-## What Was Built
-
-A complete system for **proposing, tracking, documenting, and implementing** ideas for the Rushroom Compliance Portal. The system captures:
-
-- **Cause:** What problems does this proposal solve?
-- **Effect:** What changes would be made?
-- **Implications:** Risks, dependencies, effort, performance, compliance impact
-- **Status Tracking:** Draft → Proposed → In Progress → Implemented
-- **Git Integration:** Link proposals to commits and implementation history
+> This is a concise, current summary of the actual portal. For the full technical
+> reference (data model, ERDs, every API action, workflows) see
+> [`SYSTEM_OVERVIEW.html`](SYSTEM_OVERVIEW.html). The older proposal-tracking
+> workflow lives in [`PROPOSALS.json`](PROPOSALS.json),
+> [`IMPLEMENTATION_LOG.md`](IMPLEMENTATION_LOG.md) and
+> [`DRAFTING_SYSTEM_GUIDE.md`](DRAFTING_SYSTEM_GUIDE.md).
 
 ---
 
-## System Components
+## What it is
 
-### 1. **PROPOSALS.json** (570 lines)
-Master registry containing **10 initial proposals** with full details:
+A web-based compliance-documentation system that manages the full lifecycle of the
+compliance evidence for Rushroom's LED system-furniture product: the CE/compliance
+**action plan**, the **document library** (templates and "as operated" documents with
+immutable version history), the **standards & regulations** register, structured
+**clause-level interpretations** and **Digital Product Passport (DPP)** preparation for
+ESPR, an **AI deviation scan**, and an **EU-directive relationship analyser**.
 
-```
-PROP-001: Phase 5 Frontend UI (IMPLEMENTED, HIGH, 4 hours)
-PROP-002: Real-time Compliance Matrix Updates (DRAFT, MEDIUM, 3 hours)
-PROP-003: Bulk Interpretation Workflow (DRAFT, MEDIUM, 6 hours)
-PROP-004: Deviation Trend Analysis (DRAFT, MEDIUM, 4 hours)
-PROP-005: Auto DPP Generation (DRAFT, MEDIUM, 3 hours)
-PROP-006: AI-Suggested Compliance Status (DRAFT, LOW, 2 hours)
-PROP-007: Multi-Language Support (DRAFT, LOW, 10 hours)
-PROP-008: Interpretation Version Control (DRAFT, MEDIUM, 5 hours)
-PROP-009: Scheduled Compliance Scans (DRAFT, LOW, 4 hours)
-PROP-010: ESPR Compliance Path Tracing (PROPOSED, HIGH, 8 hours)
-```
-
-Each proposal includes:
-- Unique ID (PROP-001 format)
-- Title, status, category, priority
-- Cause (3+ reasons why)
-- Effect (3+ changes that would happen)
-- Implications (effort, risk, dependencies, browser compat, performance, training needs, etc.)
-- Implementation checklist (3-5 concrete tasks)
-- Tracking fields: commits_implemented[], percentage_complete
-- Estimated effort in hours
-
-**Format:** JSON array (easy to parse programmatically if needed)
-
-### 2. **SYSTEM_OVERVIEW.html** (Section 12 added)
-Beautiful HTML section showing all proposals with:
-
-- **Visual cards** for each proposal (color-coded by status)
-- **Status badges:** Draft (gray) | Proposed (orange) | In Progress (blue) | Implemented (green)
-- **Priority indicators:** HIGH (red) | MEDIUM (orange) | LOW (green)
-- **Expandable boxes:**
-  - Cause (blue background) — why is this needed?
-  - Effect (green background) — what changes?
-  - Implications (yellow background) — risks and considerations
-- **Metadata display:**
-  - Priority level
-  - Estimated effort (hours)
-  - Completion percentage (0-100%)
-  - Proposed date
-- **Decision workflow:** Explains how to use the section (Draft → Review → Approve → Build → Track)
-
-**Styling:** Added 100+ lines of CSS for professional presentation
-- Color-coded cards based on status
-- Clean typography
-- Printable to PDF
-- Responsive layout
-
-### 3. **IMPLEMENTATION_LOG.md** (250 lines)
-Tracking document with **one section per proposal** containing:
-
-- Current status (⏳ IN PROGRESS, 🟡 PROPOSED, 🟢 DRAFT, ✅ IMPLEMENTED, ❌ REJECTED)
-- Proposed date
-- Expected effort
-- Commits implemented (git hashes added as development proceeds)
-- Implementation notes (what was actually done, blockers, discoveries)
-- Learnings section (what we learned, recommendations)
-- Percentage complete (0-100%, updated continuously)
-
-**Structure:**
-- Timeline view (all 10 proposals listed in order)
-- Phase plan (which proposals target which phase)
-- Summary table (quick reference of all proposals)
-- Legend (explanation of status symbols)
-
-### 4. **PROPOSAL_TEMPLATE.md** (450 lines)
-Comprehensive guide for creating new proposals:
-
-- **Field definitions:** Each JSON field explained with examples
-- **Guidelines:** How to think through cause/effect/implications
-- **Examples:** Small proposal (PROP-006, 2h) vs. large proposal (PROP-010, 8h)
-- **Decision flowchart:** When to implement a proposal
-- **Review checklist:** Before adding to PROPOSALS.json
-- **How-to guide:** Step-by-step for adding new proposals
-- **Tips for success:** Before proposing, when proposing, when implementing, when complete
-
-### 5. **DRAFTING_SYSTEM_GUIDE.md** (500+ lines)
-End-user guide explaining:
-
-- **How to use each component**
-- **Workflow scenarios:** (I have an idea → Review proposals → Start implementing → Track progress)
-- **Features:** Why this system works (capture ideas, document reasoning, flag implications, etc.)
-- **Phase planning:** Using proposals to organize work (Phase 5, Phase 5b, Phase 6)
-- **Quick reference table:** All 10 proposals sorted by priority/effort
-- **Decision matrix:** When to implement a proposal (priority vs. effort)
-- **Git integration:** How proposals connect to commits
-- **Examples:** From current system (PROP-001, PROP-010, PROP-007)
-- **Tips for success:** Best practices
+The whole thing is intentionally lightweight: a no-framework static frontend on GitHub
+Pages talking to a single Supabase Edge Function, which is the only thing that touches
+the database and file storage.
 
 ---
 
-## Key Design Decisions
+## Architecture at a glance
 
-### ✅ **JSON for PROPOSALS.json**
-- Structured, machine-readable format
-- Easy to parse/query if needed (future tooling)
-- Human-readable with proper formatting
-- Git-friendly (good diffs)
+Three tiers:
 
-### ✅ **Visual Cards in SYSTEM_OVERVIEW.html**
-- Beautiful, professional appearance
-- Printable to PDF for stakeholder review
-- Hand-coded (not auto-generated) for full control
-- Color-coding makes status visible at a glance
+1. **Frontend** — static HTML/CSS/vanilla JS, no build step. Hosted on **GitHub Pages**
+   (repo `ziirvass/rushroom-compliance-portal`). Assets are cache-busted with a shared
+   `?v=N` query string bumped on every release (currently `?v=91`).
+   - `index.html` (portal shell + tabs), plus `supplier.html`, `verify.html`,
+     `reset.html`.
+   - `assets/app.js` (UI), `api.js` (edge-function client), `config.js` (function URL +
+     public Google OAuth client id), `gdocs.js` (client-side Google Docs/Sheets),
+     `viewer.js` (in-browser PDF/DOCX/XLSX/CSV/MD viewer), `styles.css`.
 
-### ✅ **Cause + Effect + Implications**
-- **Cause:** Forces clear thinking about the problem
-- **Effect:** Describes what users see (not just technical changes)
-- **Implications:** Makes risks visible upfront
-- Result: Better decision-making, fewer surprises
+2. **Backend** — one **Supabase Edge Function** (`supabase/functions/portal-api`, Deno),
+   deployed `--no-verify-jwt` because it does its own token auth. The browser never
+   touches Postgres or Storage directly — every request is a `POST` with an `action`
+   field. Project ref `iwoqujpwhsoywudjtsnj`.
 
-### ✅ **Status Tracking Through Lifecycle**
-- Draft (idea, not reviewed)
-- Proposed (reviewed, approved for consideration)
-- In Progress (actively being built)
-- Implemented (complete and deployed)
-- Rejected (decided not to do)
+3. **Data** — Supabase **PostgreSQL** (RLS enabled with no policies, so all access is via
+   the function's service role) + three private **Storage** buckets: `documents`,
+   `standards`, `supplier-uploads`.
 
-### ✅ **Link to Git Commits**
-- Each proposal can reference commit hashes that implemented it
-- Traceability from idea to code
-- Useful for code review, release notes, documentation
-
-### ✅ **Learnings Capture**
-- After implementation, document what was learned
-- Time estimate accuracy (did it actually take 3 hours?)
-- Recommendations for similar features
-- Feeds back into estimation for future proposals
+External services: **Anthropic Claude** for all AI (model `claude-opus-4-8`), **Resend**
+for transactional email (optional), the **EU Publications Office CELLAR** SPARQL/REST
+service for directive metadata and relations, and **client-side Google Identity Services
+OAuth** for the optional "edit in Google Docs" round-trip (the user's own Google account —
+no server-side service account).
 
 ---
 
-## Initial Proposals Summary
+## What a user sees — the six tabs
 
-### Current Phase (Phase 5)
-- **PROP-001:** Frontend UI (IMPLEMENTED) - 4 hours
-  - Critical blocker for all other Level 2 features
-  - All backend APIs ready and deployed
+The portal shows up to six top-level tabs, gated by role:
 
-### Phase 5b Candidates (if time permits)
-- **PROP-006:** AI-Suggested Status - 2 hours (easy win)
-- **PROP-005:** Auto DPP Generation - 3 hours
-- **PROP-002:** Real-time Matrix Updates - 3 hours
+| Tab | Who | What it does |
+|-----|-----|--------------|
+| **Compliance Status** | All roles | The live action plan: summary tiles (overall %, pre-sale blockers, blocked actions), progress-by-phase, blockers panel, and collapsible phase sections with inline status editing. For Rushroom it carries two sub-tabs: **Status** and **Compliance Map** (a 2×2 Lifecycle × Scope board). |
+| **Standards & Regulations** | All roles | Versioned register of standards/regulations (type + jurisdiction). Rushroom gets an **Add standard** sub-tab with AI metadata autofill. |
+| **As Operated** | All roles | The document library — a two-pane browser of "Templates & Requirements" and "Company as Operated" docs, with version history, in-app viewer, version-to-version diff, AI drafting, and (Rushroom) supplier-upload review + a "Labels and Instructions" placeholder. |
+| **Deviation Monitoring** | Rushroom only | Sub-tabs: **Monitoring** (the AI deviation scan) and **Directive Graph** (a D3 force graph of EU-directive relationships). |
+| **Clauses & DPP** | Rushroom only | Level-2 structured compliance: **Clauses**, **Interpretations**, **Matrix**, **Passports** (DPP export). |
+| **Accounts** | Admins only | User administration: approve/assign roles, generate verify/reset links, email-delivery status + test send. |
 
-### Phase 6 Planning
-- **PROP-010:** ESPR Compliance Tracing - 8 hours (HIGH priority, regulatory)
-- **PROP-003:** Bulk Interpretation Workflow - 6 hours
-- **PROP-004:** Deviation Trend Analysis - 4 hours
-- **PROP-008:** Interpretation Version Control - 5 hours
-- **PROP-009:** Scheduled Compliance Scans - 4 hours
-
-### Deferred (Low Priority)
-- **PROP-007:** Multi-Language Support - 10 hours (reassess when user demand)
+**Roles → access tier.** `admin`/`internal`/`reviewer` map to the full **"rushroom"**
+tier; `supplier`/`installer` map to a limited **"supplier"** tier. `admin` accounts also
+carry a super-user flag that unlocks the Accounts tab and permanent document deletion. A
+shared-password login is retained as a bootstrap admin fallback.
 
 ---
 
-## How to Use
+## Key capabilities
 
-### To Browse Proposals
-1. Open `SYSTEM_OVERVIEW.html` in browser
-2. Scroll to Section 12: "Proposals & Drafts"
-3. Read the color-coded cards
-4. Check cause/effect/implications boxes
+- **Immutable versioning + provenance.** Documents and standards are never edited in
+  place; every change is a new version row. Each document version records which prior
+  version and which standard versions it was derived from. (Exception: an admin can
+  permanently delete a whole document, cascading to versions, interpretations, passport
+  links and the stored files.)
 
-### To Add a New Proposal
-1. Read `PROPOSAL_TEMPLATE.md` for structure
-2. Create JSON object with all fields
-3. Add to `PROPOSALS.json` array
-4. Optionally add card to `SYSTEM_OVERVIEW.html` (if HIGH/MEDIUM priority)
-5. Commit both files
+- **AI-assisted document drafting.** Claude reads the current document file + selected
+  standard versions + the user's change notes and returns a structured draft (summary,
+  proposed changes, markdown draft, version/filename hints) for human review before
+  publishing.
 
-### To Implement a Proposal
-1. Update status: `draft` → `in_progress` in `PROPOSALS.json`
-2. Add row to `IMPLEMENTATION_LOG.md`
-3. Do the work (normal coding)
-4. Track commit hashes as you go
-5. Update `PROPOSALS.json`: `status: implemented`, add commits, percentage: 100
-6. Update `IMPLEMENTATION_LOG.md` with learnings
-7. Commit everything
+- **AI deviation scan (two-phase).** Phase A turns existing clause interpretations into
+  findings with no LLM call; Phase B sends only the documents that lack interpretations to
+  Claude. Findings are graded Critical→Info, tagged `structured` vs `ai_inference`, and
+  flagged when new since the previous scan. Token usage + cost is shown.
 
----
+- **Level 2 — structured clause interpretations & DPP.** Standards are AI-decomposed into
+  atomic clauses; each clause × document version gets an interpretation with a compliance
+  status (`compliant` / `deviation` / `not_applicable` / `pending`) and an audit trail.
+  These feed a compliance matrix and a Digital Product Passport export in **JSON-LD**
+  (schema.org/Product + ESPR extensions) for the 2027 ESPR furniture deadline.
 
-## Artifacts Created
+- **EU Directive Relationship Analyser (CELLAR).** Pulls directive metadata and
+  relationships from the EU CELLAR service (7-day cached), optionally augmented by
+  on-demand AI inference, and visualises them as an interactive D3 graph coloured by
+  compliance coverage — at company level or per product passport, with a gaps list and an
+  AI-written compliance narrative (EN/SV).
 
-| File | Size | Purpose |
-|------|------|---------|
-| `PROPOSALS.json` | 570 lines | Master registry of all proposals |
-| `SYSTEM_OVERVIEW.html` (Section 12 added) | +400 lines | Visual browser with proposal cards |
-| `IMPLEMENTATION_LOG.md` | 250 lines | Tracking implementation progress |
-| `PROPOSAL_TEMPLATE.md` | 450 lines | Guide for creating new proposals |
-| `DRAFTING_SYSTEM_GUIDE.md` | 500+ lines | End-user guide |
+- **Compliance Status dimension (Lifecycle × Scope 2×2).** Every compliance item
+  (documents, action-plan items, clause interpretations) can be classified by lifecycle
+  phase (`pre_launch` / `monitoring`) × scope (`company` / `product_services`).
+  Classification is captured at creation time in the new-action and new-document forms
+  (all columns nullable → progressive enrichment); the **Compliance Map** sub-tab renders
+  the resulting 2×2 board with per-quadrant counts, % complete and drill-down. An AI
+  classification-suggestion endpoint and an editable classification workbench exist in the
+  codebase but are not wired into the live UI in this revision.
 
-**Total additions:** 2170+ lines of documentation and structure
-
----
-
-## Git Commits Made
-
-```
-0c62290 docs: add comprehensive guide to proposal drafting and tracking system
-de08f60 feat: add comprehensive proposal drafting and tracking system
-        - Add PROPOSALS.json with 10 initial proposals (PROP-001 to PROP-010)
-        - Add Proposals section to SYSTEM_OVERVIEW.html with visual cards and status indicators
-        - Add IMPLEMENTATION_LOG.md to track which proposals are implemented and commit history
-        - Add PROPOSAL_TEMPLATE.md as guide for adding new proposals
-```
+- **Editing niceties.** In-browser document viewer, client-side version diffing (inline &
+  side-by-side, yellow highlights), file-type badges, optional Google Docs/Sheets editing
+  round-trip, light/dark theme, accessible keyboard tab navigation, Print/Save-PDF.
 
 ---
 
-## Features of This System
+## Data model (tables)
 
-### 🎯 Never Lose Ideas
-Every proposal is documented and version-controlled.
+Grouped by domain (see `supabase/schema.sql` for exact columns):
 
-### 📋 Document Reasoning
-Cause/effect/implications force clear thinking before building.
+- **Action plan & documents:** `steps`, `documents`, `document_versions`, `uploads`
+- **Standards:** `standards`, `standard_versions`
+- **Deviation scan:** `deviation_scans`, `deviation_findings`
+- **Accounts:** `users`
+- **Level 2 / DPP:** `standard_clauses`, `as_operates_interpretations`,
+  `product_passports`, `passport_interpretation_links`
+- **CELLAR / directives:** `eu_directives`, `directive_relations`,
+  `product_directive_applicability`, `cellar_cache`
+- **Classification:** enums `lifecycle_phase` & `compliance_scope`; classification columns
+  added additively to `documents`, `as_operates_interpretations` and `steps`; plus an
+  append-only `classification_log`.
 
-### ⚠️ Flag Implications Upfront
-Risks, dependencies, effort, performance concerns all visible.
-
-### 📊 Track Status Over Time
-Every proposal has a lifecycle: draft → proposed → in progress → implemented.
-
-### 🔗 Link to Code
-Commit hashes connect proposals to their implementations.
-
-### 📚 Capture Learnings
-After implementation, document what was learned (accuracy of estimates, what was hard, etc.).
-
-### 👀 Beautiful Visualization
-`SYSTEM_OVERVIEW.html` Section 12 makes it easy to browse and make decisions.
-
-### 🤖 Machine-Readable
-JSON format allows future tooling (dashboards, reports, etc.).
+> Terminology note: the action-plan table is `steps` and the API verbs are still
+> `addStep`/`updateStep`/`deleteStep` (the text field is sent as `actionText`). The
+> **"Action"** wording is a UI rename only — the schema and API remain `step`.
 
 ---
 
-## What This Enables
+## Deployment
 
-### **Better Planning**
-Proposals with effort estimates make phase planning easier. You can see at a glance:
-- What needs 2 hours vs. 8 hours
-- Which features have dependencies
-- What's risky vs. low-risk
+- **Frontend:** commit & push to `main` → GitHub Pages redeploys. Bump the `?v=N`
+  cache-bust on the asset tags in `index.html` (and `supplier.html`) so browsers refetch.
+- **Edge function:** `supabase functions deploy portal-api --no-verify-jwt` (project is
+  linked, so no `--project-ref` needed).
+- **Schema:** paste `supabase/schema.sql` into the Supabase **SQL Editor** and run. It is
+  idempotent (`if not exists` / `on conflict do nothing` / guarded `alter … add column`).
+  There is **no** `migrations/` dir, so `supabase db push` does not apply the schema.
 
-### **Faster Decision-Making**
-When someone says "we should do X," you can:
-1. Check if proposal exists
-2. Review cause/effect/implications
-3. Decide immediately (yes/no/maybe)
-
-### **Historical Record**
-Years from now, if someone asks "why didn't we do multi-language support?", you can point to PROP-007 and see the decision rationale.
-
-### **Learning Loop**
-Track time spent vs. estimated → improve future estimates.
-
-### **Regulatory Compliance**
-For ESPR deadline (2027), you have PROP-010 documented with full impact analysis.
-
----
-
-## Next Steps
-
-1. **Phase 5:** Implement PROP-001 (Frontend UI) using Claude Code
-   - Track progress in `IMPLEMENTATION_LOG.md`
-   - Add commit hashes as you go
-
-2. **Phase 5b:** Consider implementing:
-   - PROP-006 (2 hours) — easy win
-   - PROP-005 (3 hours) — reduces manual work
-   - PROP-002 (3 hours) — nice UX improvement
-
-3. **Review PROP-010** for Phase 6 planning
-   - ESPR compliance tracing (HIGH priority, regulatory)
-   - Start after Phase 5 complete
-
-4. **Ongoing:** Add new proposals as ideas arise
-   - Use PROPOSAL_TEMPLATE.md as guide
-   - Link to git commits when implemented
-
----
-
-## Quick Reference
-
-**To view proposals:** Open `SYSTEM_OVERVIEW.html`, Section 12  
-**To add a proposal:** Edit `PROPOSALS.json`, follow `PROPOSAL_TEMPLATE.md`  
-**To track implementation:** Update `IMPLEMENTATION_LOG.md` as you develop  
-**To understand system:** Read `DRAFTING_SYSTEM_GUIDE.md`  
-
----
-
-## Files in Version Control
-
-```
-✅ PROPOSALS.json — Master registry
-✅ SYSTEM_OVERVIEW.html — Visual browser (Section 12)
-✅ IMPLEMENTATION_LOG.md — Implementation tracking
-✅ PROPOSAL_TEMPLATE.md — Guide for new proposals
-✅ DRAFTING_SYSTEM_GUIDE.md — End-user guide
-```
-
-All files committed to git with clear history.
-
----
-
-**Status:** ✅ System ready for use  
-**Initial Proposals:** 10 (PROP-001 through PROP-010)  
-**Next Phase:** Phase 5 (implement PROP-001 via Claude Code)  
-**Estimated Total Benefit:** Better planning, fewer lost ideas, clearer decision-making
-
----
-
-## System Philosophy
-
-> "Good ideas deserve to be tracked, not lost. Before building anything, understand why we're building it, what will change, and what risks we're taking. After building, learn from what actually happened. Use this knowledge to make better proposals in the future."
-
-This system embodies that philosophy by creating a lightweight but comprehensive framework for proposing, evaluating, implementing, and learning from feature development.
-
----
-
-**Created:** 2026-07-05  
-**Implemented by:** GitHub Copilot  
-**Ready for:** Claude Code (Phase 5 implementation of PROP-001)
+**Required Supabase secrets:** `TOKEN_SECRET`, `RUSHROOM_PW_HASH`, `SUPPLIER_PW_HASH`,
+`ANTHROPIC_API_KEY`. **Optional:** `RESEND_API_KEY` + `MAIL_FROM` (email delivery;
+falls back to copyable links), `APP_BASE_URL` (overrides the GitHub Pages base used in
+email links). `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically.
