@@ -739,6 +739,7 @@
     tag: svg('<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>'),
     graph: svg('<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6.5" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M6.9 7.4l3.6 8.2M17.2 8.2l-4 6.9M7.3 6.2h9.4"/>'),
     grid: svg('<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/>'),
+    gauge: svg('<path d="M3.34 19a10 10 0 1 1 17.32 0"/><path d="m12 14 4-4"/>'),
   };
   // File action chip (View / Open) — subtle pill; label hides on narrow screens.
   function fileActionBtn(label, iconKey, opts = {}) {
@@ -3232,7 +3233,7 @@
       // overview; other roles get the status overview on its own.
       if (role === "rushroom") {
         mount.replaceChildren(subTabs("compliance", [
-          { id: "status", label: "Status", icon: "layers", build: () => frag },
+          { id: "status", label: "Status", icon: "gauge", build: () => frag },
           { id: "map", label: "Compliance Map", icon: "grid", build: () => {
             const m = el("div", {}, el("div", { class: "loading" }, "Loading compliance map…"));
             renderComplianceMap(role, m);
