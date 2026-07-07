@@ -1589,6 +1589,53 @@
                 </div>
             </div>
 
+            <div class="proposal-card proposed doc-section-new">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-011</div>
+                        <div class="proposal-title">Requirement Threads — Cross-Document Clause &amp; Text Linking <span class="doc-new-badge">New proposal</span></div>
+                    </div>
+                    <span class="proposal-status status-proposed">PROPOSED</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-high">HIGH</span></span>
+                    <span>Effort: ~28–40 hours (phased)</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-07</span>
+                </div>
+                <p style="margin:6px 0 4px; color:#555;">Connect clauses, paragraphs and statements across <strong>Standards &amp; Regulations</strong> and <strong>As Operated</strong> documents so a user can open any text unit and immediately see where the same or related requirement appears, with clear confidence and evidence. Full UX/product spec: <em>"Requirement Threads"</em> proposal document (separate artifact).</p>
+                <div class="cause-box">
+                    <strong>Cause:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>Compliance evidence is scattered: a standard clause and the As-Operated text that satisfies it live in different documents with no explicit, navigable connection.</li>
+                        <li>Auditors ask "show me everything behind this claim" — today that means manual cross-referencing of prose.</li>
+                        <li>The pieces exist in isolation (<code>standard_clauses</code>, clause↔document <code>as_operates_interpretations</code>, <code>directive_relations</code>) but there is no unified, bidirectional text-to-text linking model.</li>
+                    </ul>
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>A reusable <strong>Requirement Link Inspector</strong> surfaced from any clause, paragraph or Matrix cell — showing both endpoints, highlighted evidence snippets, a confidence score and a source badge (manual / cited / imported / AI-assisted / derived).</li>
+                        <li><strong>Bidirectional traceability:</strong> from a standard clause → every As-Operated statement implementing it; from a statement → its originating clauses and related obligations.</li>
+                        <li><strong>Exact links</strong> (same clause / explicit citation, deterministic) and <strong>semantic links</strong> (similar intent, incl. cross-standard) proposed by <code>claude-opus-4-8</code>, on demand.</li>
+                        <li><strong>Linked-in chips</strong> in Standards &amp; Regulations, <strong>paragraph anchors</strong> in the As-Operated viewer, and link-awareness in the existing Clauses &amp; DPP Matrix — extends current tabs, does not add a destination.</li>
+                        <li>A low-friction <strong>Link Review Queue</strong> (accept / reject-with-reason / edit-anchor) and role-aware behaviour: internal roles see confidence &amp; source; suppliers see accepted links only, in plain language.</li>
+                        <li>A walkable, exportable <strong>evidence chain</strong>: standard clause → link → As-Operated statement → interpretation verdict → passport.</li>
+                    </ul>
+                </div>
+                <div class="implications-box">
+                    <strong>Implications &amp; phasing:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li><strong>Conceptual data model (no code/SQL in this proposal):</strong> a <em>Text Unit</em> (standard clause exists; As-Operated <em>statement</em> is new), a <em>Requirement Link</em> generalising <code>directive_relations</code> (from/to unit, link_type, confidence, source, status, evidence_from/to, rationale, reviewed_by), and an append-only <em>Link Event log</em> like <code>classification_log</code>.</li>
+                        <li><strong>Change-awareness:</strong> links are version-anchored — on a new document/standard version they are carried (unchanged), flagged (text changed / clause removed / split), or re-pointed; never silently dropped. Reuses the <code>previous_interpretation_text</code> diff and <code>is_new</code> flag patterns.</li>
+                        <li><strong>Phase 1 (quick wins, ~1–2 wks):</strong> render existing clause↔document interpretations as bidirectional linked-in chips, parse explicit citations with the existing Akoma-Ntoso ref parser, Inspector (read) + manual link CRUD, "Unlinked clauses" coverage filter — <em>uses only data that exists today</em>.</li>
+                        <li><strong>Phase 2 (scalable):</strong> decompose As-Operated docs into statements + paragraph anchors, the general Requirement Link entity + event log, Review Queue, versioning/re-anchoring rules, role gating.</li>
+                        <li><strong>Phase 3 (advanced):</strong> AI/embedding semantic + cross-standard links, change-impact analysis, auto-propagation with confidence decay, coverage/conflict analytics.</li>
+                        <li>Risk: Medium — AI false positives and version churn are the main hazards; mitigated by never auto-accepting semantic links, confidence thresholds, on-demand/cached inference, and keeping the compliance <em>verdict</em> in interpretations (a link is a pointer, not a legal conclusion).</li>
+                    </ul>
+                </div>
+            </div>
+
             <div class="proposal-card draft">
                 <div class="proposal-header">
                     <div style="display: flex; align-items: center;">
