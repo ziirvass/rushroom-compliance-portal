@@ -1711,7 +1711,7 @@
     const lifePhase = phaseSelect(v.lifecycle_phase);
     const cScope = scopeSelect(v.scope);
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
-    const save = el("button", { class: "btn btn-primary", type: "button" }, existing ? "Save changes" : "Add step");
+    const save = el("button", { class: "btn btn-primary", type: "button" }, existing ? "Save changes" : "Add action");
     const form = el("div", { class: "step-form" }, [
       prioList,
       row("Phase", phaseField), row("Action", action), row("Owner", owner),
@@ -1720,7 +1720,7 @@
       el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Audience"), el("div", { class: "aud-checks" }, auds.map((c) => c.label))]),
       note, el("div", { style: "margin-top:0.5rem" }, save),
     ]);
-    const close = openModal(existing ? `Edit step #${existing.step}` : "Add a step", form);
+    const close = openModal(existing ? `Edit action #${existing.step}` : "Add an action", form);
     phaseSel.focus();
     save.addEventListener("click", async () => {
       const actionText = action.value.trim();
@@ -3187,7 +3187,7 @@
         await load();
       });
       const onDeleteStep = async (s) => {
-        if (!confirm(`Delete step #${s.step}: “${(s.action || "").slice(0, 60)}”?`)) return;
+        if (!confirm(`Delete action #${s.step}: “${(s.action || "").slice(0, 60)}”?`)) return;
         try { await API.deleteStep(API.getToken(role), s.step); await load(); }
         catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
       };
@@ -3196,7 +3196,7 @@
         actionBtn("Expand all", "expand", { onClick: () => setAllPhases(true) }),
         actionBtn("Collapse all", "collapse", { onClick: () => setAllPhases(false) }),
         actionBtn("Refresh", "refresh", { onClick: load }),
-        role === "rushroom" ? actionBtn("Add step", "plus", { primary: true, onClick: () => saveStep(null) }) : null,
+        role === "rushroom" ? actionBtn("Add action", "plus", { primary: true, onClick: () => saveStep(null) }) : null,
         actionBtn("Print / Save PDF", "printer", { onClick: () => window.print() }),
         el("span", { class: "spacer" }),
         el("span", { class: "updated" }, `Live · ${(API.session() && (API.session().name || API.session().urole)) || role} · ${new Date().toLocaleTimeString("en-GB")}`),
