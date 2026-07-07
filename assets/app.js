@@ -332,17 +332,32 @@
     return el("span", { class: `badge-status ${step.cls}` }, step.status);
   }
 
+  // One progress tracker inside a multi-tracker card. Pass pct=null for a
+  // not-yet-wired tracker (renders "—", an empty bar and muted styling).
+  function complianceTracker(label, pct, sub) {
+    const known = typeof pct === "number";
+    return el("div", { class: "tracker" + (known ? "" : " pending") }, [
+      el("div", { class: "tracker-head" }, [
+        el("span", { class: "tracker-label" }, label),
+        el("span", { class: "tracker-pct" }, known ? `${pct}%` : "—"),
+      ]),
+      el("div", { class: "progress", "aria-hidden": "true" }, el("span", { style: `width:${known ? pct : 0}%` })),
+      el("div", { class: "sub" }, sub),
+    ]);
+  }
+
   function summaryTiles(steps) {
     const total = steps.length;
     const done = steps.filter((s) => s.done).length;
     const pct = total ? Math.round((done / total) * 100) : 0;
     const presaleOpen = steps.filter((s) => s.presale && !s.done).length;
     return el("div", { class: "summary" }, [
+      // Multi-tracker card. "Launch Compliance" is the existing action-plan
+      // progress; "Company Compliance" is a placeholder — logic added later.
       el("div", { class: "card stat" }, [
-        el("h3", {}, "Overall compliance status"),
-        el("div", { class: "value" }, `${pct}%`),
-        el("div", { class: "progress", "aria-hidden": "true" }, el("span", { style: `width:${pct}%` })),
-        el("div", { class: "sub" }, `${done} of ${total} actions complete`),
+        el("h3", {}, "Compliance status"),
+        complianceTracker("Launch Compliance", pct, `${done} of ${total} actions complete`),
+        complianceTracker("Company Compliance", null, "coming soon"),
       ]),
       el("div", { class: "card stat" }, [
         el("h3", {}, "Pre-sale blockers"),
