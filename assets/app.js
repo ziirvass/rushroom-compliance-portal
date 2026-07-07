@@ -1673,9 +1673,24 @@
   function stepEditor(existing, phases, onSave) {
     const v = existing || {};
     const row = (labelText, input) => el("label", { class: "form-row" }, [el("span", { class: "form-label" }, labelText), input]);
-    const phaseList = el("datalist", { id: "phase-list" }, (phases || []).map((p) => el("option", { value: p })));
     const prioList = el("datalist", { id: "prio-list" }, ["Foundation", "High", "High — gate", "BLOCKER", "Medium", "Conditional", "Ongoing", "Annual"].map((p) => el("option", { value: p })));
-    const phase = el("input", { type: "text", value: v.phase || "", list: "phase-list", placeholder: "e.g. 11. New regulations" });
+    // Phase: a dropdown of all existing phases (so they're reused, not duplicated),
+    // plus an "Add new phase…" option that reveals a text field.
+    const NEW_PHASE = "__new_phase__";
+    const existingPhases = [...new Set((phases || []).filter(Boolean))];
+    const curPhase = v.phase || "";
+    const phaseInList = existingPhases.includes(curPhase);
+    const phaseSel = el("select", { class: "up-text", "aria-label": "Phase" }, [
+      el("option", { value: "", selected: !curPhase ? "selected" : null }, "— select phase —"),
+      ...existingPhases.map((pp) => el("option", { value: pp, selected: phaseInList && pp === curPhase ? "selected" : null }, pp)),
+      el("option", { value: NEW_PHASE, selected: curPhase && !phaseInList ? "selected" : null }, "＋ Add new phase…"),
+    ]);
+    const phaseNew = el("input", { type: "text", class: "up-text", placeholder: "New phase name, e.g. 11. New regulations", value: curPhase && !phaseInList ? curPhase : "" });
+    const phaseNewWrap = el("div", { style: "margin-top:0.4rem" }, phaseNew);
+    phaseNewWrap.hidden = phaseSel.value !== NEW_PHASE;
+    phaseSel.addEventListener("change", () => { const isNew = phaseSel.value === NEW_PHASE; phaseNewWrap.hidden = !isNew; if (isNew) phaseNew.focus(); });
+    const phaseValue = () => (phaseSel.value === NEW_PHASE ? phaseNew.value.trim() : phaseSel.value);
+    const phaseField = el("div", {}, [phaseSel, phaseNewWrap]);
     const action = el("textarea", { rows: "3", placeholder: "What must Rushroom do…" }, v.action || "");
     const owner = el("input", { type: "text", value: v.owner || "", placeholder: "Who does it" });
     const priority = el("input", { type: "text", value: v.priority || "", list: "prio-list", placeholder: "e.g. High, BLOCKER" });
@@ -1692,20 +1707,20 @@
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
     const save = el("button", { class: "btn btn-primary", type: "button" }, existing ? "Save changes" : "Add step");
     const form = el("div", { class: "step-form" }, [
-      phaseList, prioList,
-      row("Phase", phase), row("Action", action), row("Owner", owner),
+      prioList,
+      row("Phase", phaseField), row("Action", action), row("Owner", owner),
       row("Priority", priority), row("Status", status), row("Evidence", evidence), row("Where / how", where),
       el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Compliance quadrant"), el("div", { class: "cs-quad-picker" }, [lifePhase, cScope])]),
       el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Audience"), el("div", { class: "aud-checks" }, auds.map((c) => c.label))]),
       note, el("div", { style: "margin-top:0.5rem" }, save),
     ]);
     const close = openModal(existing ? `Edit step #${existing.step}` : "Add a step", form);
-    phase.focus();
+    phaseSel.focus();
     save.addEventListener("click", async () => {
       const actionText = action.value.trim();
       if (!actionText) { note.className = "up-status warn"; note.textContent = "Action text is required."; return; }
       const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
-      const fields = { phase: phase.value.trim(), actionText, owner: owner.value.trim(), priority: priority.value.trim(), status: status.value, evidence: evidence.value.trim(), where: where.value.trim(), audience: audience.length ? audience : ["internal"], lifecyclePhase: lifePhase.value || null, scope: cScope.value || null };
+      const fields = { phase: phaseValue(), actionText, owner: owner.value.trim(), priority: priority.value.trim(), status: status.value, evidence: evidence.value.trim(), where: where.value.trim(), audience: audience.length ? audience : ["internal"], lifecyclePhase: lifePhase.value || null, scope: cScope.value || null };
       save.disabled = true; note.className = "up-status"; note.textContent = "Saving…";
       try { await onSave(fields); close(); }
       catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
