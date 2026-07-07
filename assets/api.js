@@ -240,6 +240,8 @@
     // ---- Requirement links: cross-document clause & text linking ----
     listRequirementLinks: (token, { entityType, entityId }) =>
       call({ action: "listRequirementLinks", token, entityType, entityId }),
+    listRequirementLinksForClauses: (token, clauseIds) =>
+      call({ action: "listRequirementLinksForClauses", token, clauseIds }),
     createRequirementLink: (token, fields) =>
       call({ action: "createRequirementLink", token, ...fields }),
     setRequirementLinkStatus: (token, id, status, reviewedBy) =>

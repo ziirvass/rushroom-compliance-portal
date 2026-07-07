@@ -782,6 +782,12 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .rl-add { margin-top: 0.5rem; }
 .rl-add > summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--accent); }
 .rl-add[open] > summary { margin-bottom: 0.5rem; }
+/* Inline link chips in the Clauses table */
+.rl-count { background: rgba(75,131,229,0.12); color: #4b83e5; border: 1px solid rgba(75,131,229,0.4); border-radius: 999px; font-size: 0.75rem; font-weight: 700; padding: 0.1rem 0.5rem; cursor: pointer; white-space: nowrap; }
+.rl-count[aria-expanded="true"] { background: rgba(75,131,229,0.24); }
+.rl-detail > td { background: var(--panel-2); padding: 0.4rem 0.6rem; }
+.rl-inline { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; align-items: center; }
+.rl-inline-item { display: inline-flex; align-items: center; gap: 0.35rem; }
 
 /* deviation finding source badge (structured vs AI) */
 .finding-title { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }

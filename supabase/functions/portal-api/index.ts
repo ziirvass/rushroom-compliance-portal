@@ -2138,6 +2138,22 @@ Be specific: name the exact document and the exact standard (and clause where po
       if (error) return json({ error: error.message }, 500);
       return json({ ok: true });
     }
+
+    // Batch: every link touching any of the given clauses (for inline chips).
+    if (action === "listRequirementLinksForClauses") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const clauseIds = (Array.isArray(body.clauseIds) ? body.clauseIds : []).map((v: unknown) => String(v ?? "")).filter(isUuid);
+      if (!clauseIds.length) return json({ links: [] });
+      const [a, b] = await Promise.all([
+        db.from("requirement_links").select("*").eq("from_type", "clause").in("from_id", clauseIds),
+        db.from("requirement_links").select("*").eq("to_type", "clause").in("to_id", clauseIds),
+      ]);
+      if (a.error) return json({ error: a.error.message }, 500);
+      if (b.error) return json({ error: b.error.message }, 500);
+      const seen = new Set<string>(), merged: any[] = [];
+      for (const l of [...(a.data ?? []), ...(b.data ?? [])]) { if (!seen.has(l.id)) { seen.add(l.id); merged.push(l); } }
+      return json({ links: await labelEndpoints(merged) });
+    }
   }
 
   if (action === "exportProductPassport") {

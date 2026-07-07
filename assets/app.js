@@ -2337,14 +2337,45 @@
       try {
         const { clauses } = await API.getClausesForStandard(ctx.token, sel.value);
         if (!clauses.length) { out.replaceChildren(el("div", { class: "empty" }, "No clauses yet. Use “Extract clauses (AI)” to read this standard.")); return; }
-        out.replaceChildren(el("table", { class: "l2-table" }, [
-          el("thead", {}, el("tr", {}, [el("th", {}, "Ref"), el("th", {}, "Title"), el("th", {}, "Type"), el("th", {}, "Requirement")])),
-          el("tbody", {}, clauses.map((c) => el("tr", {}, [
+        // Batch-fetch requirement links touching these clauses → per-clause counterparts.
+        const byClause = new Map();
+        try {
+          const r = await API.listRequirementLinksForClauses(ctx.token, clauses.map((c) => c.id));
+          const ours = new Set(clauses.map((c) => c.id));
+          for (const l of (r.links || [])) {
+            for (const side of ["from", "to"]) {
+              const ep = l[side];
+              if (ep && ep.type === "clause" && ours.has(ep.id)) {
+                if (!byClause.has(ep.id)) byClause.set(ep.id, []);
+                byClause.get(ep.id).push({ link: l, other: side === "from" ? l.to : l.from });
+              }
+            }
+          }
+        } catch { /* links are optional — the clause table still renders */ }
+
+        const tbody = el("tbody");
+        clauses.forEach((c) => {
+          const entries = byClause.get(c.id) || [];
+          const detail = el("tr", { class: "rl-detail", hidden: "hidden" }, el("td", { colspan: "5" }, rlInlineStrip(entries)));
+          const toggle = entries.length
+            ? el("button", { type: "button", class: "rl-count", "aria-expanded": "false" }, `🔗 ${entries.length}`)
+            : el("span", { class: "muted", style: "font-size:0.8rem" }, "—");
+          if (entries.length) toggle.addEventListener("click", () => {
+            const open = detail.hasAttribute("hidden");
+            if (open) detail.removeAttribute("hidden"); else detail.setAttribute("hidden", "hidden");
+            toggle.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          tbody.append(el("tr", {}, [
             el("td", {}, el("strong", {}, c.clause_ref)),
             el("td", {}, c.clause_title || "—"),
             el("td", {}, el("span", { class: "pill-priority" }, c.requirement_type || "—")),
             el("td", { class: "l2-clausetext" }, c.clause_text || ""),
-          ]))),
+            el("td", {}, toggle),
+          ]), detail);
+        });
+        out.replaceChildren(el("table", { class: "l2-table" }, [
+          el("thead", {}, el("tr", {}, [el("th", {}, "Ref"), el("th", {}, "Title"), el("th", {}, "Type"), el("th", {}, "Requirement"), el("th", {}, "Links")])),
+          tbody,
         ]));
       } catch (ex) { out.replaceChildren(el("div", { class: "error" }, ex.message)); }
     };
@@ -2376,6 +2407,23 @@
   const RL_STATUS = { proposed: "Proposed", accepted: "Accepted", rejected: "Rejected", flagged: "Flagged", archived: "Archived" };
   const rlStatusChip = (s) => el("span", { class: "rl-status rl-s-" + (s || "proposed") }, RL_STATUS[s] || s || "—");
   const RL_SOURCE = { manual: "Manual", cited: "Cited", imported: "Imported", ai_assisted: "AI-assisted", derived: "Derived" };
+
+  // Read-only inline strip of a clause's links (used in the Clauses tab).
+  function rlInlineStrip(entries) {
+    if (!entries.length) return el("span", { class: "muted" }, "No links.");
+    return el("div", { class: "rl-inline" }, [
+      ...entries.map(({ link, other }) => el("span", { class: "rl-inline-item" }, [
+        rlTypeChip(link.link_type),
+        el("span", { class: "rl-arrow", "aria-hidden": "true" }, "→"),
+        el("span", { class: "rl-target" }, [
+          el("strong", {}, (other && other.label) || "(removed)"),
+          el("span", { class: "rl-kind" }, other && other.type === "document_version" ? "doc" : "clause"),
+        ]),
+        rlStatusChip(link.status),
+      ])),
+      el("span", { class: "muted", style: "font-size:0.78rem" }, "Manage in the Links tab."),
+    ]);
+  }
 
   // 4) Links — connect a standard clause to related clauses or As-Operated docs.
   function l2LinksView(ctx) {
