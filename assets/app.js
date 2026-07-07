@@ -2363,6 +2363,186 @@
     return wrap;
   }
 
+  /* ---------------- Requirement links (cross-document clause linking) ------- */
+  const RL_TYPES = [
+    ["same_clause", "Same clause"], ["citation", "Citation / reference"],
+    ["implements", "Implements / satisfies"], ["similar_intent", "Similar intent"],
+    ["defines_terms_for", "Defines terms for"], ["supersedes", "Supersedes / amends"],
+    ["conflicts_with", "Conflicts with"],
+  ];
+  const RL_TYPE_LABEL = (t) => (RL_TYPES.find((x) => x[0] === t) || [, t])[1];
+  const RL_EXACT = new Set(["same_clause", "citation", "implements"]);
+  const rlTypeChip = (t) => el("span", { class: "rl-type " + (RL_EXACT.has(t) ? "rl-exact" : "rl-semantic") }, RL_TYPE_LABEL(t));
+  const RL_STATUS = { proposed: "Proposed", accepted: "Accepted", rejected: "Rejected", flagged: "Flagged", archived: "Archived" };
+  const rlStatusChip = (s) => el("span", { class: "rl-status rl-s-" + (s || "proposed") }, RL_STATUS[s] || s || "—");
+  const RL_SOURCE = { manual: "Manual", cited: "Cited", imported: "Imported", ai_assisted: "AI-assisted", derived: "Derived" };
+
+  // 4) Links — connect a standard clause to related clauses or As-Operated docs.
+  function l2LinksView(ctx) {
+    const wrap = el("div");
+    const stdVers = flattenStdVersions(ctx.standards);
+    const docVers = flattenDocVersions(ctx.documents);
+    if (!stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "No standard versions yet — upload a standard and extract its clauses first.")); return wrap; }
+
+    const stdSel = el("select", { class: "up-text" }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
+    const clauseSel = el("select", { class: "up-text" }, [el("option", { value: "" }, "— select a clause —")]);
+    const status = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+    const panel = el("div", { style: "margin-top:0.8rem" });
+    let clauses = [];
+
+    const loadClauses = async () => {
+      clauseSel.replaceChildren(el("option", { value: "" }, "Loading…"));
+      panel.replaceChildren();
+      try {
+        const r = await API.getClausesForStandard(ctx.token, stdSel.value);
+        clauses = r.clauses || [];
+        clauseSel.replaceChildren(
+          el("option", { value: "" }, clauses.length ? "— select a clause —" : "No clauses yet (extract them under “Clauses”)"),
+          ...clauses.map((c) => el("option", { value: c.id }, `${c.clause_ref}${c.clause_title ? " — " + c.clause_title : ""}`)),
+        );
+      } catch (ex) { clauseSel.replaceChildren(el("option", { value: "" }, "Error")); status.className = "up-status err"; status.textContent = ex.message; }
+    };
+    const loadLinks = async () => {
+      const clause = clauses.find((c) => c.id === clauseSel.value);
+      if (!clause) { panel.replaceChildren(); return; }
+      panel.replaceChildren(el("div", { class: "loading" }, "Loading links…"));
+      try {
+        const r = await API.listRequirementLinks(ctx.token, { entityType: "clause", entityId: clause.id });
+        panel.replaceChildren(rlPanel(ctx, clause, r.links || [], loadLinks, docVers, stdVers));
+      } catch (ex) { panel.replaceChildren(el("div", { class: "error" }, ex.message)); }
+    };
+
+    stdSel.addEventListener("change", loadClauses);
+    clauseSel.addEventListener("change", loadLinks);
+    wrap.append(
+      el("p", { class: "muted", style: "margin:0 0 0.6rem" }, "Link a standard clause to related clauses in other standards or to As-Operated documents. Links are bidirectional — open either side and you’ll see the connection, with its type, source and review status."),
+      el("div", { class: "rl-controls" }, [
+        el("span", { class: "form-label" }, "Standard"), stdSel,
+        el("span", { class: "form-label" }, "Clause"), clauseSel,
+      ]),
+      status, panel,
+    );
+    loadClauses();
+    return wrap;
+  }
+
+  // The per-clause link panel: the clause, its existing links, and an add form.
+  function rlPanel(ctx, clause, links, reload, docVers, stdVers) {
+    const box = el("div");
+    box.append(el("div", { class: "rl-clause-head" }, [
+      el("div", {}, [el("strong", {}, clause.clause_ref), clause.clause_title ? el("span", { class: "muted" }, ` — ${clause.clause_title}`) : null]),
+      el("span", { class: "muted", style: "font-size:0.8rem" }, `${links.length} link${links.length === 1 ? "" : "s"}`),
+    ]));
+    if (clause.clause_text) box.append(el("details", { class: "l2-clause-req" }, [el("summary", {}, "Requirement text"), el("p", { class: "muted" }, clause.clause_text)]));
+
+    // Existing links
+    if (!links.length) {
+      box.append(el("div", { class: "rl-empty muted" }, "No links yet. Add one below."));
+    } else {
+      box.append(el("div", { class: "rl-list" }, links.map((l) => rlRow(ctx, clause, l, reload))));
+    }
+    box.append(rlAddForm(ctx, clause, reload, docVers, stdVers));
+    return box;
+  }
+
+  // One existing-link row, showing the counterpart endpoint + controls.
+  function rlRow(ctx, clause, link, reload) {
+    // The endpoint that is NOT the current clause is the counterpart.
+    const isFrom = link.from && link.from.type === "clause" && link.from.id === clause.id;
+    const other = isFrom ? link.to : link.from;
+    const note = el("span", { class: "up-status" }, "");
+    const setStatus = async (s) => {
+      note.className = "up-status"; note.textContent = "…";
+      try { await API.setRequirementLinkStatus(ctx.token, link.id, s, (API.session() && API.session().name) || "rushroom"); await reload(); }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    };
+    const del = async () => {
+      if (!confirm("Delete this link? This cannot be undone.")) return;
+      try { await API.deleteRequirementLink(ctx.token, link.id); await reload(); }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    };
+    const controls = [];
+    if (link.status === "proposed" || link.status === "flagged") {
+      controls.push(actionBtn("Accept", "edit", { primary: true, onClick: () => setStatus("accepted") }));
+      controls.push(actionBtn("Reject", "trash", { onClick: () => setStatus("rejected") }));
+    }
+    controls.push(actionBtn("Delete", "trash", { danger: true, onClick: del }));
+
+    const conf = (typeof link.confidence === "number" && link.confidence < 1)
+      ? el("span", { class: "rl-conf" }, `${Math.round(link.confidence * 100)}%`) : null;
+    return el("div", { class: "rl-row" }, [
+      el("div", { class: "rl-row-main" }, [
+        rlTypeChip(link.link_type),
+        el("span", { class: "rl-arrow", "aria-hidden": "true" }, "→"),
+        el("span", { class: "rl-target" }, [
+          el("strong", {}, other && other.label || "(removed)"),
+          other && other.type === "document_version" ? el("span", { class: "rl-kind" }, "doc") : el("span", { class: "rl-kind" }, "clause"),
+        ]),
+        rlStatusChip(link.status),
+        el("span", { class: "rl-src" }, RL_SOURCE[link.source] || link.source || "manual"),
+        conf,
+      ]),
+      link.rationale ? el("div", { class: "rl-rationale muted" }, link.rationale) : null,
+      el("div", { class: "rl-row-actions" }, [...controls, note]),
+    ]);
+  }
+
+  // Add-link form: pick a target (another clause, or an As-Operated document) + type.
+  function rlAddForm(ctx, clause, reload, docVers, stdVers) {
+    const typeSel = el("select", { class: "up-text" }, RL_TYPES.map(([v, l]) => el("option", { value: v }, l)));
+    const kindSel = el("select", { class: "up-text" }, [el("option", { value: "clause" }, "A clause"), el("option", { value: "document_version" }, "An As-Operated document")]);
+
+    // Clause target: standard-version select + clause select (loads on change).
+    const tStdSel = el("select", { class: "up-text" }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
+    const tClauseSel = el("select", { class: "up-text" }, [el("option", { value: "" }, "— select a clause —")]);
+    const loadTargetClauses = async () => {
+      tClauseSel.replaceChildren(el("option", { value: "" }, "Loading…"));
+      try {
+        const r = await API.getClausesForStandard(ctx.token, tStdSel.value);
+        const list = (r.clauses || []).filter((c) => c.id !== clause.id);
+        tClauseSel.replaceChildren(el("option", { value: "" }, list.length ? "— select a clause —" : "No other clauses"), ...list.map((c) => el("option", { value: c.id }, `${c.clause_ref}${c.clause_title ? " — " + c.clause_title : ""}`)));
+      } catch { tClauseSel.replaceChildren(el("option", { value: "" }, "Error")); }
+    };
+    tStdSel.addEventListener("change", loadTargetClauses);
+    const clausePicker = el("div", { class: "rl-controls" }, [el("span", { class: "form-label" }, "In"), tStdSel, tClauseSel]);
+
+    // Document target: a document-version select.
+    const docSel = el("select", { class: "up-text" }, [el("option", { value: "" }, "— select a document —"), ...docVers.map((o) => el("option", { value: o.id }, o.label))]);
+    const docPicker = el("div", { class: "rl-controls", style: "display:none" }, [el("span", { class: "form-label" }, "Document"), docSel]);
+
+    kindSel.addEventListener("change", () => {
+      const clauseMode = kindSel.value === "clause";
+      clausePicker.style.display = clauseMode ? "" : "none";
+      docPicker.style.display = clauseMode ? "none" : "";
+      if (clauseMode && !tClauseSel.value) loadTargetClauses();
+    });
+
+    const rationale = taField({ rows: "1", class: "up-text", placeholder: "Why are these linked? (optional)" }, "");
+    const note = el("span", { class: "up-status" }, "");
+    const add = actionBtn("Add link", "plus", { primary: true, onClick: async () => {
+      const toType = kindSel.value;
+      const toId = toType === "clause" ? tClauseSel.value : docSel.value;
+      if (!toId) { note.className = "up-status warn"; note.textContent = "Pick a target first."; return; }
+      note.className = "up-status"; note.textContent = "Adding…";
+      try {
+        await API.createRequirementLink(ctx.token, {
+          fromType: "clause", fromId: clause.id, toType, toId, linkType: typeSel.value,
+          rationale: rationale.value, createdBy: (API.session() && API.session().name) || "rushroom",
+        });
+        note.className = "up-status ok"; note.textContent = "Linked."; await reload();
+      } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    } });
+
+    loadTargetClauses();
+    return el("details", { class: "rl-add card" }, [
+      el("summary", {}, "＋ Add a link"),
+      el("div", { class: "rl-controls" }, [el("span", { class: "form-label" }, "Relationship"), typeSel, el("span", { class: "form-label" }, "Link to"), kindSel]),
+      clausePicker, docPicker,
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Rationale"), rationale]),
+      el("div", { style: "display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap" }, [add, note]),
+    ]);
+  }
+
   // Editable interpretation card for one clause against one document version.
   function l2InterpCard(ctx, clause, interp, docVersionId, reload) {
     const text = taField({ rows: "2", class: "up-text", placeholder: "How the document implements this clause…" }, interp && interp.interpretation_text);
@@ -2615,6 +2795,7 @@
       { id: "clauses", label: "Clauses", icon: "layers", build: () => l2ClausesView(ctx) },
       { id: "interp", label: "Interpretations", icon: "edit", build: () => l2InterpretationsView(ctx) },
       { id: "matrix", label: "Matrix", icon: "expand", build: () => l2MatrixView(ctx) },
+      { id: "links", label: "Links", icon: "graph", build: () => l2LinksView(ctx) },
       { id: "passports", label: "Passports", icon: "sparkles", build: () => l2PassportsView(ctx) },
     ]));
   }

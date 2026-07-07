@@ -2031,6 +2031,115 @@ Be specific: name the exact document and the exact standard (and clause where po
     return json({ docs: docs ?? [], clauses: clauses ?? [], matrix });
   }
 
+  // --- Requirement links: cross-document clause/text linking (Rushroom only) ---
+  // Endpoints are (type, id) pairs: 'clause' -> standard_clauses, or
+  // 'document_version' -> document_versions. Links are bidirectional in the UI.
+  {
+    const RL_ENDPOINT_TYPES = ["clause", "document_version"];
+    const RL_LINK_TYPES = ["same_clause", "citation", "implements", "similar_intent", "defines_terms_for", "supersedes", "conflicts_with"];
+    const RL_STATUSES = ["proposed", "accepted", "rejected", "flagged", "archived"];
+    const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+    // Resolve a plain-language label for each (type,id) endpoint referenced by a set of links.
+    const labelEndpoints = async (links: any[]) => {
+      const clauseIds = new Set<string>(), docVerIds = new Set<string>();
+      for (const l of links) {
+        if (l.from_type === "clause") clauseIds.add(l.from_id); else if (l.from_type === "document_version") docVerIds.add(l.from_id);
+        if (l.to_type === "clause") clauseIds.add(l.to_id); else if (l.to_type === "document_version") docVerIds.add(l.to_id);
+      }
+      const clauseMap = new Map<string, any>(), docMap = new Map<string, any>();
+      if (clauseIds.size) {
+        const { data } = await db.from("standard_clauses")
+          .select("id,clause_ref,clause_title,standard_version:standard_version_id(version,standard:standard_id(code,title))")
+          .in("id", [...clauseIds]);
+        for (const c of data ?? []) {
+          const std = (c as any).standard_version?.standard;
+          const code = std?.code || std?.title || "Standard";
+          clauseMap.set(c.id, { type: "clause", id: c.id, ref: c.clause_ref, label: `${code} ${c.clause_ref}`, title: c.clause_title || "" });
+        }
+      }
+      if (docVerIds.size) {
+        const { data } = await db.from("document_versions")
+          .select("id,version,document:document_id(name)").in("id", [...docVerIds]);
+        for (const v of data ?? []) {
+          const name = (v as any).document?.name || "Document";
+          docMap.set(v.id, { type: "document_version", id: v.id, ref: v.version || "", label: `${name}${v.version ? " " + v.version : ""}`, title: "" });
+        }
+      }
+      const resolve = (t: string, id: string) => (t === "clause" ? clauseMap.get(id) : docMap.get(id)) || { type: t, id, ref: "", label: "(removed)", title: "" };
+      return links.map((l) => ({ ...l, from: resolve(l.from_type, l.from_id), to: resolve(l.to_type, l.to_id) }));
+    };
+
+    if (action === "listRequirementLinks") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const entityType = String(body.entityType ?? "").trim();
+      const entityId = String(body.entityId ?? "").trim();
+      if (!RL_ENDPOINT_TYPES.includes(entityType) || !isUuid(entityId)) return json({ error: "Valid entityType and entityId required" }, 400);
+      // Links where the entity is on either side (bidirectional). Two queries, merged.
+      const [a, b] = await Promise.all([
+        db.from("requirement_links").select("*").eq("from_type", entityType).eq("from_id", entityId),
+        db.from("requirement_links").select("*").eq("to_type", entityType).eq("to_id", entityId),
+      ]);
+      if (a.error) return json({ error: a.error.message }, 500);
+      if (b.error) return json({ error: b.error.message }, 500);
+      const seen = new Set<string>(), merged: any[] = [];
+      for (const l of [...(a.data ?? []), ...(b.data ?? [])]) { if (!seen.has(l.id)) { seen.add(l.id); merged.push(l); } }
+      merged.sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)));
+      return json({ links: await labelEndpoints(merged) });
+    }
+
+    if (action === "createRequirementLink") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const fromType = String(body.fromType ?? "").trim(), toType = String(body.toType ?? "").trim();
+      const fromId = String(body.fromId ?? "").trim(), toId = String(body.toId ?? "").trim();
+      const linkType = String(body.linkType ?? "same_clause").trim();
+      if (!RL_ENDPOINT_TYPES.includes(fromType) || !RL_ENDPOINT_TYPES.includes(toType)) return json({ error: "Invalid endpoint type" }, 400);
+      if (!isUuid(fromId) || !isUuid(toId)) return json({ error: "Invalid endpoint id" }, 400);
+      if (!RL_LINK_TYPES.includes(linkType)) return json({ error: "Invalid linkType" }, 400);
+      if (fromType === toType && fromId === toId) return json({ error: "A text unit can't link to itself" }, 400);
+      const row: Record<string, unknown> = {
+        from_type: fromType, from_id: fromId, to_type: toType, to_id: toId, link_type: linkType,
+        source: "manual", status: "accepted", confidence: 1.0,
+        rationale: body.rationale !== undefined ? String(body.rationale).slice(0, 2000) : null,
+        evidence_from: body.evidenceFrom !== undefined ? String(body.evidenceFrom).slice(0, 2000) : null,
+        evidence_to: body.evidenceTo !== undefined ? String(body.evidenceTo).slice(0, 2000) : null,
+        created_by: body.createdBy !== undefined ? String(body.createdBy).slice(0, 120) : (session.urole || "rushroom"),
+        reviewed_by: body.createdBy !== undefined ? String(body.createdBy).slice(0, 120) : (session.urole || "rushroom"),
+        reviewed_at: new Date().toISOString(),
+      };
+      const { data, error } = await db.from("requirement_links").insert(row).select("id").maybeSingle();
+      if (error) {
+        if (/duplicate key|unique/i.test(error.message)) return json({ error: "That exact link already exists." }, 409);
+        return json({ error: error.message }, 500);
+      }
+      return json({ ok: true, id: data?.id });
+    }
+
+    if (action === "setRequirementLinkStatus") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const id = String(body.id ?? "").trim();
+      const status = String(body.status ?? "").trim();
+      if (!isUuid(id) || !RL_STATUSES.includes(status)) return json({ error: "Valid id and status required" }, 400);
+      const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
+      if (status === "accepted" || status === "rejected") {
+        patch.reviewed_by = body.reviewedBy !== undefined ? String(body.reviewedBy).slice(0, 120) : (session.urole || "rushroom");
+        patch.reviewed_at = new Date().toISOString();
+      }
+      const { error } = await db.from("requirement_links").update(patch).eq("id", id);
+      if (error) return json({ error: error.message }, 500);
+      return json({ ok: true });
+    }
+
+    if (action === "deleteRequirementLink") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const id = String(body.id ?? "").trim();
+      if (!isUuid(id)) return json({ error: "Valid id required" }, 400);
+      const { error } = await db.from("requirement_links").delete().eq("id", id);
+      if (error) return json({ error: error.message }, 500);
+      return json({ ok: true });
+    }
+  }
+
   if (action === "exportProductPassport") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const passportId = String(body.passportId ?? "").trim();

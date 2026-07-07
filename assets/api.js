@@ -237,6 +237,15 @@
       call({ action: "complianceMatrix", token, documentVersionIds, standardVersionIds }),
     exportProductPassport: (token, { passportId, format }) =>
       call({ action: "exportProductPassport", token, passportId, format }),
+    // ---- Requirement links: cross-document clause & text linking ----
+    listRequirementLinks: (token, { entityType, entityId }) =>
+      call({ action: "listRequirementLinks", token, entityType, entityId }),
+    createRequirementLink: (token, fields) =>
+      call({ action: "createRequirementLink", token, ...fields }),
+    setRequirementLinkStatus: (token, id, status, reviewedBy) =>
+      call({ action: "setRequirementLinkStatus", token, id, status, reviewedBy }),
+    deleteRequirementLink: (token, id) =>
+      call({ action: "deleteRequirementLink", token, id }),
     // Product passport management
     listProductPassports: (token) => call({ action: "listProductPassports", token }),
     getProductPassport: (token, id) => call({ action: "getProductPassport", token, id }),

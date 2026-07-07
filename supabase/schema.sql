@@ -470,3 +470,40 @@ alter table public.steps add column if not exists scope public.compliance_scope;
 alter table public.steps add column if not exists classification_ai_generated boolean not null default false;
 alter table public.classification_log alter column entity_id drop not null;
 alter table public.classification_log add column if not exists entity_step integer;
+
+-- ============================================================================
+-- REQUIREMENT LINKS: cross-document clause & text linking ("Requirement Threads")
+-- ============================================================================
+-- A typed, evidenced, reviewable edge between two addressable text units — today
+-- a standard clause (standard_clauses) or a document version (document_versions);
+-- an As-Operated "statement" endpoint can be added later without changing shape.
+-- Generalises the directive_relations pattern (type / confidence / source /
+-- status). Manual links are created 'accepted'; AI/imported links start 'proposed'.
+-- Endpoints are stored as (type, id) rather than FKs so both kinds share one row;
+-- referential cleanup is handled in the Edge Function. RLS denies direct access.
+create table if not exists public.requirement_links (
+  id             uuid primary key default gen_random_uuid(),
+  from_type      text not null,                    -- 'clause' | 'document_version'
+  from_id        uuid not null,
+  to_type        text not null,                    -- 'clause' | 'document_version'
+  to_id          uuid not null,
+  link_type      text not null default 'same_clause',
+  -- 'same_clause' | 'citation' | 'implements' | 'similar_intent' |
+  -- 'defines_terms_for' | 'supersedes' | 'conflicts_with'
+  confidence     double precision default 1.0,     -- 1.0 manual/exact, 0.0-1.0 for AI
+  source         text default 'manual',            -- 'manual' | 'cited' | 'imported' | 'ai_assisted' | 'derived'
+  status         text default 'accepted',          -- 'proposed' | 'accepted' | 'rejected' | 'flagged' | 'archived'
+  rationale      text,
+  evidence_from  text,                             -- matched snippet on the from side
+  evidence_to    text,                             -- matched snippet on the to side
+  created_by     text,
+  reviewed_by    text,
+  reviewed_at    timestamptz,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  unique(from_type, from_id, to_type, to_id, link_type)
+);
+create index if not exists requirement_links_from_idx on public.requirement_links (from_type, from_id);
+create index if not exists requirement_links_to_idx   on public.requirement_links (to_type, to_id);
+
+alter table public.requirement_links enable row level security;
