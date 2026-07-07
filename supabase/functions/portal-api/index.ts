@@ -2170,6 +2170,91 @@ Be specific: name the exact document and the exact standard (and clause where po
       for (const l of [...(a.data ?? []), ...(b.data ?? [])]) { if (!seen.has(l.id)) { seen.add(l.id); merged.push(l); } }
       return json({ links: await labelEndpoints(merged) });
     }
+
+    // AI: propose semantic links from a clause to clauses in OTHER standards.
+    // Proposals land as status='proposed' (source='ai_assisted') for human review.
+    if (action === "suggestRequirementLinks") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY." }, 400);
+      const clauseId = String(body.clauseId ?? "").trim();
+      if (!isUuid(clauseId)) return json({ error: "Valid clauseId required" }, 400);
+
+      const clauseSelect = "id,standard_version_id,clause_ref,clause_title,clause_text,standard_version:standard_version_id(standard:standard_id(code,title))";
+      const { data: src } = await db.from("standard_clauses").select(clauseSelect).eq("id", clauseId).maybeSingle();
+      if (!src) return json({ error: "Clause not found" }, 404);
+      const stdOf = (c: any) => c?.standard_version?.standard?.code || c?.standard_version?.standard?.title || "Standard";
+
+      // Candidate clauses from OTHER standard versions (cross-standard matching).
+      const { data: cands } = await db.from("standard_clauses").select(clauseSelect)
+        .neq("standard_version_id", (src as any).standard_version_id).limit(150);
+      let candidates = cands ?? [];
+      // Drop candidates already linked to this clause (either direction).
+      const [la, lb] = await Promise.all([
+        db.from("requirement_links").select("to_type,to_id").eq("from_type", "clause").eq("from_id", clauseId),
+        db.from("requirement_links").select("from_type,from_id").eq("to_type", "clause").eq("to_id", clauseId),
+      ]);
+      const linked = new Set<string>();
+      for (const r of la.data ?? []) if (r.to_type === "clause") linked.add(r.to_id);
+      for (const r of lb.data ?? []) if (r.from_type === "clause") linked.add(r.from_id);
+      candidates = candidates.filter((c) => !linked.has(c.id));
+      if (!candidates.length) return json({ ok: true, created: 0, candidates: 0 });
+
+      const SUG_SCHEMA = {
+        type: "object", additionalProperties: false,
+        properties: { matches: { type: "array", items: {
+          type: "object", additionalProperties: false,
+          properties: {
+            id: { type: "string" },
+            linkType: { type: "string", enum: ["same_clause", "similar_intent", "implements", "defines_terms_for"] },
+            confidence: { type: "number" }, rationale: { type: "string" },
+          },
+          required: ["id", "linkType", "confidence", "rationale"],
+        } } },
+        required: ["matches"],
+      };
+      const trunc = (t: unknown, n: number) => String(t ?? "").replace(/\s+/g, " ").trim().slice(0, n);
+      const system = `You find cross-reference relationships between EU product-compliance clauses for Rushroom AB (LED system-furniture).
+Given a SOURCE clause and CANDIDATE clauses from other standards, return only candidates that express the SAME or a CLOSELY RELATED requirement.
+linkType: same_clause = identical normative requirement; similar_intent = same obligation worded differently; implements = candidate is a means of satisfying the source; defines_terms_for = candidate defines terms the source relies on.
+Be conservative — prefer precision over recall; only match when a compliance reviewer would agree. Give confidence 0.0–1.0 and a one-line rationale. Echo the candidate id exactly; never invent ids.`;
+      const candText = candidates.map((c) => `- id=${c.id} [${stdOf(c)} ${c.clause_ref}] ${trunc(c.clause_title, 80)} :: ${trunc(c.clause_text, 240)}`).join("\n");
+      const user = `SOURCE clause [${stdOf(src)} ${(src as any).clause_ref}] ${trunc((src as any).clause_title, 120)}:\n${trunc((src as any).clause_text, 800)}\n\nCANDIDATES (${candidates.length}):\n${candText}`;
+
+      let apiJson: any;
+      try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+          body: JSON.stringify({ model: SCAN_MODEL, max_tokens: 4000, thinking: { type: "adaptive" }, output_config: { effort: "medium", format: { type: "json_schema", schema: SUG_SCHEMA } }, system, messages: [{ role: "user", content: [{ type: "text", text: user }] }] }),
+        });
+        apiJson = await res.json();
+        if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
+      } catch (e) { return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502); }
+      if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to suggest links." }, 502);
+      const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
+      let parsed: any; try { parsed = JSON.parse(textBlock?.text || "{}"); } catch { return json({ error: "The AI response could not be parsed." }, 502); }
+
+      const validIds = new Set(candidates.map((c) => c.id));
+      const allowed = ["same_clause", "similar_intent", "implements", "defines_terms_for"];
+      const now = new Date().toISOString();
+      const rows = (parsed.matches || [])
+        .filter((m: any) => validIds.has(String(m.id)) && allowed.includes(m.linkType) && Number(m.confidence) >= 0.5)
+        .slice(0, 25)
+        .map((m: any) => ({
+          from_type: "clause", from_id: clauseId, to_type: "clause", to_id: String(m.id),
+          link_type: m.linkType, source: "ai_assisted", status: "proposed",
+          confidence: Math.max(0, Math.min(1, Number(m.confidence) || 0.5)),
+          rationale: String(m.rationale || "").slice(0, 500), created_by: "AI", created_at: now, updated_at: now,
+        }));
+      let created = 0;
+      if (rows.length) {
+        const { data: ins, error } = await db.from("requirement_links")
+          .upsert(rows, { onConflict: "from_type,from_id,to_type,to_id,link_type", ignoreDuplicates: true }).select("id");
+        if (error) return json({ error: error.message }, 500);
+        created = (ins ?? []).length;
+      }
+      return json({ ok: true, created, candidates: candidates.length, usage: usageOf(apiJson) });
+    }
   }
 
   if (action === "exportProductPassport") {

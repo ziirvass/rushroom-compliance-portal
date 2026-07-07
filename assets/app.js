@@ -2516,6 +2516,22 @@
     ]));
     if (clause.clause_text) box.append(el("details", { class: "l2-clause-req" }, [el("summary", {}, "Requirement text"), el("p", { class: "muted" }, clause.clause_text)]));
 
+    // AI: suggest semantic links to clauses in other standards (proposals only).
+    const aiNote = el("span", { class: "up-status" }, "");
+    const suggest = actionBtn("Suggest links (AI)", "sparkles", { onClick: async () => {
+      aiNote.className = "up-status"; aiNote.textContent = "Looking for related clauses in other standards…";
+      try {
+        const r = await API.suggestRequirementLinks(ctx.token, clause.id);
+        aiNote.className = "up-status ok";
+        const msg = r.created
+          ? `Added ${r.created} suggestion${r.created === 1 ? "" : "s"} — review below. `
+          : (r.candidates ? "No confident matches found. " : "No clauses from other standards to compare against yet. ");
+        aiNote.replaceChildren(document.createTextNode(msg), usageChip(r.usage) || document.createTextNode(""));
+        if (r.created) await reload();
+      } catch (ex) { aiNote.className = "up-status err"; aiNote.textContent = ex.message; }
+    } });
+    box.append(el("div", { class: "rl-toolbar" }, [suggest, aiNote]));
+
     // Existing links
     if (!links.length) {
       box.append(el("div", { class: "rl-empty muted" }, "No links yet. Add one below."));
