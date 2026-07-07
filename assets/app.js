@@ -1179,6 +1179,9 @@
       el("option", { value: "template" }, "Templates & Requirements"),
       el("option", { value: "operational" }, "Company as Operated (AI-audited)"),
     ]);
+    // Compliance classification (lifecycle phase × scope) — captured at creation.
+    const docPhase = phaseSelect("");
+    const docScope = scopeSelect("");
     const auds = ["internal", "supplier", "reviewer", "installer"].map((a) => {
       const cb = el("input", { type: "checkbox", value: a, checked: a === "internal" ? "checked" : null });
       return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
@@ -1198,7 +1201,7 @@
       if (!audience.length) audience.push("internal");
       btn.disabled = true; status.className = "up-status"; status.textContent = "Adding…";
       try {
-        const res = await API.addDocumentRecord(API.getToken(role), { category: category.value, name: name.value || up.fileName, audience, kind: kind.value, path: up.path, fileName: up.fileName });
+        const res = await API.addDocumentRecord(API.getToken(role), { category: category.value, name: name.value || up.fileName, audience, kind: kind.value, path: up.path, fileName: up.fileName, lifecyclePhase: docPhase.value || null, scope: docScope.value || null });
         flash(res && res.id);
         status.className = "up-status ok"; status.textContent = `Added “${name.value || up.fileName}”.`;
         zone.reset(); name.value = ""; category.value = "";
@@ -1213,6 +1216,7 @@
       el("p", { class: "muted", style: "margin:0.25rem 0 1rem" }, "Upload a file — the AI reads its name, category and section for you. Review, then add. Templates can later become As Operated documents without deleting anything."),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Document file"), zone.el]),
       el("div", { class: "upload-fields" }, [name, category, kind]),
+      el("div", { class: "form-row", style: "margin-top:0.6rem" }, [el("span", { class: "form-label" }, "Compliance quadrant"), el("div", { class: "cs-quad-picker" }, [docPhase, docScope])]),
       el("div", { class: "aud-checks" }, auds.map((c) => c.label)),
       el("div", { style: "margin-top:0.75rem" }, btn),
       status,
@@ -3073,6 +3077,87 @@
     await reload();
   }
 
+  /* ------- Compliance Map: a true 2×2 board over the classification data ------- */
+  async function renderComplianceMap(role, mount) {
+    if (role !== "rushroom") { mount.replaceChildren(el("div", { class: "empty" }, "The compliance map is available to Rushroom users.")); return; }
+    const token = () => API.getToken();
+    const state = { cell: null };
+    let matrix = null, items = [];
+    const gridMount = el("div");
+    const listMount = el("div", { class: "map-list", style: "margin-top:1rem" });
+
+    const cellFor = (phase, scope) => {
+      const key = `${phase}|${scope}`;
+      const q = (matrix.quadrants && matrix.quadrants[key]) || { total: 0, steps: 0, documents: 0, interpretations: 0, pct_compliant: null, colour: "grey" };
+      const active = state.cell === key;
+      return el("button", { class: `map-cell map-${q.colour}${active ? " active" : ""}`, type: "button", onclick: () => { state.cell = active ? null : key; render(); } }, [
+        el("div", { class: "map-count" }, String(q.total)),
+        el("div", { class: "map-break muted" }, `${q.steps} steps · ${q.documents} docs · ${q.interpretations} clauses`),
+        el("div", { class: "map-bar" }, el("div", { class: `map-bar-fill map-fill-${q.colour}`, style: `width:${q.pct_compliant || 0}%` })),
+        el("div", { class: "map-pct" }, q.total === 0 ? "no items" : (q.pct_compliant == null ? "not rated" : `${q.pct_compliant}% done`)),
+      ]);
+    };
+
+    const renderList = () => {
+      if (!state.cell) { listMount.replaceChildren(); return; }
+      let inCell, title;
+      if (state.cell === "__unc__") { inCell = items.filter((i) => !i.effective_phase || !i.effective_scope); title = "Unclassified"; }
+      else { const [phase, scope] = state.cell.split("|"); inCell = items.filter((i) => i.effective_phase === phase && i.effective_scope === scope); title = `${PHASE_LABEL[phase]} · ${SCOPE_LABEL[scope]}`; }
+      listMount.replaceChildren(el("div", { class: "card" }, [
+        el("div", { style: "display:flex; align-items:center; gap:0.5rem" }, [el("h3", { style: "margin:0" }, `${title} — ${inCell.length} item(s)`), el("span", { class: "spacer" }), el("button", { class: "btn btn-sm", type: "button", onclick: () => { state.cell = null; render(); } }, "Close")]),
+        inCell.length ? el("div", { class: "cs-list", style: "margin-top:0.6rem" }, inCell.map((it) => el("div", { class: "cs-row" }, [
+          el("div", { class: "cs-row-main" }, [
+            el("div", { class: "cs-row-label" }, [el("span", { class: `cs-type cs-type-${it.entityType}` }, it.entityType === "document" ? "DOC" : it.entityType === "step" ? "STEP" : "CLAUSE"), " ", it.label]),
+            it.sublabel ? el("div", { class: "cs-row-sub muted" }, it.sublabel) : null,
+          ]),
+          it.compliance_status ? el("span", { class: `map-status map-st-${it.compliance_status}` }, it.compliance_status.replace(/_/g, " ")) : null,
+          it.ai ? el("span", { class: "cs-ai", title: "AI-classified" }, "AI") : null,
+        ]))) : el("div", { class: "empty", style: "margin-top:0.6rem" }, "No items."),
+      ]));
+    };
+
+    const render = () => {
+      const u = (matrix && matrix.unclassified) || { total: 0, steps: 0, documents: 0, interpretations: 0 };
+      const t = (matrix && matrix.totals) || {};
+      const grid = el("div", { class: "map-grid" }, [
+        el("div", { class: "map-corner muted" }, "phase ╲ scope"),
+        el("div", { class: "map-colh" }, "Company"),
+        el("div", { class: "map-colh" }, "Product & Services"),
+        el("div", { class: "map-rowh" }, "Pre Launch"),
+        cellFor("pre_launch", "company"), cellFor("pre_launch", "product_services"),
+        el("div", { class: "map-rowh" }, "Monitoring"),
+        cellFor("monitoring", "company"), cellFor("monitoring", "product_services"),
+      ]);
+      const unc = u.total
+        ? el("button", { class: `map-unclassified${state.cell === "__unc__" ? " active" : ""}`, type: "button", onclick: () => { state.cell = state.cell === "__unc__" ? null : "__unc__"; render(); } }, [
+            el("strong", {}, `${u.total} unclassified`), el("span", { class: "muted" }, ` — ${u.steps} steps · ${u.documents} docs · ${u.interpretations} clauses (classify them in the step / document forms)`),
+          ])
+        : el("div", { class: "muted", style: "margin-top:0.6rem; font-size:0.85rem" }, "✓ All items are classified.");
+      const summary = el("div", { class: "map-summary muted" }, `${t.classified || 0} of ${t.total || 0} items classified · ${t.steps || 0} steps · ${t.documents || 0} docs · ${t.interpretations || 0} clauses. Green ≥80% done · amber 40–79% · red <40% · grey not rated. Click a cell to list its items.`);
+      gridMount.replaceChildren(el("div", {}, [grid, unc, summary]));
+      renderList();
+    };
+
+    const load = async () => {
+      gridMount.replaceChildren(el("div", { class: "loading" }, "Loading compliance map…"));
+      try { const [m, li] = await Promise.all([API.getComplianceMatrix(token()), API.listClassificationItems(token(), {})]); matrix = m; items = li.items || []; }
+      catch (ex) {
+        if (/aren't set up/i.test(ex.message)) { gridMount.replaceChildren(el("div", { class: "notice" }, "The compliance map needs its database columns — run the classification SQL in Supabase, then reload.")); return; }
+        gridMount.replaceChildren(el("div", { class: "error" }, `Couldn't load the compliance map: ${ex.message}`)); return;
+      }
+      render();
+    };
+
+    const tools = el("div", { class: "row-tools" }, [
+      el("h2", { style: "margin:0; font-size:1.1rem" }, "Compliance Map"),
+      el("span", { class: "spacer" }),
+      actionBtn("Refresh", "refresh", { onClick: load }),
+      actionBtn("Print / Save PDF", "printer", { onClick: () => window.print() }),
+    ]);
+    mount.replaceChildren(el("div", {}, [tools, gridMount, listMount]));
+    await load();
+  }
+
   // Full API render for a page: editable readiness + documents + uploads.
   async function renderApi(role, readinessMountId) {
     wireTabs($("#tablist"));
@@ -3164,6 +3249,8 @@
       docsPanel.replaceChildren(subTabs("documents", docTabs));
     };
     await load();
+    const mapPanel = $("#map-panel");
+    if (mapPanel && role === "rushroom") renderComplianceMap(role, mapPanel);
     const stdPanel = $("#standards-panel");
     if (stdPanel) renderStandards(role, stdPanel);
     // Deviation Monitoring hosts two sub-tabs: the AI scan and the Directive Graph.
@@ -3187,6 +3274,7 @@
       if (t) t.hidden = !ok;
       if (!ok && p) p.hidden = true;
     };
+    gate("tab-map", "map-panel", role === "rushroom");
     gate("tab-deviations", "deviations-panel", role === "rushroom");
     gate("tab-level2", "level2-panel", role === "rushroom");
     gate("tab-accounts", "accounts-panel", !!admin);

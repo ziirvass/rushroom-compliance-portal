@@ -155,8 +155,8 @@
     suggestFileMetadata: (token, { path, fileName, bucket = "documents" }) =>
       call({ action: "suggestFileMetadata", token, path, fileName, bucket }),
     // Register an already-uploaded library document (after AI auto-fill approval).
-    addDocumentRecord: (token, { category, name, audience, kind, path, fileName, version }) =>
-      call({ action: "addDocument", token, category, name, audience, kind, storagePath: path, fileName, version }),
+    addDocumentRecord: (token, { category, name, audience, kind, path, fileName, version, lifecyclePhase, scope }) =>
+      call({ action: "addDocument", token, category, name, audience, kind, storagePath: path, fileName, version, lifecyclePhase, scope }),
     // Add a version row to an existing document for an already-uploaded file.
     addDocumentVersionRecord: (token, { documentId, version, notes, path, fileName, sourceStandardVersionIds }) =>
       call({ action: "addDocumentVersion", token, documentId, version, notes, path, fileName, sourceStandardVersionIds }),

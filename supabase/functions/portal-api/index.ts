@@ -958,14 +958,24 @@ Deno.serve(async (req) => {
       ? body.audience.map((a: unknown) => String(a)) : ["internal"];
     const kind = body.kind === "operational" ? "operational" : "template";
     const storagePath = String(body.storagePath ?? "").slice(0, 400);
-    const { data: doc, error } = await db.from("documents").insert({
+    const lp = body.lifecyclePhase && LIFECYCLE_PHASES.includes(String(body.lifecyclePhase)) ? String(body.lifecyclePhase) : null;
+    const sc = body.scope && COMPLIANCE_SCOPES.includes(String(body.scope)) ? String(body.scope) : null;
+    const docRow: Record<string, unknown> = {
       category: (String(body.category ?? "").trim() || "Uncategorised").slice(0, 80),
       name: name.slice(0, 200),
       url: String(body.url ?? "").slice(0, 1000),
       storage_path: storagePath,
       kind,
       audience,
-    }).select("id").maybeSingle();
+      lifecycle_phase: lp, scope: sc,
+      classification_ai_generated: false,
+    };
+    let ins = await db.from("documents").insert(docRow).select("id").maybeSingle();
+    if (ins.error && /lifecycle_phase|scope|classification/i.test(ins.error.message || "")) {
+      const clean = { ...docRow }; delete clean.lifecycle_phase; delete clean.scope; delete clean.classification_ai_generated;
+      ins = await db.from("documents").insert(clean).select("id").maybeSingle();
+    }
+    const doc = ins.data; const error = ins.error;
     if (error) return json({ error: error.message }, 500);
     // All documents are version-managed from the first upload onward.
     if (doc?.id) {
@@ -2421,20 +2431,21 @@ Be specific: name the exact document and the exact standard (and clause where po
     let items: any[];
     try { items = await loadClassificationItems(); }
     catch (e) { if (/does not exist|schema cache|Could not find|column/i.test((e as Error).message)) return json({ error: "The classification columns aren't set up yet — run the classification SQL first." }, 500); return json({ error: (e as Error).message }, 500); }
-    const blank = () => ({ total: 0, documents: 0, interpretations: 0, statuses: { compliant: 0, deviation: 0, not_applicable: 0, pending: 0 }, statusable: 0 });
+    const typeKey = (t: string) => t === "interpretation" ? "interpretations" : t === "step" ? "steps" : "documents";
+    const blank = () => ({ total: 0, steps: 0, documents: 0, interpretations: 0, statuses: { compliant: 0, deviation: 0, not_applicable: 0, pending: 0 }, statusable: 0 });
     const quadKeys = ["pre_launch|company", "pre_launch|product_services", "monitoring|company", "monitoring|product_services"];
     const quadrants: Record<string, any> = {}; for (const k of quadKeys) quadrants[k] = blank();
-    const unclassified = { total: 0, documents: 0, interpretations: 0 };
+    const unclassified = { total: 0, steps: 0, documents: 0, interpretations: 0 };
     let classified = 0;
     for (const it of items) {
       if (!it.effective_phase || !it.effective_scope) {
-        unclassified.total++; unclassified[it.entityType === "interpretation" ? "interpretations" : "documents"]++;
+        unclassified.total++; unclassified[typeKey(it.entityType)]++;
         continue;
       }
       classified++;
       const q = quadrants[`${it.effective_phase}|${it.effective_scope}`];
       if (!q) continue;
-      q.total++; q[it.entityType === "interpretation" ? "interpretations" : "documents"]++;
+      q.total++; q[typeKey(it.entityType)]++;
       if (it.compliance_status && q.statuses[it.compliance_status] !== undefined) { q.statuses[it.compliance_status]++; q.statusable++; }
     }
     // Attach a coverage % + colour per quadrant.
@@ -2448,7 +2459,7 @@ Be specific: name the exact document and the exact standard (and clause where po
     return json({
       ok: true, quadrants,
       unclassified,
-      totals: { total: items.length, classified, unclassified: unclassified.total, documents: items.filter((i) => i.entityType === "document").length, interpretations: items.filter((i) => i.entityType === "interpretation").length },
+      totals: { total: items.length, classified, unclassified: unclassified.total, steps: items.filter((i) => i.entityType === "step").length, documents: items.filter((i) => i.entityType === "document").length, interpretations: items.filter((i) => i.entityType === "interpretation").length },
     });
   }
 
