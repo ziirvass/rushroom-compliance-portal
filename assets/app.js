@@ -1701,7 +1701,9 @@
       const cb = el("input", { type: "checkbox", value: a, checked: (v.audience || ["internal"]).includes(a) ? "checked" : null });
       return { a, cb, label: el("label", { class: "aud-check" }, [cb, ` ${a}`]) };
     });
-    // Compliance-matrix classification: lifecycle phase × scope.
+    // Compliance classification (lifecycle phase × scope) is captured only when
+    // creating a NEW step; existing steps keep their classification untouched.
+    const showClass = !existing;
     const lifePhase = phaseSelect(v.lifecycle_phase);
     const cScope = scopeSelect(v.scope);
     const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
@@ -1710,7 +1712,7 @@
       prioList,
       row("Phase", phaseField), row("Action", action), row("Owner", owner),
       row("Priority", priority), row("Status", status), row("Evidence", evidence), row("Where / how", where),
-      el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Compliance quadrant"), el("div", { class: "cs-quad-picker" }, [lifePhase, cScope])]),
+      showClass ? el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Compliance quadrant"), el("div", { class: "cs-quad-picker" }, [lifePhase, cScope])]) : null,
       el("div", { class: "form-row" }, [el("span", { class: "form-label" }, "Audience"), el("div", { class: "aud-checks" }, auds.map((c) => c.label))]),
       note, el("div", { style: "margin-top:0.5rem" }, save),
     ]);
@@ -1720,7 +1722,8 @@
       const actionText = action.value.trim();
       if (!actionText) { note.className = "up-status warn"; note.textContent = "Action text is required."; return; }
       const audience = auds.filter((c) => c.cb.checked).map((c) => c.a);
-      const fields = { phase: phaseValue(), actionText, owner: owner.value.trim(), priority: priority.value.trim(), status: status.value, evidence: evidence.value.trim(), where: where.value.trim(), audience: audience.length ? audience : ["internal"], lifecyclePhase: lifePhase.value || null, scope: cScope.value || null };
+      const fields = { phase: phaseValue(), actionText, owner: owner.value.trim(), priority: priority.value.trim(), status: status.value, evidence: evidence.value.trim(), where: where.value.trim(), audience: audience.length ? audience : ["internal"] };
+      if (showClass) { fields.lifecyclePhase = lifePhase.value || null; fields.scope = cScope.value || null; }
       save.disabled = true; note.className = "up-status"; note.textContent = "Saving…";
       try { await onSave(fields); close(); }
       catch (ex) { save.disabled = false; note.className = "up-status err"; note.textContent = `Failed: ${ex.message}`; }
@@ -3073,25 +3076,10 @@
   // Full API render for a page: editable readiness + documents + uploads.
   async function renderApi(role, readinessMountId) {
     wireTabs($("#tablist"));
-    const panel = $(readinessMountId);
-    // The classification matrix lives at the top of Compliance Status and persists
-    // across step reloads; the steps render into their own mount below it.
-    const matrixMount = el("div", { class: "cs-matrix-block" });
-    const stepsMount = el("div");
-    panel.replaceChildren(matrixMount, stepsMount);
-    const mount = stepsMount;
-    // Editing a step from the matrix opens the full step editor, then refreshes both.
-    let latestSteps = [], latestPhases = [];
-    const refreshMatrix = () => (matrixMount.__reload ? matrixMount.__reload() : null);
-    const editStepItem = (item) => {
-      const existing = latestSteps.find((s) => String(s.step) === String(item.id));
-      if (!existing) return;
-      stepEditor(existing, latestPhases, async (fields) => {
-        await API.updateStep(API.getToken(role), existing.step, fields);
-        await load(); await refreshMatrix();
-      });
-    };
-    if (role === "rushroom") renderComplianceMatrix(role, matrixMount, { onEditStep: editStepItem });
+    // Steps are organised by their progress phase categories; the 2×2
+    // classification matrix is not shown here (classification is captured in the
+    // new-step form and persisted on each step/document).
+    const mount = $(readinessMountId);
     const load = async () => {
       mount.replaceChildren(el("div", { class: "loading" }, "Loading…"));
       let payload;
@@ -3104,19 +3092,18 @@
       const steps = stepsFromApi(payload.steps);
       const onStatus = async (step, status, sel) => {
         sel.disabled = true;
-        try { await API.setStatus(API.getToken(role), step, status); await load(); await refreshMatrix(); }
+        try { await API.setStatus(API.getToken(role), step, status); await load(); }
         catch (ex) { sel.disabled = false; alert(`Couldn't save: ${ex.message}`); }
       };
       const phases = [...new Set(steps.map((s) => s.phase))];
-      latestSteps = steps; latestPhases = phases;    // for the matrix's Edit-step action
       const saveStep = (existing) => stepEditor(existing, phases, async (fields) => {
         if (existing) await API.updateStep(API.getToken(role), existing.step, fields);
         else await API.addStep(API.getToken(role), fields);
-        await load(); await refreshMatrix();
+        await load();
       });
       const onDeleteStep = async (s) => {
         if (!confirm(`Delete step #${s.step}: “${(s.action || "").slice(0, 60)}”?`)) return;
-        try { await API.deleteStep(API.getToken(role), s.step); await load(); await refreshMatrix(); }
+        try { await API.deleteStep(API.getToken(role), s.step); await load(); }
         catch (ex) { alert(`Couldn't delete: ${ex.message}`); }
       };
       // One toolbar: Expand/Collapse all sit alongside Refresh / Add step / Print.
