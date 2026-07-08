@@ -524,3 +524,98 @@ create table if not exists public.document_statements (
 create index if not exists document_statements_docver_idx on public.document_statements (document_version_id);
 
 alter table public.document_statements enable row level security;
+
+-- ============================================================================
+-- MULTI-TENANT SaaS — Stage 1: Organizations, Memberships, Invitations
+-- ============================================================================
+-- Introduces the tenant model additively. Every existing row is backfilled to a
+-- single seed organization ("Rushroom AB"), so nothing changes behaviourally
+-- until Stage 2 enforces scoping. All access still flows through portal-api
+-- (RLS deny-all). Safe to re-run (idempotent). See PROP-012 in SYSTEM_OVERVIEW.
+
+-- The seed organization id. MUST match RUSHROOM_ORG_ID in portal-api/index.ts.
+-- (Used below via the literal; kept here as documentation.)
+
+-- Tenants.
+create table if not exists public.organizations (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  slug        text unique,                                  -- url-safe handle
+  status      text not null default 'active',               -- 'trial'|'active'|'past_due'|'suspended'|'cancelled'
+  plan        text not null default 'internal',             -- entitlement tier (Stage 4); 'internal' for the seed org
+  settings    jsonb not null default '{}'::jsonb,
+  created_at  timestamptz not null default now()
+);
+
+-- A user's role + status within one organization (the unit seats are counted from).
+create table if not exists public.memberships (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  user_id         uuid not null references public.users(id) on delete cascade,
+  role            text not null default 'collaborator',     -- 'org_admin'|'manager'|'reviewer'|'collaborator'
+  status          text not null default 'active',           -- 'active'|'invited'|'suspended'
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique(organization_id, user_id)
+);
+create index if not exists memberships_user_idx on public.memberships (user_id);
+create index if not exists memberships_org_idx  on public.memberships (organization_id);
+
+-- Pending email invitations to join an organization at a role.
+create table if not exists public.invitations (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  email           text not null,
+  role            text not null default 'collaborator',
+  status          text not null default 'pending',          -- 'pending'|'accepted'|'revoked'|'expired'
+  invited_by      uuid,                                     -- users.id of the inviter
+  created_at      timestamptz not null default now(),
+  expires_at      timestamptz,
+  unique(organization_id, email)
+);
+create index if not exists invitations_email_idx on public.invitations (email);
+
+alter table public.organizations enable row level security;
+alter table public.memberships   enable row level security;
+alter table public.invitations   enable row level security;
+
+-- Seed the first tenant (idempotent by slug).
+insert into public.organizations (id, name, slug, status, plan)
+values ('11111111-1111-4111-8111-111111111111', 'Rushroom AB', 'rushroom', 'active', 'internal')
+on conflict (slug) do nothing;
+
+-- Migrate existing users into memberships of the seed org (role-mapped).
+insert into public.memberships (organization_id, user_id, role, status)
+select '11111111-1111-4111-8111-111111111111', u.id,
+  case
+    when u.role = 'admin'    then 'org_admin'
+    when u.role = 'internal' then 'manager'
+    when u.role = 'reviewer' then 'reviewer'
+    else 'collaborator'
+  end,
+  case
+    when u.status = 'approved'              then 'active'
+    when u.status in ('disabled','rejected') then 'suspended'
+    else 'invited'
+  end
+from public.users u
+on conflict (organization_id, user_id) do nothing;
+
+-- Add a nullable organization_id to every tenant-scoped table (additive).
+-- NOTE: kept NULLABLE in Stage 1; Stage 2 ensures all writes set it and a later
+-- hardening stage may add NOT NULL. Global tables (users, eu_directives,
+-- directive_relations, cellar_cache) are intentionally NOT given an org column.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'steps','documents','document_versions','uploads','standards','standard_versions',
+    'deviation_scans','deviation_findings','standard_clauses','as_operates_interpretations',
+    'product_passports','passport_interpretation_links','product_directive_applicability',
+    'classification_log','requirement_links','document_statements'
+  ] loop
+    execute format('alter table public.%I add column if not exists organization_id uuid references public.organizations(id) on delete cascade', t);
+    execute format('update public.%I set organization_id = %L where organization_id is null', t, '11111111-1111-4111-8111-111111111111');
+    execute format('create index if not exists %I on public.%I (organization_id)', t || '_org_idx', t);
+  end loop;
+end $$;

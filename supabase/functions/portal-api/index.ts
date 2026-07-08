@@ -139,6 +139,17 @@ const emailOk = (e: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
 const roleTier = (r: string): "rushroom" | "supplier" =>
   ["admin", "internal", "reviewer"].includes(r) ? "rushroom" : "supplier";
 
+// --- Multi-tenant Stage 1: the seed organization all existing data belongs to.
+// This literal MUST match the organizations seed row in supabase/schema.sql.
+// The tenant is always taken from the session (never a request body); this is
+// only the fallback for sessions/rows created before the org model existed.
+const RUSHROOM_ORG_ID = "11111111-1111-4111-8111-111111111111";
+// A user's assigned role → their per-organization membership role.
+const MEMBERSHIP_ROLE: Record<string, string> = {
+  admin: "org_admin", internal: "manager", reviewer: "reviewer", supplier: "collaborator", installer: "collaborator",
+};
+const membershipRoleFor = (assigned: string) => MEMBERSHIP_ROLE[assigned] || "collaborator";
+
 // HMAC-sign an arbitrary payload (used for email-verification links).
 async function signData(obj: unknown): Promise<string> {
   const payload = b64url(enc.encode(JSON.stringify(obj)));
@@ -626,7 +637,8 @@ Deno.serve(async (req) => {
     const got = await sha256Hex(String(body.password ?? ""));
     if (!eq(got, expected)) return json({ error: "Incorrect password" }, 401);
     // The shared Rushroom password is the bootstrap admin; supplier is limited.
-    return json({ token: await issueSession({ role, admin: role === "rushroom" }), role, admin: role === "rushroom" });
+    // Bootstrap logins belong to the seed organization (Stage 1).
+    return json({ token: await issueSession({ role, admin: role === "rushroom", org: RUSHROOM_ORG_ID }), role, admin: role === "rushroom", organization_id: RUSHROOM_ORG_ID });
   }
 
   // --- login: individual email + password ---------------------------------
@@ -647,8 +659,19 @@ Deno.serve(async (req) => {
     const assigned = String(u.role || u.requested_role || "supplier");
     const tier = roleTier(assigned);
     const admin = assigned === "admin";
-    const token = await issueSession({ role: tier, admin, uid: u.id, email: u.email, urole: assigned });
-    return json({ token, role: tier, admin, urole: assigned, name: u.name });
+    // Stage 1: resolve the user's active organization membership so the session
+    // is tenant-aware. Wrapped in try/catch so login still works before the
+    // memberships table exists (falls back to the seed org — backward compatible).
+    let orgId = RUSHROOM_ORG_ID, orgName = "", mRole = membershipRoleFor(assigned);
+    try {
+      const { data: ms } = await db.from("memberships")
+        .select("organization_id, role, organizations(name)")
+        .eq("user_id", u.id).eq("status", "active").order("created_at").limit(1);
+      const m = ms && ms[0];
+      if (m && m.organization_id) { orgId = m.organization_id; mRole = m.role || mRole; orgName = (m as any).organizations?.name || ""; }
+    } catch { /* memberships not set up yet → default org */ }
+    const token = await issueSession({ role: tier, admin, uid: u.id, email: u.email, urole: assigned, org: orgId, mrole: mRole });
+    return json({ token, role: tier, admin, urole: assigned, name: u.name, organization_id: orgId, organization_name: orgName });
   }
 
   // --- public: request a password-reset / set-password link ---------------
@@ -725,6 +748,22 @@ Deno.serve(async (req) => {
   if (!session) return json({ error: "Not authenticated" }, 401);
   const role = session.role as string;      // access tier: "rushroom" | "supplier"
   const isAdmin = session.admin === true;    // account-management privilege
+  // Stage 1: the caller's tenant, taken ONLY from the signed session (never the
+  // request body). Legacy tokens without an org fall back to the seed org.
+  const organizationId = (session.org as string) || RUSHROOM_ORG_ID;
+
+  // --- tenant context for the caller (Stage 1; read-only, session-derived) --
+  if (action === "orgContext") {
+    let organizationName = "";
+    try {
+      const { data: o } = await db.from("organizations").select("name").eq("id", organizationId).maybeSingle();
+      organizationName = o?.name || "";
+    } catch { /* organizations table not set up yet */ }
+    return json({
+      organization_id: organizationId, organization_name: organizationName,
+      role, urole: session.urole ?? null, admin: isAdmin, membership_role: session.mrole ?? null,
+    });
+  }
 
   // --- admin account management (requires the admin privilege) ------------
   if (action === "adminListUsers") {
