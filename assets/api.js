@@ -250,6 +250,12 @@
       call({ action: "listRequirementLinksQueue", token, statuses }),
     detectClauseCitations: (token, standardVersionId) =>
       call({ action: "detectClauseCitations", token, standardVersionId }),
+    listDocumentStatements: (token, documentVersionId) =>
+      call({ action: "listDocumentStatements", token, documentVersionId }),
+    saveDocumentStatements: (token, documentVersionId, statements) =>
+      call({ action: "saveDocumentStatements", token, documentVersionId, statements }),
+    listRequirementLinksForStatements: (token, statementIds) =>
+      call({ action: "listRequirementLinksForStatements", token, statementIds }),
     createRequirementLink: (token, fields) =>
       call({ action: "createRequirementLink", token, ...fields }),
     setRequirementLinkStatus: (token, id, status, reviewedBy) =>

@@ -765,6 +765,18 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .rl-queue > summary { cursor: pointer; font-weight: 700; color: var(--amber); }
 .rl-queue[open] > summary { margin-bottom: 0.6rem; }
 .rl-queue-body .rl-row { background: var(--panel); }
+/* As-Operated paragraphs (statements) */
+.rl-statements { margin: 0.4rem 0 0.2rem; border: 1px solid var(--border); border-radius: 10px; padding: 0.5rem 0.7rem; background: var(--panel-2); }
+.rl-statements > summary { cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--accent); }
+.rl-statements[open] > summary { margin-bottom: 0.5rem; }
+.rl-stmt-tools { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+.rl-stmt-list { display: grid; gap: 0.5rem; }
+.rl-stmt { border: 1px solid var(--border); border-radius: 9px; padding: 0.55rem 0.7rem; background: var(--panel); }
+.rl-stmt-text { font-size: 0.88rem; line-height: 1.5; display: flex; gap: 0.5rem; }
+.rl-stmt-seq { flex: none; font-family: var(--mono, monospace); font-size: 0.72rem; font-weight: 700; color: var(--muted); padding-top: 0.15rem; }
+.rl-stmt-actions { margin-top: 0.4rem; }
+.rl-stmt .rl-inline { margin: 0.45rem 0 0.2rem; }
+.rl-stmt-form:not(:empty) { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--border); }
 .rl-empty { font-size: 0.85rem; padding: 0.5rem 0; }
 .rl-list { display: grid; gap: 0.5rem; margin: 0.4rem 0 0.8rem; }
 .rl-row { border: 1px solid var(--border); border-radius: 10px; padding: 0.6rem 0.75rem; background: var(--panel-2); }

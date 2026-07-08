@@ -894,6 +894,8 @@
         el("div", {}, [el("div", { class: "name" }, [el("span", {}, d.name), fileTypeChip((current && (current.file_name || current.storage_path)) || d.storage_path || d.url || d.name)]), el("div", { class: "audience" }, `For: ${(d.audience || []).join(", ") || "—"}`)]),
         currentRow,
         linkBox,
+        // Paragraph-level linking for the current version (Rushroom only).
+        opts.manage && current && current.id ? docStatementsPanel(d, current) : null,
         history,
         el("div", { class: "doc-actions" }, actions),
       ]);
@@ -2502,6 +2504,113 @@
       ])),
       el("span", { class: "muted", style: "font-size:0.78rem" }, "Manage in the Links tab."),
     ]);
+  }
+
+  /* ---- As-Operated paragraphs (statements) — addressable text units ---- */
+  // Split extracted document text into paragraphs (blank-line separated, ≥3 words).
+  function segmentIntoParagraphs(text) {
+    return String(text || "")
+      .split(/\n\s*\n+/)
+      .map((p) => p.replace(/\s*\n\s*/g, " ").replace(/[ \t]+/g, " ").trim())
+      .filter((p) => p.split(" ").filter(Boolean).length >= 3)
+      .slice(0, 300);
+  }
+
+  // A document version broken into paragraphs, each linkable to a clause. Lazy.
+  function docStatementsPanel(d, version) {
+    const summary = el("summary", {}, "Paragraphs & links");
+    const body = el("div", { class: "rl-stmt-body" });
+    const node = el("details", { class: "rl-statements" }, [summary, body]);
+    let stdCache = null, loaded = false;
+    const getStandards = async () => stdCache || (stdCache = ((await API.standards(API.getToken())).standards) || []);
+
+    const segment = async () => {
+      body.replaceChildren(el("div", { class: "loading" }, "Reading the file and splitting into paragraphs…"));
+      try {
+        const text = await extractVersionText(version.open_url, version.file_name || d.name);
+        if (text == null) { body.replaceChildren(el("div", { class: "notice warn" }, "This file type can’t be text-extracted (e.g. an image or scanned PDF).")); return; }
+        const paras = segmentIntoParagraphs(text);
+        if (!paras.length) { body.replaceChildren(el("div", { class: "muted" }, "No paragraphs found in the text.")); return; }
+        await API.saveDocumentStatements(API.getToken(), version.id, paras.map((t, i) => ({ seq: i, text: t })));
+        await load();
+      } catch (ex) { body.replaceChildren(el("div", { class: "error" }, ex.message)); }
+    };
+    const load = async () => {
+      body.replaceChildren(el("div", { class: "loading" }, "Loading paragraphs…"));
+      let statements = [];
+      try { statements = (await API.listDocumentStatements(API.getToken(), version.id)).statements || []; }
+      catch (ex) { body.replaceChildren(el("div", { class: "error" }, ex.message)); return; }
+      if (!statements.length) {
+        body.replaceChildren(el("div", {}, [
+          el("p", { class: "muted", style: "font-size:0.85rem; margin:0 0 0.45rem" }, "Break this version into paragraphs so you can link each one to the clauses it satisfies."),
+          actionBtn("Break into paragraphs", "layers", { primary: true, onClick: segment }),
+        ]));
+        return;
+      }
+      const byStmt = new Map();
+      try {
+        const r = await API.listRequirementLinksForStatements(API.getToken(), statements.map((s) => s.id));
+        for (const l of (r.links || [])) for (const side of ["from", "to"]) {
+          const ep = l[side];
+          if (ep && ep.type === "statement") { if (!byStmt.has(ep.id)) byStmt.set(ep.id, []); byStmt.get(ep.id).push({ link: l, other: side === "from" ? l.to : l.from }); }
+        }
+      } catch { /* links optional */ }
+      const tools = el("div", { class: "rl-stmt-tools" }, [
+        el("span", { class: "muted", style: "font-size:0.8rem" }, `${statements.length} paragraph${statements.length === 1 ? "" : "s"}`),
+        actionBtn("Re-segment", "refresh", { onClick: () => { if (confirm("Re-splitting replaces the current paragraphs; existing links to them will be orphaned. Continue?")) segment(); } }),
+      ]);
+      body.replaceChildren(tools, el("div", { class: "rl-stmt-list" }, statements.map((s) => docStatementRow(s, byStmt.get(s.id) || [], getStandards, load))));
+    };
+    node.addEventListener("toggle", () => { if (node.open && !loaded) { loaded = true; load(); } });
+    return node;
+  }
+
+  function docStatementRow(s, entries, getStandards, reload) {
+    const chips = entries.length ? el("div", { class: "rl-inline" }, entries.map(({ link, other }) => el("span", { class: "rl-inline-item" }, [
+      rlTypeChip(link.link_type), el("span", { class: "rl-arrow", "aria-hidden": "true" }, "→"),
+      el("span", { class: "rl-target" }, [el("strong", {}, (other && other.label) || "(removed)"), el("span", { class: "rl-kind" }, other && other.type === "document_version" ? "doc" : "clause")]),
+      rlStatusChip(link.status),
+      actionBtn("Unlink", "trash", { danger: true, onClick: async () => { if (!confirm("Remove this link?")) return; try { await API.deleteRequirementLink(API.getToken(), link.id); await reload(); } catch (ex) { alert(ex.message); } } }),
+    ]))) : null;
+    const form = el("div", { class: "rl-stmt-form" });
+    const addBtn = actionBtn("Link to clause", "plus", { onClick: () => openStmtLinkForm(s, getStandards, reload, form, addBtn) });
+    return el("div", { class: "rl-stmt" }, [
+      el("div", { class: "rl-stmt-text" }, [el("span", { class: "rl-stmt-seq" }, `¶${(Number(s.seq) || 0) + 1}`), el("span", {}, s.text)]),
+      chips,
+      el("div", { class: "rl-stmt-actions" }, addBtn),
+      form,
+    ]);
+  }
+
+  async function openStmtLinkForm(s, getStandards, reload, mount, addBtn) {
+    addBtn.disabled = true;
+    mount.replaceChildren(el("div", { class: "loading" }, "Loading standards…"));
+    let stdVers;
+    try { stdVers = flattenStdVersions(await getStandards()); }
+    catch (ex) { mount.replaceChildren(el("div", { class: "error" }, ex.message)); addBtn.disabled = false; return; }
+    if (!stdVers.length) { mount.replaceChildren(el("div", { class: "muted" }, "No standards with clauses yet.")); addBtn.disabled = false; return; }
+    const typeSel = el("select", { class: "up-text" }, RL_TYPES.map(([v, l]) => el("option", { value: v, selected: v === "implements" ? "selected" : null }, l)));
+    const stdSel = el("select", { class: "up-text" }, stdVers.map((o) => el("option", { value: o.id }, o.label)));
+    const clauseSel = el("select", { class: "up-text" }, [el("option", { value: "" }, "— select a clause —")]);
+    const note = el("span", { class: "up-status" }, "");
+    const loadC = async () => {
+      clauseSel.replaceChildren(el("option", { value: "" }, "Loading…"));
+      try { const r = await API.getClausesForStandard(API.getToken(), stdSel.value); const list = r.clauses || []; clauseSel.replaceChildren(el("option", { value: "" }, list.length ? "— select a clause —" : "No clauses"), ...list.map((c) => el("option", { value: c.id }, `${c.clause_ref}${c.clause_title ? " — " + c.clause_title : ""}`))); }
+      catch { clauseSel.replaceChildren(el("option", { value: "" }, "Error")); }
+    };
+    stdSel.addEventListener("change", loadC);
+    const doLink = actionBtn("Link", "plus", { primary: true, onClick: async () => {
+      if (!clauseSel.value) { note.className = "up-status warn"; note.textContent = "Pick a clause."; return; }
+      note.className = "up-status"; note.textContent = "Linking…";
+      try { await API.createRequirementLink(API.getToken(), { fromType: "statement", fromId: s.id, toType: "clause", toId: clauseSel.value, linkType: typeSel.value, createdBy: (API.session() && API.session().name) || "rushroom" }); await reload(); }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    } });
+    const cancel = actionBtn("Cancel", "collapse", { onClick: () => { mount.replaceChildren(); addBtn.disabled = false; } });
+    mount.replaceChildren(
+      el("div", { class: "rl-controls" }, [el("span", { class: "form-label" }, "Relationship"), typeSel, el("span", { class: "form-label" }, "Standard"), stdSel, el("span", { class: "form-label" }, "Clause"), clauseSel]),
+      el("div", { style: "display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap" }, [doLink, cancel, note]),
+    );
+    loadC();
   }
 
   const rlSessionName = () => (API.session() && API.session().name) || "rushroom";

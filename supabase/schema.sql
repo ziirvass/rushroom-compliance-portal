@@ -507,3 +507,20 @@ create index if not exists requirement_links_from_idx on public.requirement_link
 create index if not exists requirement_links_to_idx   on public.requirement_links (to_type, to_id);
 
 alter table public.requirement_links enable row level security;
+
+-- As-Operated "statements": a document version broken into addressable paragraphs,
+-- so a requirement_link can point at a specific paragraph (endpoint type
+-- 'statement') rather than the whole document. Segmented client-side from the
+-- stored file text; re-segmenting replaces the set for that version.
+create table if not exists public.document_statements (
+  id                  uuid primary key default gen_random_uuid(),
+  document_version_id uuid not null references public.document_versions(id) on delete cascade,
+  seq                 integer not null default 0,        -- 0-based paragraph order
+  text                text not null default '',
+  anchor              text,                              -- optional heading/label
+  created_at          timestamptz not null default now(),
+  unique(document_version_id, seq)
+);
+create index if not exists document_statements_docver_idx on public.document_statements (document_version_id);
+
+alter table public.document_statements enable row level security;

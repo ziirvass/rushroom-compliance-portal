@@ -2035,19 +2035,17 @@ Be specific: name the exact document and the exact standard (and clause where po
   // Endpoints are (type, id) pairs: 'clause' -> standard_clauses, or
   // 'document_version' -> document_versions. Links are bidirectional in the UI.
   {
-    const RL_ENDPOINT_TYPES = ["clause", "document_version"];
+    const RL_ENDPOINT_TYPES = ["clause", "document_version", "statement"];
     const RL_LINK_TYPES = ["same_clause", "citation", "implements", "similar_intent", "defines_terms_for", "supersedes", "conflicts_with"];
     const RL_STATUSES = ["proposed", "accepted", "rejected", "flagged", "archived"];
     const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
     // Resolve a plain-language label for each (type,id) endpoint referenced by a set of links.
     const labelEndpoints = async (links: any[]) => {
-      const clauseIds = new Set<string>(), docVerIds = new Set<string>();
-      for (const l of links) {
-        if (l.from_type === "clause") clauseIds.add(l.from_id); else if (l.from_type === "document_version") docVerIds.add(l.from_id);
-        if (l.to_type === "clause") clauseIds.add(l.to_id); else if (l.to_type === "document_version") docVerIds.add(l.to_id);
-      }
-      const clauseMap = new Map<string, any>(), docMap = new Map<string, any>();
+      const clauseIds = new Set<string>(), docVerIds = new Set<string>(), stmtIds = new Set<string>();
+      const add = (t: string, id: string) => { if (t === "clause") clauseIds.add(id); else if (t === "document_version") docVerIds.add(id); else if (t === "statement") stmtIds.add(id); };
+      for (const l of links) { add(l.from_type, l.from_id); add(l.to_type, l.to_id); }
+      const clauseMap = new Map<string, any>(), docMap = new Map<string, any>(), stmtMap = new Map<string, any>();
       if (clauseIds.size) {
         const { data } = await db.from("standard_clauses")
           .select("id,clause_ref,clause_title,standard_version:standard_version_id(version,standard:standard_id(code,title))")
@@ -2066,7 +2064,17 @@ Be specific: name the exact document and the exact standard (and clause where po
           docMap.set(v.id, { type: "document_version", id: v.id, ref: v.version || "", label: `${name}${v.version ? " " + v.version : ""}`, title: "" });
         }
       }
-      const resolve = (t: string, id: string) => (t === "clause" ? clauseMap.get(id) : docMap.get(id)) || { type: t, id, ref: "", label: "(removed)", title: "" };
+      if (stmtIds.size) {
+        const { data } = await db.from("document_statements")
+          .select("id,seq,text,document_version:document_version_id(version,document:document_id(name))").in("id", [...stmtIds]);
+        for (const s of data ?? []) {
+          const dv = (s as any).document_version;
+          const name = dv?.document?.name || "Document";
+          const para = `¶${(Number(s.seq) || 0) + 1}`;
+          stmtMap.set(s.id, { type: "statement", id: s.id, ref: para, label: `${name}${dv?.version ? " " + dv.version : ""} ${para}`, title: String(s.text || "").slice(0, 160) });
+        }
+      }
+      const resolve = (t: string, id: string) => (t === "clause" ? clauseMap.get(id) : t === "document_version" ? docMap.get(id) : t === "statement" ? stmtMap.get(id) : null) || { type: t, id, ref: "", label: "(removed)", title: "" };
       return links.map((l) => ({ ...l, from: resolve(l.from_type, l.from_id), to: resolve(l.to_type, l.to_id) }));
     };
 
@@ -2339,6 +2347,53 @@ Be conservative — prefer precision over recall; only match when a compliance r
         created = (ins ?? []).length;
       }
       return json({ ok: true, created, scanned: srcClauses.length, matched: rows.length });
+    }
+
+    // As-Operated statements (addressable paragraphs of a document version).
+    if (action === "listDocumentStatements") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const dv = String(body.documentVersionId ?? "").trim();
+      if (!isUuid(dv)) return json({ error: "Valid documentVersionId required" }, 400);
+      const { data, error } = await db.from("document_statements").select("*").eq("document_version_id", dv).order("seq");
+      if (error) return json({ error: error.message }, 500);
+      return json({ statements: data ?? [] });
+    }
+
+    // Replace the paragraph set for a version (segmented client-side from the file).
+    if (action === "saveDocumentStatements") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const dv = String(body.documentVersionId ?? "").trim();
+      if (!isUuid(dv)) return json({ error: "Valid documentVersionId required" }, 400);
+      const input = Array.isArray(body.statements) ? body.statements : [];
+      const rows = input.map((s: any, i: number) => ({
+        document_version_id: dv,
+        seq: Number.isInteger(s?.seq) ? s.seq : i,
+        text: String(s?.text ?? "").slice(0, 8000),
+        anchor: s?.anchor != null ? String(s.anchor).slice(0, 300) : null,
+      })).filter((r: any) => r.text.trim());
+      const del = await db.from("document_statements").delete().eq("document_version_id", dv);
+      if (del.error) return json({ error: del.error.message }, 500);
+      if (rows.length) {
+        const { error } = await db.from("document_statements").insert(rows);
+        if (error) return json({ error: error.message }, 500);
+      }
+      return json({ ok: true, count: rows.length });
+    }
+
+    // Batch: every link touching any of the given statements (for the paragraph view).
+    if (action === "listRequirementLinksForStatements") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const stmtIds = (Array.isArray(body.statementIds) ? body.statementIds : []).map((v: unknown) => String(v ?? "")).filter(isUuid);
+      if (!stmtIds.length) return json({ links: [] });
+      const [a, b] = await Promise.all([
+        db.from("requirement_links").select("*").eq("from_type", "statement").in("from_id", stmtIds),
+        db.from("requirement_links").select("*").eq("to_type", "statement").in("to_id", stmtIds),
+      ]);
+      if (a.error) return json({ error: a.error.message }, 500);
+      if (b.error) return json({ error: b.error.message }, 500);
+      const seen = new Set<string>(), merged: any[] = [];
+      for (const l of [...(a.data ?? []), ...(b.data ?? [])]) { if (!seen.has(l.id)) { seen.add(l.id); merged.push(l); } }
+      return json({ links: await labelEndpoints(merged) });
     }
   }
 
