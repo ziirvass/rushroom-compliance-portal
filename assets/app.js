@@ -2492,12 +2492,71 @@
     ]);
   }
 
+  const rlSessionName = () => (API.session() && API.session().name) || "rushroom";
+
+  // Endpoint label + kind tag (used in queue rows where neither side is fixed).
+  const rlEndpoint = (ep) => el("span", { class: "rl-target" }, [
+    el("strong", {}, (ep && ep.label) || "(removed)"),
+    el("span", { class: "rl-kind" }, ep && ep.type === "document_version" ? "doc" : "clause"),
+  ]);
+
+  // One review-queue row: both endpoints shown, with Accept / Reject / Delete.
+  function rlQueueRow(ctx, link, reload) {
+    const note = el("span", { class: "up-status" }, "");
+    const setStatus = async (s) => {
+      note.className = "up-status"; note.textContent = "…";
+      try { await API.setRequirementLinkStatus(ctx.token, link.id, s, rlSessionName()); await reload(); }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    };
+    const del = async () => {
+      if (!confirm("Delete this link? This cannot be undone.")) return;
+      try { await API.deleteRequirementLink(ctx.token, link.id); await reload(); }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    };
+    const conf = (typeof link.confidence === "number" && link.confidence < 1)
+      ? el("span", { class: "rl-conf" }, `${Math.round(link.confidence * 100)}%`) : null;
+    return el("div", { class: "rl-row" }, [
+      el("div", { class: "rl-row-main" }, [
+        rlEndpoint(link.from), rlTypeChip(link.link_type), el("span", { class: "rl-arrow", "aria-hidden": "true" }, "→"), rlEndpoint(link.to),
+        rlStatusChip(link.status), el("span", { class: "rl-src" }, RL_SOURCE[link.source] || link.source || "manual"), conf,
+      ]),
+      link.rationale ? el("div", { class: "rl-rationale muted" }, link.rationale) : null,
+      el("div", { class: "rl-row-actions" }, [
+        actionBtn("Accept", "edit", { primary: true, onClick: () => setStatus("accepted") }),
+        actionBtn("Reject", "trash", { onClick: () => setStatus("rejected") }),
+        actionBtn("Delete", "trash", { danger: true, onClick: del }),
+        note,
+      ]),
+    ]);
+  }
+
+  // Self-refreshing "needs review" panel: every proposed/flagged link, one screen.
+  function rlQueuePanel(ctx) {
+    const summary = el("summary", {}, "Review queue");
+    const body = el("div", { class: "rl-queue-body" });
+    const node = el("details", { class: "rl-queue" }, [summary, body]);
+    const load = async () => {
+      body.replaceChildren(el("div", { class: "loading" }, "Loading review queue…"));
+      try {
+        const r = await API.listRequirementLinksQueue(ctx.token, ["proposed", "flagged"]);
+        const links = r.links || [];
+        summary.replaceChildren(document.createTextNode(`Review queue (${links.length})`));
+        body.replaceChildren(links.length
+          ? el("div", { class: "rl-list" }, links.map((l) => rlQueueRow(ctx, l, load)))
+          : el("div", { class: "muted", style: "font-size:0.85rem" }, "Nothing to review — no proposed or flagged links."));
+      } catch (ex) { body.replaceChildren(el("div", { class: "error" }, ex.message)); }
+    };
+    load();
+    return { node, reload: load };
+  }
+
   // 4) Links — connect a standard clause to related clauses or As-Operated docs.
   function l2LinksView(ctx) {
     const wrap = el("div");
     const stdVers = flattenStdVersions(ctx.standards);
     const docVers = flattenDocVersions(ctx.documents);
     if (!stdVers.length) { wrap.appendChild(el("div", { class: "empty" }, "No standard versions yet — upload a standard and extract its clauses first.")); return wrap; }
+    const queue = rlQueuePanel(ctx);
 
     const stdSel = el("select", { class: "up-text" }, stdVers.map((o) => {
       const opt = el("option", { value: o.id, "data-base-label": o.label }, `${o.label} [Checking...]`);
@@ -2551,14 +2610,17 @@
       panel.replaceChildren(el("div", { class: "loading" }, "Loading links…"));
       try {
         const r = await API.listRequirementLinks(ctx.token, { entityType: "clause", entityId: clause.id });
-        panel.replaceChildren(rlPanel(ctx, clause, r.links || [], loadLinks, docVers, stdVers));
+        panel.replaceChildren(rlPanel(ctx, clause, r.links || [], reloadBoth, docVers, stdVers));
       } catch (ex) { panel.replaceChildren(el("div", { class: "error" }, ex.message)); }
     };
+    // Per-clause actions also refresh the review queue so its count stays honest.
+    const reloadBoth = async () => { await loadLinks(); await queue.reload(); };
 
     stdSel.addEventListener("change", loadClauses);
     clauseSel.addEventListener("change", loadLinks);
     wrap.append(
       el("p", { class: "muted", style: "margin:0 0 0.6rem" }, "Link a standard clause to related clauses in other standards or to As-Operated documents. Links are bidirectional — open either side and you’ll see the connection, with its type, source and review status."),
+      queue.node,
       el("div", { class: "rl-controls" }, [
         el("span", { class: "form-label" }, "Standard"), stdSel,
         el("span", { class: "form-label" }, "Clause"), clauseSel,

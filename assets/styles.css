@@ -761,6 +761,10 @@ details.phase { scroll-margin-top: calc(var(--header-h, 64px) + 3.5rem); } /* cl
 .rl-controls select { min-width: 160px; }
 .rl-clause-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6rem; margin: 0.4rem 0 0.5rem; }
 .rl-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.2rem 0 0.7rem; }
+.rl-queue { border: 1px solid var(--amber-bd); background: var(--amber-bg); border-radius: 12px; padding: 0.55rem 0.85rem; margin: 0 0 1rem; }
+.rl-queue > summary { cursor: pointer; font-weight: 700; color: var(--amber); }
+.rl-queue[open] > summary { margin-bottom: 0.6rem; }
+.rl-queue-body .rl-row { background: var(--panel); }
 .rl-empty { font-size: 0.85rem; padding: 0.5rem 0; }
 .rl-list { display: grid; gap: 0.5rem; margin: 0.4rem 0 0.8rem; }
 .rl-row { border: 1px solid var(--border); border-radius: 10px; padding: 0.6rem 0.75rem; background: var(--panel-2); }

@@ -2255,6 +2255,18 @@ Be conservative — prefer precision over recall; only match when a compliance r
       }
       return json({ ok: true, created, candidates: candidates.length, usage: usageOf(apiJson) });
     }
+
+    // Review queue: all links in the given statuses (default proposed + flagged),
+    // labelled and newest-first, for one-screen triage across every clause.
+    if (action === "listRequirementLinksQueue") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const wanted = (Array.isArray(body.statuses) ? body.statuses : []).map((s: unknown) => String(s)).filter((s: string) => RL_STATUSES.includes(s));
+      const statuses = wanted.length ? wanted : ["proposed", "flagged"];
+      const { data, error } = await db.from("requirement_links").select("*")
+        .in("status", statuses).order("created_at", { ascending: false }).limit(200);
+      if (error) return json({ error: error.message }, 500);
+      return json({ links: await labelEndpoints(data ?? []) });
+    }
   }
 
   if (action === "exportProductPassport") {
