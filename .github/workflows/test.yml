@@ -1,0 +1,34 @@
+name: portal-api tests
+
+# Stage 0 harness. Runs the dependency-free black-box tests against the
+# portal-api edge function. Unauthenticated smoke tests always run; credentialed
+# and cross-org isolation tests run only when the corresponding repo
+# variables/secrets are configured, and skip (green) otherwise.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run portal-api tests
+        env:
+          # Optional. Defaults to the production function URL (see tests/config.mjs).
+          # Set a repo Variable PORTAL_API_URL to point at a staging function.
+          PORTAL_API_URL: ${{ vars.PORTAL_API_URL }}
+          # Optional secrets — when unset, the dependent tests skip.
+          TEST_RUSHROOM_PASSWORD: ${{ secrets.TEST_RUSHROOM_PASSWORD }}
+          TEST_SUPPLIER_PASSWORD: ${{ secrets.TEST_SUPPLIER_PASSWORD }}
+          TEST_ORG_A_EMAIL: ${{ vars.TEST_ORG_A_EMAIL }}
+          TEST_ORG_A_PASSWORD: ${{ secrets.TEST_ORG_A_PASSWORD }}
+          TEST_ORG_B_EMAIL: ${{ vars.TEST_ORG_B_EMAIL }}
+          TEST_ORG_B_PASSWORD: ${{ secrets.TEST_ORG_B_PASSWORD }}
+        run: node --test tests/*.test.mjs
