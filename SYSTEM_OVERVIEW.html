@@ -1589,19 +1589,20 @@
                 </div>
             </div>
 
-            <div class="proposal-card proposed doc-section-new">
+            <div class="proposal-card implemented doc-section-new">
                 <div class="proposal-header">
                     <div style="display: flex; align-items: center;">
                         <div class="proposal-id">PROP-011</div>
-                        <div class="proposal-title">Requirement Threads — Cross-Document Clause &amp; Text Linking <span class="doc-new-badge">New proposal</span></div>
+                        <div class="proposal-title">Requirement Threads — Cross-Document Clause &amp; Text Linking <span class="doc-new-badge">Shipped</span></div>
                     </div>
-                    <span class="proposal-status status-proposed">PROPOSED</span>
+                    <span class="proposal-status status-implemented">IMPLEMENTED</span>
                 </div>
                 <div class="proposal-meta">
                     <span>Priority: <span class="priority-high">HIGH</span></span>
                     <span>Effort: ~28–40 hours (phased)</span>
-                    <span>Completion: 0%</span>
+                    <span>Completion: ~90%</span>
                     <span>Proposed: 2026-07-07</span>
+                    <span>Shipped: 2026-07-08</span>
                 </div>
                 <p style="margin:6px 0 4px; color:#555;">Connect clauses, paragraphs and statements across <strong>Standards &amp; Regulations</strong> and <strong>As Operated</strong> documents so a user can open any text unit and immediately see where the same or related requirement appears, with clear confidence and evidence. Full UX/product spec: <em>"Requirement Threads"</em> proposal document (separate artifact).</p>
                 <div class="cause-box">
@@ -1632,6 +1633,16 @@
                         <li><strong>Phase 2 (scalable):</strong> decompose As-Operated docs into statements + paragraph anchors, the general Requirement Link entity + event log, Review Queue, versioning/re-anchoring rules, role gating.</li>
                         <li><strong>Phase 3 (advanced):</strong> AI/embedding semantic + cross-standard links, change-impact analysis, auto-propagation with confidence decay, coverage/conflict analytics.</li>
                         <li>Risk: Medium — AI false positives and version churn are the main hazards; mitigated by never auto-accepting semantic links, confidence thresholds, on-demand/cached inference, and keeping the compliance <em>verdict</em> in interpretations (a link is a pointer, not a legal conclusion).</li>
+                    </ul>
+                </div>
+                <div class="effect-box">
+                    <strong>As built (2026-07-08):</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li><strong>Data model:</strong> a <code>requirement_links</code> table (generalises <code>directive_relations</code>: generic <code>(type,id)</code> endpoints for clause | document_version | statement, with link_type / confidence / source / status / evidence / reviewer), plus <code>document_statements</code> (As-Operated paragraphs as addressable text units). RLS deny-all, applied via the SQL Editor.</li>
+                        <li><strong>Edge function:</strong> full link CRUD (<code>listRequirementLinks</code>, <code>createRequirementLink</code>, <code>setRequirementLinkStatus</code>, <code>deleteRequirementLink</code>), batch lookups for clauses / document-versions / statements, a review-queue query, statement CRUD, plus two matchers — deterministic <code>detectClauseCitations</code> (exact "citation" links from clause text) and AI <code>suggestRequirementLinks</code> (<code>claude-opus-4-8</code> semantic proposals, precision-tuned, never auto-accepted).</li>
+                        <li><strong>UI (Clauses &amp; DPP → Links):</strong> per-clause link management, a self-refreshing <strong>Review Queue</strong> (accept / reject / delete across all proposed &amp; flagged links), inline linked-in chips on clause rows, and per-clause "Suggest links (AI)" + per-standard "Detect citations".</li>
+                        <li><strong>Bidirectional &amp; As-Operated:</strong> documents show a "Linked requirements" roll-up (whole-document + paragraph links); a "Paragraphs &amp; links" panel segments a version client-side and links each paragraph to a clause; statement↔clause links surface automatically on the clause side. Re-segmenting cleans up its links (no orphans).</li>
+                        <li><strong>Live as of v=102.</strong> Remaining (~10%): change-awareness flagging on new standard/document versions, AI-suggest for statements, and a coverage view (clauses with no As-Operated evidence).</li>
                     </ul>
                 </div>
             </div>
