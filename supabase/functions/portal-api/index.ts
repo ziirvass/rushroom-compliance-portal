@@ -150,6 +150,36 @@ const MEMBERSHIP_ROLE: Record<string, string> = {
 };
 const membershipRoleFor = (assigned: string) => MEMBERSHIP_ROLE[assigned] || "collaborator";
 
+// --- Stage 2: central tenant scoping (module-level factory) ----------------
+// Tenant tables carry organization_id; reads are filtered and writes are stamped
+// with the caller's org. Global/account tables (users, eu_directives,
+// directive_relations, cellar_cache, organizations, memberships) pass straight
+// through. Build a per-request instance with makeTdb(orgId) — never a shared
+// mutable global — so scoping can't race across concurrent requests. Use
+// tdb(table) exactly like db.from(table) for tenant data.
+const TENANT_TABLES = new Set([
+  "steps", "documents", "document_versions", "uploads", "standards", "standard_versions",
+  "deviation_scans", "deviation_findings", "standard_clauses", "as_operates_interpretations",
+  "product_passports", "passport_interpretation_links", "product_directive_applicability",
+  "classification_log", "requirement_links", "document_statements",
+]);
+function makeTdb(orgId: string) {
+  const stamp = (rows: any) => Array.isArray(rows)
+    ? rows.map((r) => ({ ...r, organization_id: orgId }))
+    : { ...rows, organization_id: orgId };
+  return function tdb(table: string): any {
+    const b = db.from(table);
+    if (!TENANT_TABLES.has(table)) return b;
+    return {
+      select: (...args: any[]) => (b.select as any)(...args).eq("organization_id", orgId),
+      insert: (rows: any) => b.insert(stamp(rows)),
+      upsert: (rows: any, opts?: any) => b.upsert(stamp(rows), opts),
+      update: (patch: any) => b.update(patch).eq("organization_id", orgId),
+      delete: () => b.delete().eq("organization_id", orgId),
+    };
+  };
+}
+
 // HMAC-sign an arbitrary payload (used for email-verification links).
 async function signData(obj: unknown): Promise<string> {
   const payload = b64url(enc.encode(JSON.stringify(obj)));
@@ -195,18 +225,18 @@ const sendPasswordEmail = (to: string, name: string, url: string) =>
 // Insert a document_versions row, tolerating the optional provenance columns
 // (source_document_version_id / source_standard_version_ids) not existing yet —
 // if the DB doesn't have them, retry without them so publishing still works.
-async function insertDocumentVersion(row: Record<string, unknown>) {
+async function insertDocumentVersion(tdb: any, row: Record<string, unknown>) {
   // Auto-number the version (v1, v2, v3 …) when no label was supplied.
   if (!String(row.version ?? "").trim() && row.document_id) {
-    const { count } = await db.from("document_versions").select("id", { count: "exact", head: true }).eq("document_id", row.document_id as string);
+    const { count } = await tdb("document_versions").select("id", { count: "exact", head: true }).eq("document_id", row.document_id as string);
     row.version = `v${(count ?? 0) + 1}`;
   }
-  let res = await db.from("document_versions").insert(row);
+  let res = await tdb("document_versions").insert(row);
   if (res.error && /source_(document|standard)_version_ids?/.test(res.error.message || "")) {
     const clean = { ...row };
     delete clean.source_document_version_id;
     delete clean.source_standard_version_ids;
-    res = await db.from("document_versions").insert(clean);
+    res = await tdb("document_versions").insert(clean);
   }
   return res;
 }
@@ -396,28 +426,28 @@ const APPLICABILITY_STATUSES = ["applicable", "not_applicable", "partial", "unde
 // register whose DOMAIN (category) or code matches the directive's short name, then
 // count clause-level interpretations by status. No matching standards → not assessed
 // (coverage_pct = null → grey node).
-async function coverageForDirective(dir: any): Promise<{ total_clauses: number; covered_clauses: number; coverage_pct: number | null; pending_count: number; deviation_count: number; standard_ids: string[] }> {
+async function coverageForDirective(tdb: any, dir: any): Promise<{ total_clauses: number; covered_clauses: number; coverage_pct: number | null; pending_count: number; deviation_count: number; standard_ids: string[] }> {
   const zero = { total_clauses: 0, covered_clauses: 0, coverage_pct: null as number | null, pending_count: 0, deviation_count: 0, standard_ids: [] as string[] };
   try {
     const shortU = String(dir.short_name || "").toUpperCase();
     if (!shortU) return zero;
-    const { data: stds } = await db.from("standards").select("id, code, category, reg_type, title");
+    const { data: stds } = await tdb("standards").select("id, code, category, reg_type, title");
     const related = (stds || []).filter((s: any) => {
       const hay = `${s.category || ""} ${s.code || ""} ${s.title || ""}`.toUpperCase();
       return hay.includes(shortU);
     });
     const relIds = related.map((s: any) => s.id);
     if (!relIds.length) return zero;
-    const { data: vers } = await db.from("standard_versions").select("id, standard_id, created_at").in("standard_id", relIds).order("created_at", { ascending: false });
+    const { data: vers } = await tdb("standard_versions").select("id, standard_id, created_at").in("standard_id", relIds).order("created_at", { ascending: false });
     const latestByStd = new Map<string, string>();
     for (const v of vers || []) if (!latestByStd.has(v.standard_id)) latestByStd.set(v.standard_id, v.id);
     const versionIds = [...latestByStd.values()];
     if (!versionIds.length) return { ...zero, standard_ids: relIds };
-    const { data: clauses } = await db.from("standard_clauses").select("id").in("standard_version_id", versionIds);
+    const { data: clauses } = await tdb("standard_clauses").select("id").in("standard_version_id", versionIds);
     const clauseIds = (clauses || []).map((c: any) => c.id);
     const total = clauseIds.length;
     if (!total) return { ...zero, standard_ids: relIds };
-    const { data: interps } = await db.from("as_operates_interpretations").select("compliance_status, clause_id").in("clause_id", clauseIds);
+    const { data: interps } = await tdb("as_operates_interpretations").select("compliance_status, clause_id").in("clause_id", clauseIds);
     const statusByClause = new Map<string, string>();
     for (const it of interps || []) statusByClause.set(it.clause_id, it.compliance_status);
     let covered = 0, deviation = 0;
@@ -452,9 +482,9 @@ function celexFromCode(code: string, regType: string): string | null {
 // Pre-load the directive registry from the Standards & Regulations register: any
 // standard classed as an EU Directive/Regulation whose code yields a CELEX and that
 // isn't already tracked gets added to eu_directives. Idempotent; best-effort.
-async function importDirectivesFromStandards(): Promise<number> {
+async function importDirectivesFromStandards(tdb: any): Promise<number> {
   try {
-    const { data: stds } = await db.from("standards").select("code, title, reg_type, category");
+    const { data: stds } = await tdb("standards").select("code, title, reg_type, category");
     if (!stds || !stds.length) return 0;
     const { data: existing } = await db.from("eu_directives").select("celex_number");
     const have = new Set((existing || []).map((d: any) => String(d.celex_number).toUpperCase()));
@@ -481,11 +511,11 @@ async function importDirectivesFromStandards(): Promise<number> {
 // Build the directive relationship graph for a scope: nodes (directives + coverage),
 // edges (relations between in-scope directives) and gaps (referenced directives not
 // in scope / not in the portal). scope: "all" (whole registry) | "company" | "product".
-async function buildComplianceGraph(scope: string, passportId: string | null): Promise<{ nodes: any[]; edges: any[]; gaps: any[] }> {
+async function buildComplianceGraph(tdb: any, scope: string, passportId: string | null): Promise<{ nodes: any[]; edges: any[]; gaps: any[] }> {
   let directives: any[] = [];
   const applicabilityByDir = new Map<string, string>();
   if (scope === "product" && passportId) {
-    const { data: appl } = await db.from("product_directive_applicability").select("*").eq("passport_id", passportId);
+    const { data: appl } = await tdb("product_directive_applicability").select("*").eq("passport_id", passportId);
     for (const a of appl || []) applicabilityByDir.set(a.directive_id, a.applicability_status);
     const dirIds = (appl || []).filter((a: any) => a.applicability_status !== "not_applicable").map((a: any) => a.directive_id);
     if (dirIds.length) { const { data } = await db.from("eu_directives").select("*").in("id", dirIds); directives = data || []; }
@@ -504,7 +534,7 @@ async function buildComplianceGraph(scope: string, passportId: string | null): P
 
   const nodes: any[] = [];
   for (const d of directives) {
-    const cov = await coverageForDirective(d);
+    const cov = await coverageForDirective(tdb, d);
     nodes.push({
       id: d.id, celex: d.celex_number, shortName: d.short_name, title: d.official_title || "",
       status: d.status || "active", directiveType: d.directive_type || "", appliesToCompany: !!d.applies_to_company,
@@ -544,16 +574,16 @@ const CLASS_STATUSES = ["compliant", "deviation", "not_applicable", "pending"];
 // Apply one classification change and append to the audit log. phase/scope may be
 // null (unclassify). When set to pre_launch, monitoring fields are nulled to keep
 // the CHECK constraint satisfied.
-async function applyClassification(entityType: string, id: string, phase: string | null, scope: string | null, aiGenerated: boolean, changedBy: string | null): Promise<{ ok: boolean; error?: string }> {
+async function applyClassification(tdb: any, entityType: string, id: string, phase: string | null, scope: string | null, aiGenerated: boolean, changedBy: string | null): Promise<{ ok: boolean; error?: string }> {
   if (entityType === "step") {
     // Steps have an integer PK and no classified_at/by columns; log via entity_step.
     const stepNo = Number(id);
     if (!stepNo) return { ok: false, error: "invalid step" };
-    const { data: cur } = await db.from("steps").select("lifecycle_phase, scope").eq("step", stepNo).maybeSingle();
+    const { data: cur } = await tdb("steps").select("lifecycle_phase, scope").eq("step", stepNo).maybeSingle();
     if (!cur) return { ok: false, error: "not found" };
-    const { error } = await db.from("steps").update({ lifecycle_phase: phase, scope, classification_ai_generated: !!aiGenerated, updated_at: new Date().toISOString(), updated_by: "classification" }).eq("step", stepNo);
+    const { error } = await tdb("steps").update({ lifecycle_phase: phase, scope, classification_ai_generated: !!aiGenerated, updated_at: new Date().toISOString(), updated_by: "classification" }).eq("step", stepNo);
     if (error) return { ok: false, error: error.message };
-    await db.from("classification_log").insert({ entity_type: "step", entity_step: stepNo, entity_id: null, old_lifecycle_phase: cur.lifecycle_phase ?? null, new_lifecycle_phase: phase ?? null, old_scope: cur.scope ?? null, new_scope: scope ?? null, changed_by: changedBy || null, ai_generated: !!aiGenerated });
+    await tdb("classification_log").insert({ entity_type: "step", entity_step: stepNo, entity_id: null, old_lifecycle_phase: cur.lifecycle_phase ?? null, new_lifecycle_phase: phase ?? null, old_scope: cur.scope ?? null, new_scope: scope ?? null, changed_by: changedBy || null, ai_generated: !!aiGenerated });
     return { ok: true };
   }
   const table = entityType === "interpretation" ? "as_operates_interpretations" : "documents";
@@ -563,7 +593,7 @@ async function applyClassification(entityType: string, id: string, phase: string
   if (phase === "pre_launch") { patch.monitoring_frequency = null; patch.next_due_at = null; patch.last_verified_at = null; }
   const { error } = await db.from(table).update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
-  await db.from("classification_log").insert({
+  await tdb("classification_log").insert({
     entity_type: entityType, entity_id: id,
     old_lifecycle_phase: cur.lifecycle_phase ?? null, new_lifecycle_phase: phase ?? null,
     old_scope: cur.scope ?? null, new_scope: scope ?? null,
@@ -575,19 +605,19 @@ async function applyClassification(entityType: string, id: string, phase: string
 // Load every classifiable item (documents + interpretations) with its own and
 // EFFECTIVE classification (interpretations inherit their parent document's
 // classification when their own is unset — overridable per row).
-async function loadClassificationItems(): Promise<any[]> {
-  const { data: steps } = await db.from("steps").select("step, action, phase, status, lifecycle_phase, scope, classification_ai_generated").order("step");
-  const { data: docs } = await db.from("documents").select("id, name, category, kind, lifecycle_phase, scope, classification_ai_generated");
-  const { data: interps } = await db.from("as_operates_interpretations").select("id, compliance_status, clause_id, document_version_id, lifecycle_phase, scope, classification_ai_generated");
+async function loadClassificationItems(tdb: any): Promise<any[]> {
+  const { data: steps } = await tdb("steps").select("step, action, phase, status, lifecycle_phase, scope, classification_ai_generated").order("step");
+  const { data: docs } = await tdb("documents").select("id, name, category, kind, lifecycle_phase, scope, classification_ai_generated");
+  const { data: interps } = await tdb("as_operates_interpretations").select("id, compliance_status, clause_id, document_version_id, lifecycle_phase, scope, classification_ai_generated");
   const docClass = new Map<string, { phase: string | null; scope: string | null }>();
   const docName = new Map<string, string>();
   for (const d of docs || []) { docClass.set(d.id, { phase: d.lifecycle_phase, scope: d.scope }); docName.set(d.id, d.name || ""); }
   const dvIds = [...new Set((interps || []).map((i: any) => i.document_version_id).filter(Boolean))];
   const dvToDoc = new Map<string, string>();
-  if (dvIds.length) { const { data: dvs } = await db.from("document_versions").select("id, document_id").in("id", dvIds); for (const v of dvs || []) dvToDoc.set(v.id, v.document_id); }
+  if (dvIds.length) { const { data: dvs } = await tdb("document_versions").select("id, document_id").in("id", dvIds); for (const v of dvs || []) dvToDoc.set(v.id, v.document_id); }
   const clauseIds = [...new Set((interps || []).map((i: any) => i.clause_id).filter(Boolean))];
   const clauseMap = new Map<string, any>();
-  if (clauseIds.length) { const { data: cs } = await db.from("standard_clauses").select("id, clause_ref, clause_title").in("id", clauseIds); for (const c of cs || []) clauseMap.set(c.id, c); }
+  if (clauseIds.length) { const { data: cs } = await tdb("standard_clauses").select("id, clause_ref, clause_title").in("id", clauseIds); for (const c of cs || []) clauseMap.set(c.id, c); }
   const items: any[] = [];
   // Steps: their action-plan status maps to a compliance bucket so the matrix % reflects progress.
   const stepStatus = (st: string) => /done|complete|closed/i.test(st || "") ? "compliant" : /n\/?a|not applicable/i.test(st || "") ? "not_applicable" : "pending";
@@ -752,6 +782,11 @@ Deno.serve(async (req) => {
   // request body). Legacy tokens without an org fall back to the seed org.
   const organizationId = (session.org as string) || RUSHROOM_ORG_ID;
 
+  // --- Stage 2: central tenant scoping (per-request instance) -------------
+  const tdb = makeTdb(organizationId);
+  // Org-namespaced storage prefix for newly generated upload paths.
+  const orgPrefix = `${organizationId}/`;
+
   // --- tenant context for the caller (Stage 1; read-only, session-derived) --
   if (action === "orgContext") {
     let organizationName = "";
@@ -830,8 +865,8 @@ Deno.serve(async (req) => {
 
   if (action === "data") {
     const [{ data: steps }, { data: documents }] = await Promise.all([
-      db.from("steps").select("*").order("step"),
-      db.from("documents").select("*").order("sort").order("category"),
+      tdb("steps").select("*").order("step"),
+      tdb("documents").select("*").order("sort").order("category"),
     ]);
     const s = role === "supplier" ? (steps ?? []).filter((r) => isSupplierStep(r.audience)) : (steps ?? []);
     const d = role === "supplier" ? (documents ?? []).filter((r) => isSupplierStep(r.audience)) : (documents ?? []);
@@ -841,7 +876,7 @@ Deno.serve(async (req) => {
       // Documents are version-managed: attach the version history (newest first)
       // with signed links, and use the latest as the current file.
       let versions: any[] = [];
-      const { data: vs } = await db.from("document_versions").select("*").eq("document_id", doc.id).order("created_at", { ascending: false });
+      const { data: vs } = await tdb("document_versions").select("*").eq("document_id", doc.id).order("created_at", { ascending: false });
       versions = await Promise.all((vs ?? []).map(async (v) => {
         const { data: s } = await db.storage.from(DOC_BUCKET).createSignedUrl(v.storage_path, 60 * 60);
         return { ...v, open_url: s?.signedUrl ?? "" };
@@ -858,13 +893,13 @@ Deno.serve(async (req) => {
     const standardVersionMap = new Map<string, any>();
     if (allStandardVersionIds.length) {
       const uniq = [...new Set(allStandardVersionIds)];
-      const { data: vs } = await db.from("standard_versions").select("*, standard:standard_id(code,title)").in("id", uniq);
+      const { data: vs } = await tdb("standard_versions").select("*, standard:standard_id(code,title)").in("id", uniq);
       for (const v of vs ?? []) standardVersionMap.set(v.id, v);
     }
     const sourceVersionMap = new Map<string, any>();
     if (allSourceDocumentVersionIds.length) {
       const uniq = [...new Set(allSourceDocumentVersionIds)];
-      const { data: sv } = await db.from("document_versions").select("id,document_id,version,file_name,created_at").in("id", uniq);
+      const { data: sv } = await tdb("document_versions").select("id,document_id,version,file_name,created_at").in("id", uniq);
       for (const v of sv ?? []) sourceVersionMap.set(v.id, v);
     }
     const enrichedDocs = docs.map((doc) => ({
@@ -883,11 +918,11 @@ Deno.serve(async (req) => {
     const step = Number(body.step);
     const status = String(body.status ?? "").trim();
     if (!step || !status) return json({ error: "step and status required" }, 400);
-    const { data: row } = await db.from("steps").select("audience").eq("step", step).maybeSingle();
+    const { data: row } = await tdb("steps").select("audience").eq("step", step).maybeSingle();
     if (!row) return json({ error: "Unknown step" }, 404);
     if (role === "supplier" && !isSupplierStep(row.audience)) return json({ error: "Not allowed for this step" }, 403);
     const by = role === "supplier" ? `supplier${body.supplierLabel ? ` (${String(body.supplierLabel).slice(0, 60)})` : ""}` : "rushroom";
-    const { error } = await db.from("steps").update({ status, updated_at: new Date().toISOString(), updated_by: by }).eq("step", step);
+    const { error } = await tdb("steps").update({ status, updated_at: new Date().toISOString(), updated_by: by }).eq("step", step);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true, step, status });
   }
@@ -899,7 +934,7 @@ Deno.serve(async (req) => {
     // the request router field `action`.
     const action_ = String(body.actionText ?? "").trim();
     if (!action_) return json({ error: "action text required" }, 400);
-    const { data: maxRow } = await db.from("steps").select("step").order("step", { ascending: false }).limit(1).maybeSingle();
+    const { data: maxRow } = await tdb("steps").select("step").order("step", { ascending: false }).limit(1).maybeSingle();
     const step = (maxRow?.step ?? 0) + 1;
     const audience = Array.isArray(body.audience) && body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
     const lp = body.lifecyclePhase && LIFECYCLE_PHASES.includes(String(body.lifecyclePhase)) ? String(body.lifecyclePhase) : null;
@@ -918,10 +953,10 @@ Deno.serve(async (req) => {
       lifecycle_phase: lp, scope: sc,
       updated_by: "rushroom",
     };
-    let res = await db.from("steps").insert(row);
+    let res = await tdb("steps").insert(row);
     if (res.error && /lifecycle_phase|scope|classification/i.test(res.error.message || "")) {
       const clean = { ...row }; delete clean.lifecycle_phase; delete clean.scope;
-      res = await db.from("steps").insert(clean);
+      res = await tdb("steps").insert(clean);
     }
     if (res.error) return json({ error: res.error.message }, 500);
     return json({ ok: true, step });
@@ -939,10 +974,10 @@ Deno.serve(async (req) => {
     if (Array.isArray(body.audience)) patch.audience = body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
     if (body.lifecyclePhase !== undefined) patch.lifecycle_phase = body.lifecyclePhase && LIFECYCLE_PHASES.includes(String(body.lifecyclePhase)) ? String(body.lifecyclePhase) : null;
     if (body.scope !== undefined) patch.scope = body.scope && COMPLIANCE_SCOPES.includes(String(body.scope)) ? String(body.scope) : null;
-    let res = await db.from("steps").update(patch).eq("step", step);
+    let res = await tdb("steps").update(patch).eq("step", step);
     if (res.error && /lifecycle_phase|scope|classification/i.test(res.error.message || "")) {
       const clean = { ...patch }; delete clean.lifecycle_phase; delete clean.scope;
-      res = await db.from("steps").update(clean).eq("step", step);
+      res = await tdb("steps").update(clean).eq("step", step);
     }
     if (res.error) return json({ error: res.error.message }, 500);
     return json({ ok: true, step });
@@ -952,13 +987,13 @@ Deno.serve(async (req) => {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const step = Number(body.step);
     if (!step) return json({ error: "step required" }, 400);
-    const { error } = await db.from("steps").delete().eq("step", step);
+    const { error } = await tdb("steps").delete().eq("step", step);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }
 
   if (action === "uploadUrl") {
-    const path = `${role}/${Date.now()}-${safeName(String(body.fileName ?? "file"))}`;
+    const path = `${orgPrefix}${role}/${Date.now()}-${safeName(String(body.fileName ?? "file"))}`;
     const { data, error } = await db.storage.from(BUCKET).createSignedUploadUrl(path);
     if (error) return json({ error: error.message }, 500);
     return json({ signedUrl: data.signedUrl, token: data.token, path });
@@ -968,7 +1003,9 @@ Deno.serve(async (req) => {
     const path = String(body.path ?? "");
     const fileName = String(body.fileName ?? "");
     if (!path || !fileName) return json({ error: "path and fileName required" }, 400);
-    const { error } = await db.from("uploads").insert({
+    // Defence-in-depth: a recorded file must live under this tenant's prefix.
+    if (!path.startsWith(orgPrefix)) return json({ error: "Invalid upload path for this organization" }, 400);
+    const { error } = await tdb("uploads").insert({
       step: body.step ? Number(body.step) : null,
       uploaded_role: role,
       supplier_label: String(body.supplierLabel ?? "").slice(0, 120),
@@ -983,7 +1020,7 @@ Deno.serve(async (req) => {
   // --- document library management (Rushroom only) ------------------------
   if (action === "docUploadUrl") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const path = `${Date.now()}-${safeName(String(body.fileName ?? "file"))}`;
+    const path = `${orgPrefix}${Date.now()}-${safeName(String(body.fileName ?? "file"))}`;
     const { data, error } = await db.storage.from(DOC_BUCKET).createSignedUploadUrl(path);
     if (error) return json({ error: error.message }, 500);
     return json({ signedUrl: data.signedUrl, token: data.token, path });
@@ -1009,10 +1046,10 @@ Deno.serve(async (req) => {
       lifecycle_phase: lp, scope: sc,
       classification_ai_generated: false,
     };
-    let ins = await db.from("documents").insert(docRow).select("id").maybeSingle();
+    let ins = await tdb("documents").insert(docRow).select("id").maybeSingle();
     if (ins.error && /lifecycle_phase|scope|classification/i.test(ins.error.message || "")) {
       const clean = { ...docRow }; delete clean.lifecycle_phase; delete clean.scope; delete clean.classification_ai_generated;
-      ins = await db.from("documents").insert(clean).select("id").maybeSingle();
+      ins = await tdb("documents").insert(clean).select("id").maybeSingle();
     }
     const doc = ins.data; const error = ins.error;
     if (error) return json({ error: error.message }, 500);
@@ -1021,7 +1058,7 @@ Deno.serve(async (req) => {
       const versionLabel = String(body.version ?? "").slice(0, 80);
       const fileName = String(body.fileName ?? "file").slice(0, 200);
       if (storagePath || versionLabel || fileName) {
-        await insertDocumentVersion({
+        await insertDocumentVersion(tdb, {
           document_id: doc.id, version: versionLabel,
           file_name: fileName, storage_path: storagePath,
           notes: String(body.notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
@@ -1036,15 +1073,15 @@ Deno.serve(async (req) => {
     const templateDocumentId = String(body.templateDocumentId ?? "");
     if (!templateDocumentId) return json({ error: "templateDocumentId required" }, 400);
 
-    const { data: templateDoc, error: templateErr } = await db.from("documents").select("id,name,category,url,storage_path,audience").eq("id", templateDocumentId).maybeSingle();
+    const { data: templateDoc, error: templateErr } = await tdb("documents").select("id,name,category,url,storage_path,audience").eq("id", templateDocumentId).maybeSingle();
     if (templateErr || !templateDoc) return json({ error: "Template not found" }, 404);
 
-    const { data: latestTemplateVersion } = await db.from("document_versions").select("id").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const { data: latestTemplateVersion } = await tdb("document_versions").select("id").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
     const sourceDocumentVersionId = latestTemplateVersion?.id || null;
 
     const name = String(body.name ?? "").trim() || `${templateDoc.name || "Template"} — As Operated`;
     const audience = Array.isArray(templateDoc.audience) && templateDoc.audience.length ? templateDoc.audience : ["internal"];
-    const { data: doc, error } = await db.from("documents").insert({
+    const { data: doc, error } = await tdb("documents").insert({
       category: String(templateDoc.category ?? "Uncategorised").slice(0, 80),
       name: name.slice(0, 200),
       url: String(templateDoc.url ?? "").slice(0, 1000),
@@ -1057,7 +1094,7 @@ Deno.serve(async (req) => {
     const version = String(body.version ?? "v1").trim() || "v1";
     const notes = String(body.notes ?? "").slice(0, 1000);
     if (doc?.id && templateDoc.storage_path) {
-      await insertDocumentVersion({
+      await insertDocumentVersion(tdb, {
         document_id: doc.id,
         version: version.slice(0, 80),
         file_name: String(templateDoc.name || "template").slice(0, 200),
@@ -1083,18 +1120,18 @@ Deno.serve(async (req) => {
     let storagePath = "";
     let fileName = "document";
     if (document_id) {
-      const { data: foundDoc, error: docErr } = await db.from("documents").select("id,name,kind,storage_path").eq("id", document_id).maybeSingle();
+      const { data: foundDoc, error: docErr } = await tdb("documents").select("id,name,kind,storage_path").eq("id", document_id).maybeSingle();
       if (docErr || !foundDoc) return json({ error: "Document not found" }, 404);
       doc = foundDoc;
-      const { data: latest } = await db.from("document_versions").select("*").eq("document_id", document_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const { data: latest } = await tdb("document_versions").select("*").eq("document_id", document_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
       // Fall back to the document's own file when no version row exists yet.
       storagePath = latest?.storage_path || foundDoc.storage_path || "";
       fileName = latest?.file_name || doc.name || "document";
     } else if (templateDocumentId) {
-      const { data: foundDoc } = await db.from("documents").select("id,name,kind,storage_path").eq("id", templateDocumentId).maybeSingle();
+      const { data: foundDoc } = await tdb("documents").select("id,name,kind,storage_path").eq("id", templateDocumentId).maybeSingle();
       if (foundDoc) {
         doc = foundDoc;
-        const { data: latest } = await db.from("document_versions").select("*").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        const { data: latest } = await tdb("document_versions").select("*").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
         storagePath = latest?.storage_path || foundDoc.storage_path || "";
         fileName = latest?.file_name || doc.name || "document";
       }
@@ -1111,7 +1148,7 @@ Deno.serve(async (req) => {
     if (sourceStandardIds.length && !standardVersionIds.length) {
       // backward compatibility: use the latest uploaded version for each standard ID.
       for (const standardId of sourceStandardIds) {
-        const { data: latestVersion } = await db.from("standard_versions").select("id").eq("standard_id", standardId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        const { data: latestVersion } = await tdb("standard_versions").select("id").eq("standard_id", standardId).order("created_at", { ascending: false }).limit(1).maybeSingle();
         if (latestVersion?.id) standardVersionIds.push(latestVersion.id);
       }
     }
@@ -1119,7 +1156,7 @@ Deno.serve(async (req) => {
       content.push({ type: "text", text: "\n=== REFERENCE STANDARDS & REGULATIONS ===" });
       const summaries: string[] = [];
       for (const standardVersionId of standardVersionIds) {
-        const { data: version } = await db.from("standard_versions").select("*, standard:standard_id(code,title,category)").eq("id", standardVersionId).maybeSingle();
+        const { data: version } = await tdb("standard_versions").select("*, standard:standard_id(code,title,category)").eq("id", standardVersionId).maybeSingle();
         if (!version) continue;
         const label = `${version.standard?.code || version.standard?.title || "standard"}${version.version ? ` ${version.version}` : ""}`;
         if (version.storage_path) {
@@ -1198,10 +1235,10 @@ Deno.serve(async (req) => {
       const audience = Array.isArray(body.audience) && body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
       let templateDoc: any = null;
       if (templateDocumentId) {
-        const { data: found } = await db.from("documents").select("id,category,audience,storage_path").eq("id", templateDocumentId).maybeSingle();
+        const { data: found } = await tdb("documents").select("id,category,audience,storage_path").eq("id", templateDocumentId).maybeSingle();
         templateDoc = found;
       }
-      const { data: doc, error: insertErr } = await db.from("documents").insert({
+      const { data: doc, error: insertErr } = await tdb("documents").insert({
         category: String(templateDoc?.category ?? category).slice(0, 80),
         name: name.slice(0, 200),
         url: "",
@@ -1212,17 +1249,17 @@ Deno.serve(async (req) => {
       if (insertErr) return json({ error: insertErr.message }, 500);
       targetDocumentId = doc?.id || "";
       if (!sourceDocumentVersionId && templateDocumentId) {
-        const { data: latestTemplateVersion } = await db.from("document_versions").select("id").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        const { data: latestTemplateVersion } = await tdb("document_versions").select("id").eq("document_id", templateDocumentId).order("created_at", { ascending: false }).limit(1).maybeSingle();
         sourceDocumentVersionId = latestTemplateVersion?.id || "";
       }
     }
     if (!targetDocumentId) return json({ error: "documentId or newDocumentName required" }, 400);
     if (!sourceDocumentVersionId && document_id) {
-      const { data: latestSourceVersion } = await db.from("document_versions").select("id").eq("document_id", document_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const { data: latestSourceVersion } = await tdb("document_versions").select("id").eq("document_id", document_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
       sourceDocumentVersionId = latestSourceVersion?.id || "";
     }
 
-    const { error: insertErr } = await insertDocumentVersion({
+    const { error: insertErr } = await insertDocumentVersion(tdb, {
       document_id: targetDocumentId,
       version: String(body.version ?? "AI draft").slice(0, 80),
       file_name: fileName.slice(0, 200),
@@ -1233,7 +1270,7 @@ Deno.serve(async (req) => {
       source_standard_version_ids: sourceStandardVersionIds.length ? sourceStandardVersionIds : [],
     });
     if (insertErr) return json({ error: insertErr.message }, 500);
-    await db.from("documents").update({ storage_path: path }).eq("id", targetDocumentId);
+    await tdb("documents").update({ storage_path: path }).eq("id", targetDocumentId);
     return json({ ok: true, id: targetDocumentId });
   }
 
@@ -1245,7 +1282,7 @@ Deno.serve(async (req) => {
     const sourceStandardVersionIds = Array.isArray(body.sourceStandardVersionIds) ? body.sourceStandardVersionIds.filter((v: unknown) => String(v ?? "").trim()) : [];
     const sourceDocumentVersionId = String(body.sourceDocumentVersionId ?? "").trim() || null;
     if (!document_id || !path || !fileName) return json({ error: "documentId, path, fileName required" }, 400);
-    const { error } = await insertDocumentVersion({
+    const { error } = await insertDocumentVersion(tdb, {
       document_id, version: String(body.version ?? "").slice(0, 80),
       file_name: fileName.slice(0, 200), storage_path: path,
       notes: String(body.notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
@@ -1253,7 +1290,7 @@ Deno.serve(async (req) => {
       source_standard_version_ids: sourceStandardVersionIds.length ? sourceStandardVersionIds : [],
     });
     if (error) return json({ error: error.message }, 500);
-    await db.from("documents").update({ storage_path: path }).eq("id", document_id); // keep current pointer in sync
+    await tdb("documents").update({ storage_path: path }).eq("id", document_id); // keep current pointer in sync
     return json({ ok: true });
   }
 
@@ -1267,14 +1304,14 @@ Deno.serve(async (req) => {
     if (body.category !== undefined) patch.category = String(body.category).slice(0, 80);
     if (Array.isArray(body.audience)) patch.audience = body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
     if (!Object.keys(patch).length) return json({ error: "nothing to update" }, 400);
-    const { error } = await db.from("documents").update(patch).eq("id", id);
+    const { error } = await tdb("documents").update(patch).eq("id", id);
     if (error) return json({ error: error.message }, 500);
     // Moving a single-file template into the versioned operational track: seed v1.
     if (patch.kind === "operational") {
-      const { data: doc } = await db.from("documents").select("storage_path").eq("id", id).maybeSingle();
-      const { count } = await db.from("document_versions").select("id", { count: "exact", head: true }).eq("document_id", id);
+      const { data: doc } = await tdb("documents").select("storage_path").eq("id", id).maybeSingle();
+      const { count } = await tdb("document_versions").select("id", { count: "exact", head: true }).eq("document_id", id);
       if (doc?.storage_path && !count) {
-        await db.from("document_versions").insert({
+        await tdb("document_versions").insert({
           document_id: id, version: "v1", file_name: (doc.storage_path.split("/").pop() || "file"),
           storage_path: doc.storage_path, uploaded_by: "rushroom",
         });
@@ -1295,12 +1332,12 @@ Deno.serve(async (req) => {
     let deletedDocs = 0, deletedFiles = 0;
     const errors: any[] = [];
     for (const id of ids) {
-      const { data: doc } = await db.from("documents").select("id, storage_path").eq("id", id).maybeSingle();
+      const { data: doc } = await tdb("documents").select("id, storage_path").eq("id", id).maybeSingle();
       if (!doc) { errors.push({ id, error: "not found" }); continue; }
-      const { data: vers } = await db.from("document_versions").select("storage_path").eq("document_id", id);
+      const { data: vers } = await tdb("document_versions").select("storage_path").eq("document_id", id);
       const paths = [doc.storage_path, ...((vers ?? []).map((v: any) => v.storage_path))].filter((p: unknown): p is string => typeof p === "string" && p.trim() !== "");
       if (paths.length) { try { const { error: rmErr } = await db.storage.from(DOC_BUCKET).remove(paths); if (!rmErr) deletedFiles += paths.length; } catch { /* file cleanup best-effort */ } }
-      const { error } = await db.from("documents").delete().eq("id", id);
+      const { error } = await tdb("documents").delete().eq("id", id);
       if (error) { errors.push({ id, error: error.message }); continue; }
       deletedDocs++;
     }
@@ -1309,12 +1346,12 @@ Deno.serve(async (req) => {
 
   // --- Standards & Regulations register -----------------------------------
   if (action === "standards") {
-    const { data: stds } = await db.from("standards").select("*").order("code");
+    const { data: stds } = await tdb("standards").select("*").order("code");
     const list = role === "supplier" ? (stds ?? []).filter((s) => isSupplierStep(s.audience)) : (stds ?? []);
     const ids = list.map((s) => s.id);
     let versions: any[] = [];
     if (ids.length) {
-      const { data: vs } = await db.from("standard_versions").select("*").in("standard_id", ids).order("created_at", { ascending: false });
+      const { data: vs } = await tdb("standard_versions").select("*").in("standard_id", ids).order("created_at", { ascending: false });
       versions = vs ?? [];
     }
     const withUrls = await Promise.all(versions.map(async (v) => {
@@ -1338,11 +1375,11 @@ Deno.serve(async (req) => {
       reg_type: String(body.regType ?? "").slice(0, 60),
       jurisdiction: String(body.jurisdiction ?? "").slice(0, 60),
     };
-    let res = await db.from("standards").insert(row).select("id").maybeSingle();
+    let res = await tdb("standards").insert(row).select("id").maybeSingle();
     // Self-heal if the optional reg_type / jurisdiction columns aren't added yet.
     if (res.error && /reg_type|jurisdiction/.test(res.error.message || "")) {
       const { reg_type: _r, jurisdiction: _j, ...base } = row;
-      res = await db.from("standards").insert(base).select("id").maybeSingle();
+      res = await tdb("standards").insert(base).select("id").maybeSingle();
     }
     if (res.error) return json({ error: res.error.message }, 500);
     return json({ ok: true, id: res.data?.id });
@@ -1360,10 +1397,10 @@ Deno.serve(async (req) => {
     if (body.jurisdiction !== undefined) patch.jurisdiction = String(body.jurisdiction).slice(0, 60);
     if (Array.isArray(body.audience)) patch.audience = body.audience.length ? body.audience.map((a: unknown) => String(a)) : ["internal"];
     if (!Object.keys(patch).length) return json({ error: "nothing to update" }, 400);
-    let res = await db.from("standards").update(patch).eq("id", id);
+    let res = await tdb("standards").update(patch).eq("id", id);
     if (res.error && /reg_type|jurisdiction/.test(res.error.message || "")) {
       const { reg_type: _r, jurisdiction: _j, ...base } = patch;
-      res = await db.from("standards").update(base).eq("id", id);
+      res = await tdb("standards").update(base).eq("id", id);
     }
     if (res.error) return json({ error: res.error.message }, 500);
     return json({ ok: true });
@@ -1373,17 +1410,17 @@ Deno.serve(async (req) => {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const id = String(body.id ?? "");
     if (!id) return json({ error: "id required" }, 400);
-    const { data: vs } = await db.from("standard_versions").select("storage_path").eq("standard_id", id);
+    const { data: vs } = await tdb("standard_versions").select("storage_path").eq("standard_id", id);
     const paths = (vs ?? []).map((v) => v.storage_path).filter(Boolean);
     if (paths.length) await db.storage.from(STD_BUCKET).remove(paths);
-    const { error } = await db.from("standards").delete().eq("id", id); // cascade removes version rows
+    const { error } = await tdb("standards").delete().eq("id", id); // cascade removes version rows
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }
 
   if (action === "stdUploadUrl") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const path = `${Date.now()}-${safeName(String(body.fileName ?? "file"))}`;
+    const path = `${orgPrefix}${Date.now()}-${safeName(String(body.fileName ?? "file"))}`;
     const { data, error } = await db.storage.from(STD_BUCKET).createSignedUploadUrl(path);
     if (error) return json({ error: error.message }, 500);
     return json({ signedUrl: data.signedUrl, token: data.token, path });
@@ -1397,10 +1434,10 @@ Deno.serve(async (req) => {
     if (!standard_id || !path || !fileName) return json({ error: "standardId, path, fileName required" }, 400);
     let versionLabel = String(body.version ?? "").slice(0, 80);
     if (!versionLabel.trim()) {
-      const { count } = await db.from("standard_versions").select("id", { count: "exact", head: true }).eq("standard_id", standard_id);
+      const { count } = await tdb("standard_versions").select("id", { count: "exact", head: true }).eq("standard_id", standard_id);
       versionLabel = `v${(count ?? 0) + 1}`;
     }
-    const { error } = await db.from("standard_versions").insert({
+    const { error } = await tdb("standard_versions").insert({
       standard_id,
       version: versionLabel,
       effective_date: String(body.effectiveDate ?? "").slice(0, 40),
@@ -1535,9 +1572,9 @@ Deno.serve(async (req) => {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const id = String(body.id ?? "");
     if (!id) return json({ error: "id required" }, 400);
-    const { data: v } = await db.from("standard_versions").select("storage_path").eq("id", id).maybeSingle();
+    const { data: v } = await tdb("standard_versions").select("storage_path").eq("id", id).maybeSingle();
     if (v?.storage_path) await db.storage.from(STD_BUCKET).remove([v.storage_path]);
-    const { error } = await db.from("standard_versions").delete().eq("id", id);
+    const { error } = await tdb("standard_versions").delete().eq("id", id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }
@@ -1547,17 +1584,17 @@ Deno.serve(async (req) => {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     // Fetch the latest scan and the one before it, so we can flag findings that
     // are new since the previous scan (yellow-marked in the UI).
-    const { data: scans } = await db.from("deviation_scans").select("*").order("created_at", { ascending: false }).limit(2);
+    const { data: scans } = await tdb("deviation_scans").select("*").order("created_at", { ascending: false }).limit(2);
     const scan = scans?.[0];
     const prevScan = scans?.[1];
     if (!scan) return json({ scan: null, findings: [] });
     const sigOf = (f: any) => `${f.severity}|${String(f.title || "").trim().toLowerCase()}|${String(f.document || "").trim().toLowerCase()}|${String(f.standard || "").trim().toLowerCase()}`;
     let prevSet: Set<string> | null = null;
     if (prevScan) {
-      const { data: prevFindings } = await db.from("deviation_findings").select("severity,title,document,standard").eq("scan_id", prevScan.id);
+      const { data: prevFindings } = await tdb("deviation_findings").select("severity,title,document,standard").eq("scan_id", prevScan.id);
       prevSet = new Set((prevFindings ?? []).map(sigOf));
     }
-    const { data: findings } = await db.from("deviation_findings").select("*").eq("scan_id", scan.id);
+    const { data: findings } = await tdb("deviation_findings").select("*").eq("scan_id", scan.id);
     const withNew = (findings ?? []).map((f) => ({ ...f, is_new: prevSet ? !prevSet.has(sigOf(f)) : false }));
     return json({ scan, findings: withNew, hasPrevious: !!prevScan });
   }
@@ -1566,13 +1603,13 @@ Deno.serve(async (req) => {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
 
     // Operational ("Company as Operated") documents are the evidence being audited.
-    const { data: docs } = await db.from("documents").select("id,name,storage_path").eq("kind", "operational").neq("storage_path", "");
+    const { data: docs } = await tdb("documents").select("id,name,storage_path").eq("kind", "operational").neq("storage_path", "");
     const storedDocs = (docs ?? []).filter((d) => d.storage_path);
 
     // ---- Phase A: structured findings from clause-level interpretations ----
     // Instant, no LLM. A document with any interpretations is "covered" and is
     // NOT sent to the AI — its deviations/pending items come from here instead.
-    const { data: interps } = await db.from("as_operates_interpretations").select(
+    const { data: interps } = await tdb("as_operates_interpretations").select(
       "compliance_status, interpretation_text, rationale, deviation_description, deviation_accepted_by, document_version_id, clause:clause_id(clause_ref, clause_title, standard:standard_version_id(standard:standard_id(code,title)))",
     );
     const interpList = interps ?? [];
@@ -1580,7 +1617,7 @@ Deno.serve(async (req) => {
     const coveredDocIds = new Set<string>();
     const interpVersionIds = [...new Set(interpList.map((i) => i.document_version_id))];
     if (interpVersionIds.length) {
-      const { data: vers } = await db.from("document_versions").select("id, file_name, document_id, document:document_id(name, kind)").in("id", interpVersionIds);
+      const { data: vers } = await tdb("document_versions").select("id, file_name, document_id, document:document_id(name, kind)").in("id", interpVersionIds);
       for (const v of vers ?? []) {
         docNameByVersion[v.id] = (v as any).document?.name || v.file_name || "document";
         if (((v as any).document?.kind || "template") === "operational") coveredDocIds.add(v.document_id);
@@ -1611,10 +1648,10 @@ Deno.serve(async (req) => {
     // ---- Phase B: AI fallback for operational docs WITHOUT interpretations ----
     const uncoveredDocs = storedDocs.filter((d) => !coveredDocIds.has(d.id));
     // Latest uploaded version of each standard (needed for the AI comparison).
-    const { data: stds } = await db.from("standards").select("id,code,title,category").order("code");
+    const { data: stds } = await tdb("standards").select("id,code,title,category").order("code");
     const standards: any[] = [];
     for (const s of stds ?? []) {
-      const { data: v } = await db.from("standard_versions").select("*").eq("standard_id", s.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const { data: v } = await tdb("standard_versions").select("*").eq("standard_id", s.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (v?.storage_path) standards.push({ ...s, version: v.version, storage_path: v.storage_path, file_name: v.file_name });
     }
     const willRunAI = uncoveredDocs.length > 0 && standards.length > 0;
@@ -1704,18 +1741,18 @@ Be specific: name the exact document and the exact standard (and clause where po
       counts, docs_scanned: coveredDocIds.size + (willRunAI && !aiNote ? uncoveredDocs.length : 0), standards_scanned: standards.length,
       usage: aiUsage,
     };
-    let scanResp = await db.from("deviation_scans").insert(scanRow).select("*").maybeSingle();
+    let scanResp = await tdb("deviation_scans").insert(scanRow).select("*").maybeSingle();
     // Self-heal if the optional `usage` column hasn't been added yet.
     if (scanResp.error && /usage/.test(scanResp.error.message || "")) {
       const { usage: _u, ...noUsage } = scanRow;
-      scanResp = await db.from("deviation_scans").insert(noUsage).select("*").maybeSingle();
+      scanResp = await tdb("deviation_scans").insert(noUsage).select("*").maybeSingle();
     }
     const scan = scanResp.data;
     if (scanResp.error || !scan) return json({ error: `Could not save scan: ${scanResp.error?.message}` }, 500);
 
     if (allFindings.length) {
       const rows = allFindings.slice(0, 300).map((f: any) => ({ scan_id: scan.id, ...f }));
-      const { error: fErr } = await db.from("deviation_findings").insert(rows);
+      const { error: fErr } = await tdb("deviation_findings").insert(rows);
       if (fErr) return json({ error: `Could not save findings: ${fErr.message}` }, 500);
     }
     return json({ ok: true, scan: { ...scan, usage: scan.usage ?? aiUsage }, findings: allFindings, structuredCount: structuredFindings.length, aiCount: aiFindings.length, usage: aiUsage });
@@ -1725,16 +1762,16 @@ Be specific: name the exact document and the exact standard (and clause where po
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const id = String(body.id ?? "");
     if (!id) return json({ error: "id required" }, 400);
-    const { data: u } = await db.from("uploads").select("file_path").eq("id", id).maybeSingle();
+    const { data: u } = await tdb("uploads").select("file_path").eq("id", id).maybeSingle();
     if (u?.file_path) await db.storage.from(BUCKET).remove([u.file_path]);
-    const { error } = await db.from("uploads").delete().eq("id", id);
+    const { error } = await tdb("uploads").delete().eq("id", id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }
 
   if (action === "uploads") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const { data, error } = await db.from("uploads").select("*").order("created_at", { ascending: false }).limit(200);
+    const { data, error } = await tdb("uploads").select("*").order("created_at", { ascending: false }).limit(200);
     if (error) return json({ error: error.message }, 500);
     // Attach short-lived signed download links
     const withUrls = await Promise.all((data ?? []).map(async (u) => {
@@ -1753,7 +1790,7 @@ Be specific: name the exact document and the exact standard (and clause where po
     if (!standardVersionId) return json({ error: "standardVersionId required" }, 400);
     const maxClauses = Number(body.maxClauses ?? 200) || 200;
 
-    const { data: version } = await db.from("standard_versions")
+    const { data: version } = await tdb("standard_versions")
       .select("*, standard:standard_id(code,title)").eq("id", standardVersionId).maybeSingle();
     if (!version) return json({ error: "Standard version not found" }, 404);
     if (!version.storage_path) return json({ error: "Standard version has no uploaded file" }, 400);
@@ -1814,7 +1851,7 @@ Be specific: name the exact document and the exact standard (and clause where po
 
     if (!toInsert.length) return json({ error: "No valid clauses to insert" }, 400);
 
-    const { data: inserted, error: insertErr } = await db.from("standard_clauses").insert(toInsert).select("id,clause_ref");
+    const { data: inserted, error: insertErr } = await tdb("standard_clauses").insert(toInsert).select("id,clause_ref");
     if (insertErr) {
       if (insertErr.code === "23505") {
         // Duplicate key: clauses already exist for this standard version
@@ -1833,7 +1870,7 @@ Be specific: name the exact document and the exact standard (and clause where po
       if (parentRef === orig.clause_ref) continue; // no parent
       const parent = (inserted ?? []).find((p) => p.clause_ref === parentRef);
       if (parent?.id) {
-        await db.from("standard_clauses").update({ parent_clause_id: parent.id }).eq("id", clause.id);
+        await tdb("standard_clauses").update({ parent_clause_id: parent.id }).eq("id", clause.id);
       }
     }
 
@@ -1848,12 +1885,12 @@ Be specific: name the exact document and the exact standard (and clause where po
     if (!documentVersionId || !clauseIds.length) return json({ error: "documentVersionId and clauseIds required" }, 400);
 
     // Fetch the document version
-    const { data: docVer } = await db.from("document_versions").select("*, document:document_id(name)").eq("id", documentVersionId).maybeSingle();
+    const { data: docVer } = await tdb("document_versions").select("*, document:document_id(name)").eq("id", documentVersionId).maybeSingle();
     if (!docVer) return json({ error: "Document version not found" }, 404);
     if (!docVer.storage_path) return json({ error: "Document version has no uploaded file" }, 400);
 
     // Fetch all clauses
-    const { data: clauses } = await db.from("standard_clauses").select("*").in("id", clauseIds);
+    const { data: clauses } = await tdb("standard_clauses").select("*").in("id", clauseIds);
     if (!clauses || !clauses.length) return json({ error: "No clauses found" }, 404);
 
     // Send the actual document FILE to Claude (so PDFs work — not just text),
@@ -1936,7 +1973,7 @@ Be specific: name the exact document and the exact standard (and clause where po
 
     // Insert new interpretations, ignoring any that already exist for the same
     // (clause, document version) pair — the table has a unique constraint on it.
-    const { data: inserted, error: insertErr } = await db.from("as_operates_interpretations")
+    const { data: inserted, error: insertErr } = await tdb("as_operates_interpretations")
       .upsert(toInsert, { onConflict: "clause_id,document_version_id", ignoreDuplicates: true }).select("id");
     if (insertErr && insertErr.code !== "23505") {
       return json({ error: `Insert error: ${insertErr.message}` }, 500);
@@ -1973,14 +2010,14 @@ Be specific: name the exact document and the exact standard (and clause where po
     // When the interpretation text changes, snapshot the prior text so the UI can
     // show a version-to-version diff. Optional column — self-heals if absent.
     if (patch.interpretation_text !== undefined) {
-      const { data: cur } = await db.from("as_operates_interpretations").select("interpretation_text").eq("id", id).maybeSingle();
+      const { data: cur } = await tdb("as_operates_interpretations").select("interpretation_text").eq("id", id).maybeSingle();
       const prior = cur?.interpretation_text ?? "";
       if (prior && prior !== patch.interpretation_text) patch.previous_interpretation_text = prior;
     }
-    let upd = await db.from("as_operates_interpretations").update(patch).eq("id", id);
+    let upd = await tdb("as_operates_interpretations").update(patch).eq("id", id);
     if (upd.error && /previous_interpretation_text/.test(upd.error.message || "")) {
       const { previous_interpretation_text: _p, ...noPrev } = patch;
-      upd = await db.from("as_operates_interpretations").update(noPrev).eq("id", id);
+      upd = await tdb("as_operates_interpretations").update(noPrev).eq("id", id);
     }
     if (upd.error) return json({ error: upd.error.message }, 500);
     return json({ ok: true });
@@ -1993,7 +2030,7 @@ Be specific: name the exact document and the exact standard (and clause where po
 
     // `*` includes the optional previous_interpretation_text column when present
     // (and simply omits it otherwise — no schema-cache error).
-    const { data: interps, error } = await db.from("as_operates_interpretations")
+    const { data: interps, error } = await tdb("as_operates_interpretations")
       .select(`
         *,
         clause:clause_id(id,standard_version_id,clause_ref,clause_title,clause_text,requirement_type,
@@ -2009,7 +2046,7 @@ Be specific: name the exact document and the exact standard (and clause where po
     const standardVersionId = String(body.standardVersionId ?? "").trim();
     if (!standardVersionId) return json({ error: "standardVersionId required" }, 400);
 
-    const { data: clauses, error } = await db.from("standard_clauses")
+    const { data: clauses, error } = await tdb("standard_clauses")
       .select("*").eq("standard_version_id", standardVersionId).order("sort_order").order("clause_ref");
 
     if (error) return json({ error: error.message }, 500);
@@ -2026,7 +2063,7 @@ Be specific: name the exact document and the exact standard (and clause where po
       return json({ error: "Provide documentVersionIds or standardVersionIds" }, 400);
     }
 
-    let docsQ = db.from("document_versions").select("id,version,file_name,document_id,document:document_id(name)");
+    let docsQ = tdb("document_versions").select("id,version,file_name,document_id,document:document_id(name)");
     if (documentVersionIds.length) {
       docsQ = docsQ.in("id", documentVersionIds);
     } else {
@@ -2034,7 +2071,7 @@ Be specific: name the exact document and the exact standard (and clause where po
     }
     const { data: docs } = await docsQ;
 
-    let clausesQ = db.from("standard_clauses").select("id,standard_version_id,clause_ref,clause_title");
+    let clausesQ = tdb("standard_clauses").select("id,standard_version_id,clause_ref,clause_title");
     if (standardVersionIds.length) {
       clausesQ = clausesQ.in("standard_version_id", standardVersionIds);
     } else {
@@ -2047,7 +2084,7 @@ Be specific: name the exact document and the exact standard (and clause where po
 
     let matrix: any[] = [];
     if (docIds.length && clauseIds.length) {
-      const { data: interps } = await db.from("as_operates_interpretations")
+      const { data: interps } = await tdb("as_operates_interpretations")
         .select("clause_id,document_version_id,compliance_status,reviewed_by,ai_generated")
         .in("document_version_id", docIds)
         .in("clause_id", clauseIds);
@@ -2086,7 +2123,7 @@ Be specific: name the exact document and the exact standard (and clause where po
       for (const l of links) { add(l.from_type, l.from_id); add(l.to_type, l.to_id); }
       const clauseMap = new Map<string, any>(), docMap = new Map<string, any>(), stmtMap = new Map<string, any>();
       if (clauseIds.size) {
-        const { data } = await db.from("standard_clauses")
+        const { data } = await tdb("standard_clauses")
           .select("id,clause_ref,clause_title,standard_version:standard_version_id(version,standard:standard_id(code,title))")
           .in("id", [...clauseIds]);
         for (const c of data ?? []) {
@@ -2096,7 +2133,7 @@ Be specific: name the exact document and the exact standard (and clause where po
         }
       }
       if (docVerIds.size) {
-        const { data } = await db.from("document_versions")
+        const { data } = await tdb("document_versions")
           .select("id,version,document:document_id(name)").in("id", [...docVerIds]);
         for (const v of data ?? []) {
           const name = (v as any).document?.name || "Document";
@@ -2104,7 +2141,7 @@ Be specific: name the exact document and the exact standard (and clause where po
         }
       }
       if (stmtIds.size) {
-        const { data } = await db.from("document_statements")
+        const { data } = await tdb("document_statements")
           .select("id,seq,text,document_version:document_version_id(version,document:document_id(name))").in("id", [...stmtIds]);
         for (const s of data ?? []) {
           const dv = (s as any).document_version;
@@ -2124,8 +2161,8 @@ Be specific: name the exact document and the exact standard (and clause where po
       if (!RL_ENDPOINT_TYPES.includes(entityType) || !isUuid(entityId)) return json({ error: "Valid entityType and entityId required" }, 400);
       // Links where the entity is on either side (bidirectional). Two queries, merged.
       const [a, b] = await Promise.all([
-        db.from("requirement_links").select("*").eq("from_type", entityType).eq("from_id", entityId),
-        db.from("requirement_links").select("*").eq("to_type", entityType).eq("to_id", entityId),
+        tdb("requirement_links").select("*").eq("from_type", entityType).eq("from_id", entityId),
+        tdb("requirement_links").select("*").eq("to_type", entityType).eq("to_id", entityId),
       ]);
       if (a.error) return json({ error: a.error.message }, 500);
       if (b.error) return json({ error: b.error.message }, 500);
@@ -2154,7 +2191,7 @@ Be specific: name the exact document and the exact standard (and clause where po
         reviewed_by: body.createdBy !== undefined ? String(body.createdBy).slice(0, 120) : (session.urole || "rushroom"),
         reviewed_at: new Date().toISOString(),
       };
-      const { data, error } = await db.from("requirement_links").insert(row).select("id").maybeSingle();
+      const { data, error } = await tdb("requirement_links").insert(row).select("id").maybeSingle();
       if (error) {
         if (/duplicate key|unique/i.test(error.message)) return json({ error: "That exact link already exists." }, 409);
         return json({ error: error.message }, 500);
@@ -2172,7 +2209,7 @@ Be specific: name the exact document and the exact standard (and clause where po
         patch.reviewed_by = body.reviewedBy !== undefined ? String(body.reviewedBy).slice(0, 120) : (session.urole || "rushroom");
         patch.reviewed_at = new Date().toISOString();
       }
-      const { error } = await db.from("requirement_links").update(patch).eq("id", id);
+      const { error } = await tdb("requirement_links").update(patch).eq("id", id);
       if (error) return json({ error: error.message }, 500);
       return json({ ok: true });
     }
@@ -2181,7 +2218,7 @@ Be specific: name the exact document and the exact standard (and clause where po
       if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
       const id = String(body.id ?? "").trim();
       if (!isUuid(id)) return json({ error: "Valid id required" }, 400);
-      const { error } = await db.from("requirement_links").delete().eq("id", id);
+      const { error } = await tdb("requirement_links").delete().eq("id", id);
       if (error) return json({ error: error.message }, 500);
       return json({ ok: true });
     }
@@ -2192,8 +2229,8 @@ Be specific: name the exact document and the exact standard (and clause where po
       const clauseIds = (Array.isArray(body.clauseIds) ? body.clauseIds : []).map((v: unknown) => String(v ?? "")).filter(isUuid);
       if (!clauseIds.length) return json({ links: [] });
       const [a, b] = await Promise.all([
-        db.from("requirement_links").select("*").eq("from_type", "clause").in("from_id", clauseIds),
-        db.from("requirement_links").select("*").eq("to_type", "clause").in("to_id", clauseIds),
+        tdb("requirement_links").select("*").eq("from_type", "clause").in("from_id", clauseIds),
+        tdb("requirement_links").select("*").eq("to_type", "clause").in("to_id", clauseIds),
       ]);
       if (a.error) return json({ error: a.error.message }, 500);
       if (b.error) return json({ error: b.error.message }, 500);
@@ -2209,15 +2246,15 @@ Be specific: name the exact document and the exact standard (and clause where po
       const verIds = (Array.isArray(body.documentVersionIds) ? body.documentVersionIds : []).map((v: unknown) => String(v ?? "")).filter(isUuid);
       if (!verIds.length) return json({ links: [] });
       // Statements belonging to these versions (paragraph-level links).
-      const { data: stmts } = await db.from("document_statements").select("id").in("document_version_id", verIds);
+      const { data: stmts } = await tdb("document_statements").select("id").in("document_version_id", verIds);
       const stmtIds = (stmts ?? []).map((s: any) => s.id);
       const queries = [
-        db.from("requirement_links").select("*").eq("from_type", "document_version").in("from_id", verIds),
-        db.from("requirement_links").select("*").eq("to_type", "document_version").in("to_id", verIds),
+        tdb("requirement_links").select("*").eq("from_type", "document_version").in("from_id", verIds),
+        tdb("requirement_links").select("*").eq("to_type", "document_version").in("to_id", verIds),
       ];
       if (stmtIds.length) {
-        queries.push(db.from("requirement_links").select("*").eq("from_type", "statement").in("from_id", stmtIds));
-        queries.push(db.from("requirement_links").select("*").eq("to_type", "statement").in("to_id", stmtIds));
+        queries.push(tdb("requirement_links").select("*").eq("from_type", "statement").in("from_id", stmtIds));
+        queries.push(tdb("requirement_links").select("*").eq("to_type", "statement").in("to_id", stmtIds));
       }
       const results = await Promise.all(queries);
       for (const r of results) if (r.error) return json({ error: r.error.message }, 500);
@@ -2235,18 +2272,18 @@ Be specific: name the exact document and the exact standard (and clause where po
       if (!isUuid(clauseId)) return json({ error: "Valid clauseId required" }, 400);
 
       const clauseSelect = "id,standard_version_id,clause_ref,clause_title,clause_text,standard_version:standard_version_id(standard:standard_id(code,title))";
-      const { data: src } = await db.from("standard_clauses").select(clauseSelect).eq("id", clauseId).maybeSingle();
+      const { data: src } = await tdb("standard_clauses").select(clauseSelect).eq("id", clauseId).maybeSingle();
       if (!src) return json({ error: "Clause not found" }, 404);
       const stdOf = (c: any) => c?.standard_version?.standard?.code || c?.standard_version?.standard?.title || "Standard";
 
       // Candidate clauses from OTHER standard versions (cross-standard matching).
-      const { data: cands } = await db.from("standard_clauses").select(clauseSelect)
+      const { data: cands } = await tdb("standard_clauses").select(clauseSelect)
         .neq("standard_version_id", (src as any).standard_version_id).limit(150);
       let candidates = cands ?? [];
       // Drop candidates already linked to this clause (either direction).
       const [la, lb] = await Promise.all([
-        db.from("requirement_links").select("to_type,to_id").eq("from_type", "clause").eq("from_id", clauseId),
-        db.from("requirement_links").select("from_type,from_id").eq("to_type", "clause").eq("to_id", clauseId),
+        tdb("requirement_links").select("to_type,to_id").eq("from_type", "clause").eq("from_id", clauseId),
+        tdb("requirement_links").select("from_type,from_id").eq("to_type", "clause").eq("to_id", clauseId),
       ]);
       const linked = new Set<string>();
       for (const r of la.data ?? []) if (r.to_type === "clause") linked.add(r.to_id);
@@ -2303,7 +2340,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
         }));
       let created = 0;
       if (rows.length) {
-        const { data: ins, error } = await db.from("requirement_links")
+        const { data: ins, error } = await tdb("requirement_links")
           .upsert(rows, { onConflict: "from_type,from_id,to_type,to_id,link_type", ignoreDuplicates: true }).select("id");
         if (error) return json({ error: error.message }, 500);
         created = (ins ?? []).length;
@@ -2317,7 +2354,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
       if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
       const wanted = (Array.isArray(body.statuses) ? body.statuses : []).map((s: unknown) => String(s)).filter((s: string) => RL_STATUSES.includes(s));
       const statuses = wanted.length ? wanted : ["proposed", "flagged"];
-      const { data, error } = await db.from("requirement_links").select("*")
+      const { data, error } = await tdb("requirement_links").select("*")
         .in("status", statuses).order("created_at", { ascending: false }).limit(200);
       if (error) return json({ error: error.message }, 500);
       return json({ links: await labelEndpoints(data ?? []) });
@@ -2331,7 +2368,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
       const standardVersionId = String(body.standardVersionId ?? "").trim();
       if (!isUuid(standardVersionId)) return json({ error: "Valid standardVersionId required" }, 400);
 
-      const { data: srcClauses, error: scErr } = await db.from("standard_clauses")
+      const { data: srcClauses, error: scErr } = await tdb("standard_clauses")
         .select("id,clause_ref,clause_text").eq("standard_version_id", standardVersionId);
       if (scErr) return json({ error: scErr.message }, 500);
       if (!srcClauses || !srcClauses.length) return json({ ok: true, created: 0, scanned: 0, matched: 0 });
@@ -2357,7 +2394,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
       // Resolve referenced standard codes → their clauses (any version).
       const crossLookup = new Map<string, string>(); // `${code}::${ref}` -> target clause id
       if (codesNeeded.size) {
-        const { data: allStds } = await db.from("standards").select("id,code,standard_versions(id)");
+        const { data: allStds } = await tdb("standards").select("id,code,standard_versions(id)");
         const versionIds: string[] = [];
         const versionToCode = new Map<string, string>();
         for (const s of allStds ?? []) {
@@ -2366,7 +2403,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
           for (const v of ((s as any).standard_versions ?? [])) { versionIds.push(v.id); versionToCode.set(v.id, code); }
         }
         if (versionIds.length) {
-          const { data: tgt } = await db.from("standard_clauses").select("id,standard_version_id,clause_ref").in("standard_version_id", versionIds);
+          const { data: tgt } = await tdb("standard_clauses").select("id,standard_version_id,clause_ref").in("standard_version_id", versionIds);
           for (const tc of tgt ?? []) {
             const code = versionToCode.get(tc.standard_version_id); if (!code) continue;
             const key = `${code}::${normRef(tc.clause_ref)}`;
@@ -2388,7 +2425,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
 
       let created = 0;
       if (rows.length) {
-        const { data: ins, error } = await db.from("requirement_links")
+        const { data: ins, error } = await tdb("requirement_links")
           .upsert(rows, { onConflict: "from_type,from_id,to_type,to_id,link_type", ignoreDuplicates: true }).select("id");
         if (error) return json({ error: error.message }, 500);
         created = (ins ?? []).length;
@@ -2401,7 +2438,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
       if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
       const dv = String(body.documentVersionId ?? "").trim();
       if (!isUuid(dv)) return json({ error: "Valid documentVersionId required" }, 400);
-      const { data, error } = await db.from("document_statements").select("*").eq("document_version_id", dv).order("seq");
+      const { data, error } = await tdb("document_statements").select("*").eq("document_version_id", dv).order("seq");
       if (error) return json({ error: error.message }, 500);
       return json({ statements: data ?? [] });
     }
@@ -2420,20 +2457,20 @@ Be conservative — prefer precision over recall; only match when a compliance r
       })).filter((r: any) => r.text.trim());
       // Re-segmenting replaces this version's paragraphs. Delete links that point at
       // the old statements first, so no requirement_link is left dangling.
-      const { data: oldStmts } = await db.from("document_statements").select("id").eq("document_version_id", dv);
+      const { data: oldStmts } = await tdb("document_statements").select("id").eq("document_version_id", dv);
       const oldIds = (oldStmts ?? []).map((r: any) => r.id);
       let removedLinks = 0;
       if (oldIds.length) {
         const [rf, rt] = await Promise.all([
-          db.from("requirement_links").delete().eq("from_type", "statement").in("from_id", oldIds).select("id"),
-          db.from("requirement_links").delete().eq("to_type", "statement").in("to_id", oldIds).select("id"),
+          tdb("requirement_links").delete().eq("from_type", "statement").in("from_id", oldIds).select("id"),
+          tdb("requirement_links").delete().eq("to_type", "statement").in("to_id", oldIds).select("id"),
         ]);
         removedLinks = (rf.data?.length ?? 0) + (rt.data?.length ?? 0);
       }
-      const del = await db.from("document_statements").delete().eq("document_version_id", dv);
+      const del = await tdb("document_statements").delete().eq("document_version_id", dv);
       if (del.error) return json({ error: del.error.message }, 500);
       if (rows.length) {
-        const { error } = await db.from("document_statements").insert(rows);
+        const { error } = await tdb("document_statements").insert(rows);
         if (error) return json({ error: error.message }, 500);
       }
       return json({ ok: true, count: rows.length, removedLinks });
@@ -2445,8 +2482,8 @@ Be conservative — prefer precision over recall; only match when a compliance r
       const stmtIds = (Array.isArray(body.statementIds) ? body.statementIds : []).map((v: unknown) => String(v ?? "")).filter(isUuid);
       if (!stmtIds.length) return json({ links: [] });
       const [a, b] = await Promise.all([
-        db.from("requirement_links").select("*").eq("from_type", "statement").in("from_id", stmtIds),
-        db.from("requirement_links").select("*").eq("to_type", "statement").in("to_id", stmtIds),
+        tdb("requirement_links").select("*").eq("from_type", "statement").in("from_id", stmtIds),
+        tdb("requirement_links").select("*").eq("to_type", "statement").in("to_id", stmtIds),
       ]);
       if (a.error) return json({ error: a.error.message }, 500);
       if (b.error) return json({ error: b.error.message }, 500);
@@ -2463,11 +2500,11 @@ Be conservative — prefer precision over recall; only match when a compliance r
     if (!passportId) return json({ error: "passportId required" }, 400);
     if (!["json", "json-ld", "pdf-data"].includes(format)) return json({ error: "format must be json|json-ld|pdf-data" }, 400);
 
-    const { data: passport } = await db.from("product_passports").select("*").eq("id", passportId).maybeSingle();
+    const { data: passport } = await tdb("product_passports").select("*").eq("id", passportId).maybeSingle();
     if (!passport) return json({ error: "Passport not found" }, 404);
 
     // Fetch all linked interpretations
-    const { data: links } = await db.from("passport_interpretation_links")
+    const { data: links } = await tdb("passport_interpretation_links")
       .select("interpretation:interpretation_id(*, clause:clause_id(*, standard:standard_version_id(*, standard:standard_id(code,title))))")
       .eq("passport_id", passportId);
 
@@ -2560,13 +2597,13 @@ Be conservative — prefer precision over recall; only match when a compliance r
   // --- Product passports: management (Rushroom only) ----------------------
   if (action === "listProductPassports") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
-    const { data, error } = await db.from("product_passports").select("*").order("created_at", { ascending: false });
+    const { data, error } = await tdb("product_passports").select("*").order("created_at", { ascending: false });
     if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The Level 2 tables aren't set up yet — run the account/Level-2 SQL first." : error.message }, 500);
     // Attach a link count so the list can show how many interpretations each carries.
     const ids = (data ?? []).map((p) => p.id);
     const counts: Record<string, number> = {};
     if (ids.length) {
-      const { data: links } = await db.from("passport_interpretation_links").select("passport_id").in("passport_id", ids);
+      const { data: links } = await tdb("passport_interpretation_links").select("passport_id").in("passport_id", ids);
       for (const l of links ?? []) counts[l.passport_id] = (counts[l.passport_id] || 0) + 1;
     }
     return json({ passports: (data ?? []).map((p) => ({ ...p, link_count: counts[p.id] || 0 })) });
@@ -2575,9 +2612,9 @@ Be conservative — prefer precision over recall; only match when a compliance r
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const id = String(body.id ?? "").trim();
     if (!id) return json({ error: "id required" }, 400);
-    const { data: passport } = await db.from("product_passports").select("*").eq("id", id).maybeSingle();
+    const { data: passport } = await tdb("product_passports").select("*").eq("id", id).maybeSingle();
     if (!passport) return json({ error: "Passport not found" }, 404);
-    const { data: links } = await db.from("passport_interpretation_links")
+    const { data: links } = await tdb("passport_interpretation_links")
       .select("id, relevance_note, interpretation:interpretation_id(id, compliance_status, interpretation_text, document_version_id, clause:clause_id(clause_ref, clause_title, standard:standard_version_id(standard:standard_id(code,title))))")
       .eq("passport_id", id);
     return json({ passport, links: links ?? [] });
@@ -2593,7 +2630,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
       gtin: String(body.gtin ?? "").slice(0, 60),
       declaration_of_conformity_ref: String(body.declarationOfConformityRef ?? "").slice(0, 300),
     };
-    const { data, error } = await db.from("product_passports").insert(row).select("id").maybeSingle();
+    const { data, error } = await tdb("product_passports").insert(row).select("id").maybeSingle();
     if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The Level 2 tables aren't set up yet — run the SQL first." : error.message }, 500);
     return json({ ok: true, id: data?.id });
   }
@@ -2615,7 +2652,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
     if (body.validTo !== undefined) patch.valid_to = String(body.validTo).slice(0, 40) || null;
     if (body.sustainabilityData !== undefined && typeof body.sustainabilityData === "object") patch.sustainability_data = body.sustainabilityData;
     if (body.applicableStandards !== undefined && Array.isArray(body.applicableStandards)) patch.applicable_standards = body.applicableStandards;
-    const { error } = await db.from("product_passports").update(patch).eq("id", id);
+    const { error } = await tdb("product_passports").update(patch).eq("id", id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }
@@ -2623,7 +2660,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     const id = String(body.id ?? "").trim();
     if (!id) return json({ error: "id required" }, 400);
-    const { error } = await db.from("product_passports").delete().eq("id", id);
+    const { error } = await tdb("product_passports").delete().eq("id", id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }
@@ -2632,7 +2669,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
     const passport_id = String(body.passportId ?? "").trim();
     const interpretation_id = String(body.interpretationId ?? "").trim();
     if (!passport_id || !interpretation_id) return json({ error: "passportId and interpretationId required" }, 400);
-    const { error } = await db.from("passport_interpretation_links")
+    const { error } = await tdb("passport_interpretation_links")
       .upsert({ passport_id, interpretation_id, relevance_note: String(body.relevanceNote ?? "").slice(0, 500) }, { onConflict: "passport_id,interpretation_id", ignoreDuplicates: true });
     if (error && error.code !== "23505") return json({ error: error.message }, 500);
     return json({ ok: true });
@@ -2642,7 +2679,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
     const passport_id = String(body.passportId ?? "").trim();
     const interpretation_id = String(body.interpretationId ?? "").trim();
     if (!passport_id || !interpretation_id) return json({ error: "passportId and interpretationId required" }, 400);
-    const { error } = await db.from("passport_interpretation_links").delete().eq("passport_id", passport_id).eq("interpretation_id", interpretation_id);
+    const { error } = await tdb("passport_interpretation_links").delete().eq("passport_id", passport_id).eq("interpretation_id", interpretation_id);
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true });
   }
@@ -2656,7 +2693,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
     if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The directive tables aren't set up yet — run the directive SQL first." : error.message }, 500);
     let applicability: any[] = [];
     const passportId = String(body.passportId ?? "").trim();
-    if (passportId) { const { data: appl } = await db.from("product_directive_applicability").select("*").eq("passport_id", passportId); applicability = appl || []; }
+    if (passportId) { const { data: appl } = await tdb("product_directive_applicability").select("*").eq("passport_id", passportId); applicability = appl || []; }
     return json({ ok: true, directives: data || [], applicability });
   }
 
@@ -2748,8 +2785,8 @@ Be conservative — prefer precision over recall; only match when a compliance r
     if (scope === "product" && !passportId) return json({ error: "passportId required for product scope" }, 400);
     try {
       // Pre-load any EU directives/regulations already catalogued in the standards register.
-      if (scope !== "product") await importDirectivesFromStandards();
-      const graph = await buildComplianceGraph(scope, passportId);
+      if (scope !== "product") await importDirectivesFromStandards(tdb);
+      const graph = await buildComplianceGraph(tdb, scope, passportId);
       return json({ ok: true, scope, passportId, ...graph });
     } catch (e) {
       if (/does not exist|schema cache|Could not find the table/i.test((e as Error).message)) return json({ error: "The directive tables aren't set up yet — run the directive SQL first." }, 500);
@@ -2764,7 +2801,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
     const status = String(body.status ?? "applicable");
     if (!passport_id || !directive_id) return json({ error: "passportId and directiveId required" }, 400);
     if (!APPLICABILITY_STATUSES.includes(status)) return json({ error: "Invalid status" }, 400);
-    const { error } = await db.from("product_directive_applicability").upsert({
+    const { error } = await tdb("product_directive_applicability").upsert({
       passport_id, directive_id, applicability_status: status,
       rationale: String(body.rationale ?? "").slice(0, 2000),
       assessed_by: session.email || session.urole || "rushroom", assessed_at: new Date().toISOString(),
@@ -2779,7 +2816,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
     if (!directiveId) return json({ error: "directiveId required" }, 400);
     const { data: dir } = await db.from("eu_directives").select("*").eq("id", directiveId).maybeSingle();
     if (!dir) return json({ error: "Directive not found" }, 404);
-    const cov = await coverageForDirective(dir);
+    const cov = await coverageForDirective(tdb, dir);
     return json({ ok: true, ...cov });
   }
 
@@ -2790,9 +2827,9 @@ Be conservative — prefer precision over recall; only match when a compliance r
     const passportId = String(body.passportId ?? "").trim() || null;
     const language = body.language === "sv" ? "sv" : "en";
     if (scope === "product" && !passportId) return json({ error: "passportId required for product scope" }, 400);
-    const graph = await buildComplianceGraph(scope, passportId);
+    const graph = await buildComplianceGraph(tdb, scope, passportId);
     let subject = "Rushroom AB";
-    if (scope === "product" && passportId) { const { data: pp } = await db.from("product_passports").select("product_name").eq("id", passportId).maybeSingle(); subject = pp?.product_name || "the product"; }
+    if (scope === "product" && passportId) { const { data: pp } = await tdb("product_passports").select("product_name").eq("id", passportId).maybeSingle(); subject = pp?.product_name || "the product"; }
     // Compact the graph for the model.
     const byId = new Map(graph.nodes.map((n: any) => [n.id, n]));
     const nodeLines = graph.nodes.map((n: any) => `- ${n.shortName} (${n.celex}): ${n.title || ""} — coverage ${n.complianceCoverage == null ? "not assessed" : n.complianceCoverage + "%"}${n.applicabilityStatus ? `, ${n.applicabilityStatus}` : ""}`).join("\n");
@@ -2840,7 +2877,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
     const changedBy = (session.uid && /^[0-9a-f-]{36}$/i.test(String(session.uid))) ? String(session.uid) : null;
     let updated = 0; const errors: any[] = [];
     for (const id of ids) {
-      const r = await applyClassification(entityType, id, phase, scope, body.aiGenerated === true, changedBy);
+      const r = await applyClassification(tdb, entityType, id, phase, scope, body.aiGenerated === true, changedBy);
       if (r.ok) updated++; else errors.push({ id, error: r.error });
     }
     if (!updated && errors.length) {
@@ -2854,7 +2891,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
   if (action === "getComplianceMatrix") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     let items: any[];
-    try { items = await loadClassificationItems(); }
+    try { items = await loadClassificationItems(tdb); }
     catch (e) { if (/does not exist|schema cache|Could not find|column/i.test((e as Error).message)) return json({ error: "The classification columns aren't set up yet — run the classification SQL first." }, 500); return json({ error: (e as Error).message }, 500); }
     const typeKey = (t: string) => t === "interpretation" ? "interpretations" : t === "step" ? "steps" : "documents";
     const blank = () => ({ total: 0, steps: 0, documents: 0, interpretations: 0, statuses: { compliant: 0, deviation: 0, not_applicable: 0, pending: 0 }, statusable: 0 });
@@ -2892,7 +2929,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
   if (action === "listClassificationItems") {
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     let items: any[];
-    try { items = await loadClassificationItems(); }
+    try { items = await loadClassificationItems(tdb); }
     catch (e) { if (/does not exist|schema cache|Could not find|column/i.test((e as Error).message)) return json({ error: "The classification columns aren't set up yet — run the classification SQL first." }, 500); return json({ error: (e as Error).message }, 500); }
     const fPhase = body.lifecyclePhase ? String(body.lifecyclePhase) : null;
     const fScope = body.scope ? String(body.scope) : null;
@@ -2914,7 +2951,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
     if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
     if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY." }, 400);
     let items: any[];
-    try { items = await loadClassificationItems(); }
+    try { items = await loadClassificationItems(tdb); }
     catch (e) { if (/does not exist|schema cache|Could not find|column/i.test((e as Error).message)) return json({ error: "The classification columns aren't set up yet — run the classification SQL first." }, 500); return json({ error: (e as Error).message }, 500); }
     const wanted = Array.isArray(body.ids) && body.ids.length ? new Set(body.ids.map((x: unknown) => String(x))) : null;
     const unclassified = items.filter((it) => (!it.lifecycle_phase || !it.scope) && (!wanted || wanted.has(it.id))).slice(0, 40);
