@@ -2163,19 +2163,27 @@ Be specific: name the exact document and the exact standard (and clause where po
       return json({ links: await labelEndpoints(merged) });
     }
 
-    // Batch: every link touching any of the given document versions (for the As-Operated side).
+    // Batch: every link touching any of the given document versions OR any of
+    // their paragraphs (statements), so the document-side view rolls both up.
     if (action === "listRequirementLinksForDocumentVersions") {
       if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
       const verIds = (Array.isArray(body.documentVersionIds) ? body.documentVersionIds : []).map((v: unknown) => String(v ?? "")).filter(isUuid);
       if (!verIds.length) return json({ links: [] });
-      const [a, b] = await Promise.all([
+      // Statements belonging to these versions (paragraph-level links).
+      const { data: stmts } = await db.from("document_statements").select("id").in("document_version_id", verIds);
+      const stmtIds = (stmts ?? []).map((s: any) => s.id);
+      const queries = [
         db.from("requirement_links").select("*").eq("from_type", "document_version").in("from_id", verIds),
         db.from("requirement_links").select("*").eq("to_type", "document_version").in("to_id", verIds),
-      ]);
-      if (a.error) return json({ error: a.error.message }, 500);
-      if (b.error) return json({ error: b.error.message }, 500);
+      ];
+      if (stmtIds.length) {
+        queries.push(db.from("requirement_links").select("*").eq("from_type", "statement").in("from_id", stmtIds));
+        queries.push(db.from("requirement_links").select("*").eq("to_type", "statement").in("to_id", stmtIds));
+      }
+      const results = await Promise.all(queries);
+      for (const r of results) if (r.error) return json({ error: r.error.message }, 500);
       const seen = new Set<string>(), merged: any[] = [];
-      for (const l of [...(a.data ?? []), ...(b.data ?? [])]) { if (!seen.has(l.id)) { seen.add(l.id); merged.push(l); } }
+      for (const r of results) for (const l of (r.data ?? [])) { if (!seen.has(l.id)) { seen.add(l.id); merged.push(l); } }
       return json({ links: await labelEndpoints(merged) });
     }
 
@@ -2371,13 +2379,25 @@ Be conservative — prefer precision over recall; only match when a compliance r
         text: String(s?.text ?? "").slice(0, 8000),
         anchor: s?.anchor != null ? String(s.anchor).slice(0, 300) : null,
       })).filter((r: any) => r.text.trim());
+      // Re-segmenting replaces this version's paragraphs. Delete links that point at
+      // the old statements first, so no requirement_link is left dangling.
+      const { data: oldStmts } = await db.from("document_statements").select("id").eq("document_version_id", dv);
+      const oldIds = (oldStmts ?? []).map((r: any) => r.id);
+      let removedLinks = 0;
+      if (oldIds.length) {
+        const [rf, rt] = await Promise.all([
+          db.from("requirement_links").delete().eq("from_type", "statement").in("from_id", oldIds).select("id"),
+          db.from("requirement_links").delete().eq("to_type", "statement").in("to_id", oldIds).select("id"),
+        ]);
+        removedLinks = (rf.data?.length ?? 0) + (rt.data?.length ?? 0);
+      }
       const del = await db.from("document_statements").delete().eq("document_version_id", dv);
       if (del.error) return json({ error: del.error.message }, 500);
       if (rows.length) {
         const { error } = await db.from("document_statements").insert(rows);
         if (error) return json({ error: error.message }, 500);
       }
-      return json({ ok: true, count: rows.length });
+      return json({ ok: true, count: rows.length, removedLinks });
     }
 
     // Batch: every link touching any of the given statements (for the paragraph view).

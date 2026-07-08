@@ -854,10 +854,14 @@
           API.listRequirementLinksForDocumentVersions(API.getToken(), verIds).then((r) => {
             const links = r.links || [];
             if (!links.length) { linkBox.replaceChildren(); return; }
+            // "Our" side is a version of this doc OR one of its paragraphs; the
+            // counterpart (usually a clause) is what we show.
             const items = links.map((l) => {
-              const isFrom = l.from && l.from.type === "document_version" && verIds.includes(l.from.id);
-              const mine = isFrom ? l.from : l.to;
-              return { l, other: isFrom ? l.to : l.from, ver: verLabel.get(mine && mine.id) || "" };
+              const fromOurs = l.from && ((l.from.type === "document_version" && verIds.includes(l.from.id)) || l.from.type === "statement");
+              const mine = fromOurs ? l.from : l.to;
+              const other = fromOurs ? l.to : l.from;
+              const ver = mine && mine.type === "statement" ? (mine.ref || "¶") : (verLabel.get(mine && mine.id) || "");
+              return { l, other, ver };
             });
             linkBox.replaceChildren(el("details", { class: "rl-doclinks", open: "open" }, [
               el("summary", {}, `Linked requirements (${items.length})`),
@@ -871,7 +875,7 @@
                 ver ? el("span", { class: "rl-kind" }, ver) : null,
                 rlStatusChip(l.status),
               ]))),
-              el("div", { class: "muted", style: "font-size:0.78rem; margin-top:0.3rem" }, "Manage in Clauses & DPP → Links."),
+              el("div", { class: "muted", style: "font-size:0.78rem; margin-top:0.3rem" }, "Manage in Clauses & DPP → Links, or in “Paragraphs & links” below."),
             ]));
           }).catch(() => linkBox.replaceChildren());
         }
@@ -2557,7 +2561,7 @@
       } catch { /* links optional */ }
       const tools = el("div", { class: "rl-stmt-tools" }, [
         el("span", { class: "muted", style: "font-size:0.8rem" }, `${statements.length} paragraph${statements.length === 1 ? "" : "s"}`),
-        actionBtn("Re-segment", "refresh", { onClick: () => { if (confirm("Re-splitting replaces the current paragraphs; existing links to them will be orphaned. Continue?")) segment(); } }),
+        actionBtn("Re-segment", "refresh", { onClick: () => { if (confirm("Re-splitting replaces the current paragraphs and removes any links attached to them. Continue?")) segment(); } }),
       ]);
       body.replaceChildren(tools, el("div", { class: "rl-stmt-list" }, statements.map((s) => docStatementRow(s, byStmt.get(s.id) || [], getStandards, load))));
     };
