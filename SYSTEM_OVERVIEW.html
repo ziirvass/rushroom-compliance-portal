@@ -1636,6 +1636,52 @@
                 </div>
             </div>
 
+            <div class="proposal-card proposed doc-section-new">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-012</div>
+                        <div class="proposal-title">Multi-Tenant SaaS Platform — Organizations, Isolation &amp; Billing <span class="doc-new-badge">New proposal</span></div>
+                    </div>
+                    <span class="proposal-status status-proposed">PROPOSED</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-high">HIGH</span></span>
+                    <span>Effort: Large (multi-phase programme)</span>
+                    <span>Completion: 0%</span>
+                    <span>Proposed: 2026-07-08</span>
+                </div>
+                <p style="margin:6px 0 4px; color:#555;">Turn the single-company portal into a multi-tenant SaaS platform so many companies can sign up, onboard and run it independently — while preserving the edge-function-first, Supabase/Postgres/private-storage architecture unchanged. Full product-architecture spec: <em>"From one company to a multi-tenant SaaS platform"</em> proposal document (separate artifact).</p>
+                <div class="cause-box">
+                    <strong>Cause:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>The portal is built for a single organisation (Rushroom AB); there is no tenant boundary, so a second customer cannot be onboarded without data mixing.</li>
+                        <li>All data already flows through one Edge Function (<code>portal-api</code>) with RLS-deny-all + service role — a natural single choke point for tenant isolation that is currently unused for that purpose.</li>
+                        <li>There is no account/organisation model, no plans/limits, and no self-serve signup, billing or usage metering.</li>
+                    </ul>
+                </div>
+                <div class="effect-box">
+                    <strong>Effect:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>New account entities: <strong>Organization</strong> (tenant), global <strong>User</strong> identity, per-org <strong>Membership</strong> (role + seat), <strong>Invitation</strong>; six roles (Platform Owner, Platform Support, Org Admin, Manager, Reviewer, Collaborator) mapped from today's tiers so nothing regresses.</li>
+                        <li><strong>Tenant isolation:</strong> an <code>organization_id</code> on every tenant-scoped table; the org is derived from the signed session (never the client body); a central scoping helper filters every read/write; storage paths namespaced per org.</li>
+                        <li><strong>Global vs tenant vs internal</strong> made explicit: only the EU directive registry + CELLAR cache stay global; everything operational is tenant-scoped; operator tools (Admin Console, impersonation, plans) are internal-only.</li>
+                        <li><strong>Account-management UI</strong> inside the existing tab model: the <em>Accounts</em> tab grows into an <strong>Organization</strong> area (Members, Invitations, Roles, Billing &amp; Plan, Usage &amp; Limits, Security, Audit Log, Integrations, Data &amp; Privacy); a separate internal <strong>Admin Console</strong> for the operator.</li>
+                        <li><strong>Packaging:</strong> Trial / Starter / Professional / Enterprise; per-seat for internal roles, free unlimited Collaborators, metered AI (all calls are <code>claude-opus-4-8</code>) with a hard cap; Level 2 / DPP, Requirement Threads, and CELLAR become paywalled tiers.</li>
+                    </ul>
+                </div>
+                <div class="implications-box">
+                    <strong>Implications &amp; phasing:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li><strong>Recommended default (tenancy):</strong> shared schema, single Postgres, row-level <code>organization_id</code> — not schema-/DB-per-tenant. Fits the current single Edge Function + one database and keeps global reference data trivial to share.</li>
+                        <li><strong>Internal access:</strong> Rushroom staff use audited, time-boxed <em>impersonation</em> into a tenant, not memberships in every customer org (keeps seat counts and the audit trail clean).</li>
+                        <li><strong>Isolation defence-in-depth:</strong> Layer 1 session-derived org · Layer 2 central query scoping in the edge function · Layer 3 (Phase 2) org-scoped Postgres RLS via per-request <code>set_config</code> · plus an automated cross-tenant test suite in CI.</li>
+                        <li><strong>Migration is additive</strong> (same pattern as classification / requirement-links / statements): seed today's data as Organization&nbsp;#1 ("Rushroom AB"), backfill <code>organization_id</code>, make auth tenant-aware. Every feature module (Level 2, matrix, passports, CELLAR, classification, links, statements, versioning, provenance) and the browser's edge-first assumption stay untouched.</li>
+                        <li><strong>Roadmap:</strong> Phase 1 = MVP tenant isolation + accounts (no billing); Phase 2 = billing/entitlements/metering + MFA + org-scoped RLS; Phase 3 = SSO/SCIM + Projects + audit export + enterprise; Phase 4 = provisioning automation + self-serve export/delete + scaling.</li>
+                        <li>Risk: High-surface (auth + billing + isolation). Top hazard is cross-tenant leakage — mitigated by the three isolation layers above and CI tests. No stack change is proposed; a billing provider (Stripe suggested) is the only new external dependency and rides the existing webhook/edge model.</li>
+                    </ul>
+                </div>
+            </div>
+
             <div class="proposal-card draft">
                 <div class="proposal-header">
                     <div style="display: flex; align-items: center;">
