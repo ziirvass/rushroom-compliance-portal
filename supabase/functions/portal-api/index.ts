@@ -2267,6 +2267,79 @@ Be conservative — prefer precision over recall; only match when a compliance r
       if (error) return json({ error: error.message }, 500);
       return json({ links: await labelEndpoints(data ?? []) });
     }
+
+    // Deterministic citation detection: parse a standard version's clause text for
+    // explicit references ("clause 4.11.6", "EN 62471 4.3") and, where the target
+    // clause exists, create exact 'citation' links (source='cited', accepted).
+    if (action === "detectClauseCitations") {
+      if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+      const standardVersionId = String(body.standardVersionId ?? "").trim();
+      if (!isUuid(standardVersionId)) return json({ error: "Valid standardVersionId required" }, 400);
+
+      const { data: srcClauses, error: scErr } = await db.from("standard_clauses")
+        .select("id,clause_ref,clause_text").eq("standard_version_id", standardVersionId);
+      if (scErr) return json({ error: scErr.message }, 500);
+      if (!srcClauses || !srcClauses.length) return json({ ok: true, created: 0, scanned: 0, matched: 0 });
+
+      const normRef = (s: unknown) => String(s ?? "").replace(/^\s*(?:clause|subclause|§|point)\s+/i, "").replace(/[^\d.]/g, "").replace(/\.+$/, "");
+      const normCode = (s: unknown) => String(s ?? "").toUpperCase().replace(/\s+/g, " ").replace(/\s*:\s*\d{4}.*$/, "").trim();
+      // Clause number requires at least one dot (e.g. "4.11") to keep precision high.
+      const CROSS_RE = /\b((?:EN|IEC|ISO|EN\s?ISO|EN\s?IEC|CISPR)\s?\d{3,5}(?:-\d+)*)(?::\d{4}(?:\+A\d+(?::\d{4})?)?)?[,\s]+(?:clause\s+|subclause\s+|§\s*)?(\d+(?:\.\d+)+)\b/gi;
+      const INTRA_RE = /\b(?:clause|subclause|§)\s+(\d+(?:\.\d+)+)\b/gi;
+
+      const selfRef = new Map<string, string>();
+      for (const c of srcClauses) selfRef.set(normRef(c.clause_ref), c.id);
+
+      const crossRefs: { src: string; code: string; ref: string }[] = [];
+      const intraRefs: { src: string; ref: string }[] = [];
+      const codesNeeded = new Set<string>();
+      for (const c of srcClauses) {
+        const text = String(c.clause_text || "");
+        for (const m of text.matchAll(CROSS_RE)) { const code = normCode(m[1]); const ref = normRef(m[2]); if (code && ref) { crossRefs.push({ src: c.id, code, ref }); codesNeeded.add(code); } }
+        for (const m of text.matchAll(INTRA_RE)) { const ref = normRef(m[1]); if (ref) intraRefs.push({ src: c.id, ref }); }
+      }
+
+      // Resolve referenced standard codes → their clauses (any version).
+      const crossLookup = new Map<string, string>(); // `${code}::${ref}` -> target clause id
+      if (codesNeeded.size) {
+        const { data: allStds } = await db.from("standards").select("id,code,standard_versions(id)");
+        const versionIds: string[] = [];
+        const versionToCode = new Map<string, string>();
+        for (const s of allStds ?? []) {
+          const code = normCode(s.code);
+          if (!codesNeeded.has(code)) continue;
+          for (const v of ((s as any).standard_versions ?? [])) { versionIds.push(v.id); versionToCode.set(v.id, code); }
+        }
+        if (versionIds.length) {
+          const { data: tgt } = await db.from("standard_clauses").select("id,standard_version_id,clause_ref").in("standard_version_id", versionIds);
+          for (const tc of tgt ?? []) {
+            const code = versionToCode.get(tc.standard_version_id); if (!code) continue;
+            const key = `${code}::${normRef(tc.clause_ref)}`;
+            if (!crossLookup.has(key)) crossLookup.set(key, tc.id);
+          }
+        }
+      }
+
+      const seen = new Set<string>();
+      const now = new Date().toISOString();
+      const rows: any[] = [];
+      const pushLink = (srcId: string, tgtId: string | undefined) => {
+        if (!tgtId || tgtId === srcId) return;
+        const k = `${srcId}->${tgtId}`; if (seen.has(k)) return; seen.add(k);
+        rows.push({ from_type: "clause", from_id: srcId, to_type: "clause", to_id: tgtId, link_type: "citation", source: "cited", status: "accepted", confidence: 1.0, rationale: "Detected from a citation in the clause text.", created_by: "Citation", reviewed_by: "Citation", reviewed_at: now, created_at: now, updated_at: now });
+      };
+      for (const r of intraRefs) pushLink(r.src, selfRef.get(r.ref));
+      for (const r of crossRefs) pushLink(r.src, crossLookup.get(`${r.code}::${r.ref}`));
+
+      let created = 0;
+      if (rows.length) {
+        const { data: ins, error } = await db.from("requirement_links")
+          .upsert(rows, { onConflict: "from_type,from_id,to_type,to_id,link_type", ignoreDuplicates: true }).select("id");
+        if (error) return json({ error: error.message }, 500);
+        created = (ins ?? []).length;
+      }
+      return json({ ok: true, created, scanned: srcClauses.length, matched: rows.length });
+    }
   }
 
   if (action === "exportProductPassport") {

@@ -2450,10 +2450,22 @@
       }
       catch (ex) { status.className = "up-status err"; status.textContent = ex.message; }
     } });
+    // Deterministic: turn explicit citations in the clause text into exact links.
+    const detectCites = actionBtn("Detect citations", "diff", { onClick: async () => {
+      status.className = "up-status"; status.textContent = "Scanning clause text for references to other clauses…";
+      try {
+        const r = await API.detectClauseCitations(ctx.token, sel.value);
+        status.className = "up-status ok";
+        status.textContent = r.created
+          ? `Created ${r.created} citation link${r.created === 1 ? "" : "s"} from ${r.scanned} clauses.`
+          : `No new citations found in ${r.scanned} clause${r.scanned === 1 ? "" : "s"}.`;
+        await load();
+      } catch (ex) { status.className = "up-status err"; status.textContent = ex.message; }
+    }, title: "Find explicit references like “clause 4.11.6” or “EN 62471 4.3” and link them" });
     sel.addEventListener("change", load);
     wrap.append(
       el("p", { class: "muted", style: "margin:0 0 0.6rem" }, "Decompose a standard into individual clauses. The AI reads the uploaded standard file and extracts each requirement so you can interpret them one by one."),
-      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [el("span", { class: "form-label" }, "Standard"), sel, extract]),
+      el("div", { style: "display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center" }, [el("span", { class: "form-label" }, "Standard"), sel, extract, detectCites]),
       status, out,
     );
     updateProcessedBadges();

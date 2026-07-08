@@ -248,6 +248,8 @@
       call({ action: "suggestRequirementLinks", token, clauseId }),
     listRequirementLinksQueue: (token, statuses) =>
       call({ action: "listRequirementLinksQueue", token, statuses }),
+    detectClauseCitations: (token, standardVersionId) =>
+      call({ action: "detectClauseCitations", token, standardVersionId }),
     createRequirementLink: (token, fields) =>
       call({ action: "createRequirementLink", token, ...fields }),
     setRequirementLinkStatus: (token, id, status, reviewedBy) =>
