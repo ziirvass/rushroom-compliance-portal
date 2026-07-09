@@ -542,7 +542,7 @@
 
             <div class="note"><strong>Access model:</strong> Row-Level Security is enabled on <strong>every</strong> table with <strong>no policies</strong>, so anon/authenticated clients are denied outright. All reads and writes go through the <code>portal-api</code> Edge Function using the service-role key. Three private Storage buckets hold the files: <code>documents</code>, <code>standards</code>, <code>supplier-uploads</code>.</div>
 
-            <h3 class="doc-changed">Complete Table Inventory (18 tables, by domain)</h3>
+            <h3 class="doc-changed">Complete Table Inventory (25 tables, by domain)</h3>
             <table style="font-size: 12px;">
                 <tr><th>Table</th><th>Domain</th><th>Purpose</th><th>Key Fields</th></tr>
                 <tr><td><code>steps</code></td><td>Action plan</td><td>The CE/compliance action plan — one row per numbered action (UI label "Action")</td><td>step (PK int), phase, action, owner, status, priority, audience[], <span class="doc-changed">lifecycle_phase, scope</span></td></tr>
@@ -563,7 +563,15 @@
                 <tr><td><code>product_directive_applicability</code></td><td>CELLAR</td><td>Which directives apply to a passport</td><td>passport_id (FK), directive_id (FK), applicability_status, rationale</td></tr>
                 <tr><td><code>cellar_cache</code></td><td>CELLAR</td><td>Raw CELLAR query cache (re-fetch after 7 days)</td><td>celex_number, query_type (metadata|relations|fulltext), result_jsonb · unique pair</td></tr>
                 <tr><td><code>classification_log</code></td><td>Classification</td><td>Append-only audit trail of every classification change</td><td>entity_type (document|interpretation|step), entity_id / entity_step, old/new lifecycle_phase &amp; scope, changed_by, ai_generated</td></tr>
+                <tr><td><code>requirement_links</code></td><td>Links (PROP-011)</td><td>Typed, evidenced links between two text units (clause | document_version | statement)</td><td>from/to (type,id), link_type, confidence, source, status, evidence, reviewed_by</td></tr>
+                <tr><td><code>document_statements</code></td><td>Links (PROP-011)</td><td>As-Operated document version broken into addressable paragraphs</td><td>document_version_id (FK), seq, text · unique(document_version_id, seq)</td></tr>
+                <tr><td><span class="doc-changed"><code>organizations</code></span></td><td>SaaS (PROP-012)</td><td>Tenant. Root of all tenant data; carries plan + status + settings</td><td>id, name, slug (unique), status, plan, settings</td></tr>
+                <tr><td><span class="doc-changed"><code>memberships</code></span></td><td>SaaS (PROP-012)</td><td>User × organization + role (the seat unit)</td><td>organization_id (FK), user_id (FK), role (org_admin|manager|reviewer|collaborator), status · unique pair</td></tr>
+                <tr><td><span class="doc-changed"><code>invitations</code></span></td><td>SaaS (PROP-012)</td><td>Pending email invitation to join an org at a role</td><td>organization_id (FK), email, role, status, invited_by · unique(org, email)</td></tr>
+                <tr><td><span class="doc-changed"><code>platform_audit</code></span></td><td>SaaS (PROP-012)</td><td>Append-only operator/platform log (impersonation, tenant status/plan changes)</td><td>actor_email, action, target_organization_id, detail (jsonb)</td></tr>
+                <tr><td><span class="doc-changed"><code>ai_usage_events</code></span></td><td>SaaS (PROP-012)</td><td>Append-only AI-token ledger; monthly usage = sum per (org, period)</td><td>organization_id, period (YYYY-MM), action, input_tokens, output_tokens</td></tr>
             </table>
+            <div class="note doc-changed"><strong>Multi-tenant note (PROP-012):</strong> all 16 tenant tables above now carry a <strong>NOT NULL <code>organization_id</code></strong> (FK → <code>organizations</code>) with an org-immutability trigger; global tables (<code>users</code>, <code>eu_directives</code>, <code>directive_relations</code>, <code>cellar_cache</code>) do not. <code>users</code> also gained <code>mfa_enabled</code>/<code>mfa_secret</code>/<code>mfa_pending_secret</code> (Stage 5a TOTP). See PROP-012 for the full as-built + known risks.</div>
 
             <h3 class="doc-changed">Enums &amp; constraints</h3>
             <div class="list-grid">
@@ -1647,19 +1655,20 @@
                 </div>
             </div>
 
-            <div class="proposal-card proposed doc-section-new">
+            <div class="proposal-card in_progress doc-section-new">
                 <div class="proposal-header">
                     <div style="display: flex; align-items: center;">
                         <div class="proposal-id">PROP-012</div>
-                        <div class="proposal-title">Multi-Tenant SaaS Platform — Organizations, Isolation &amp; Billing <span class="doc-new-badge">New proposal</span></div>
+                        <div class="proposal-title">Multi-Tenant SaaS Platform — Organizations, Isolation &amp; Billing <span class="doc-new-badge">In progress</span></div>
                     </div>
-                    <span class="proposal-status status-proposed">PROPOSED</span>
+                    <span class="proposal-status status-in_progress">IN PROGRESS</span>
                 </div>
                 <div class="proposal-meta">
                     <span>Priority: <span class="priority-high">HIGH</span></span>
                     <span>Effort: Large (multi-phase programme)</span>
-                    <span>Completion: 0%</span>
+                    <span>Completion: ~70% (Stages 0–5a of 6)</span>
                     <span>Proposed: 2026-07-08</span>
+                    <span>Building since: 2026-07-08</span>
                 </div>
                 <p style="margin:6px 0 4px; color:#555;">Turn the single-company portal into a multi-tenant SaaS platform so many companies can sign up, onboard and run it independently — while preserving the edge-function-first, Supabase/Postgres/private-storage architecture unchanged. Full product-architecture spec: <em>"From one company to a multi-tenant SaaS platform"</em> proposal document (separate artifact).</p>
                 <div class="cause-box">
@@ -1689,6 +1698,30 @@
                         <li><strong>Migration is additive</strong> (same pattern as classification / requirement-links / statements): seed today's data as Organization&nbsp;#1 ("Rushroom AB"), backfill <code>organization_id</code>, make auth tenant-aware. Every feature module (Level 2, matrix, passports, CELLAR, classification, links, statements, versioning, provenance) and the browser's edge-first assumption stay untouched.</li>
                         <li><strong>Roadmap:</strong> Phase 1 = MVP tenant isolation + accounts (no billing); Phase 2 = billing/entitlements/metering + MFA + org-scoped RLS; Phase 3 = SSO/SCIM + Projects + audit export + enterprise; Phase 4 = provisioning automation + self-serve export/delete + scaling.</li>
                         <li>Risk: High-surface (auth + billing + isolation). Top hazard is cross-tenant leakage — mitigated by the three isolation layers above and CI tests. No stack change is proposed; a billing provider (Stripe suggested) is the only new external dependency and rides the existing webhook/edge model.</li>
+                    </ul>
+                </div>
+                <div class="effect-box">
+                    <strong>As built — Stages 0–5a (live as of 2026-07-09, staged rollout, additive):</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li><strong>Stage 0 — test harness:</strong> a dependency-free black-box suite for <code>portal-api</code> (<code>tests/</code>, Node <code>node:test</code>) + GitHub Actions CI. Includes the <strong>cross-tenant leakage harness</strong> (<code>assertNoOverlap</code>), auth-gate and "tenant-never-from-body" contracts. Runs on every push; credentialed/cross-org tests skip until secrets/a 2nd org exist.</li>
+                        <li><strong>Stage 1 — account model + tenant-aware session:</strong> new tables <code>organizations</code>, <code>memberships</code>, <code>invitations</code>; nullable <code>organization_id</code> added + backfilled on all 16 tenant tables; existing data seeded as Organization&nbsp;#1 ("Rushroom AB", fixed id <code>1111…</code>); users migrated to memberships (role-mapped). Login resolves the active membership → the session token carries <code>org</code> (session-derived, never from the request body); <code>orgContext</code> action.</li>
+                        <li><strong>Stage 2 — central scoping:</strong> a per-request <code>makeTdb(orgId)</code> → <code>tdb(table)</code> that filters reads and stamps writes with the org for the 16 tenant tables (globals — users, eu_directives, directive_relations, cellar_cache — pass through). 153 call sites converted; six module-level helpers thread the per-request instance (concurrency-safe). Storage upload paths namespaced <code>&lt;org_id&gt;/…</code>; <code>recordUpload</code> prefix-guarded.</li>
+                        <li><strong>Stage 3 — org management, admin console, impersonation:</strong> <code>isPlatformOwner</code> (admin of the seed org); the global user actions retightened to platform-owner (isolation fix). New: <code>orgMembers</code>/<code>orgInviteMember</code>/<code>orgUpdateMember</code>/<code>orgSettings</code>/<code>orgUpdateSettings</code>, <code>platformTenants</code>/<code>platformSetTenantStatus</code>/<code>platformAudit</code>, and audited, time-boxed (30-min), least-privilege <code>platformImpersonate</code> (writes <code>platform_audit</code>). UI: Accounts → an Organization area of sub-tabs (Members / Organization / Tenants / All users / Audit) + an impersonation banner with Exit.</li>
+                        <li><strong>Stage 4 — plans, metering, caps, billing:</strong> code-defined plans (trial/starter/professional/enterprise/internal) with features + monthly AI-token cap + seat cap; plan = <code>organizations.plan</code> (seed org = <code>internal</code> = unlimited). Single pre-dispatch <strong>feature gate</strong> and <strong>AI-cap gate</strong>; every AI call metered to the append-only <code>ai_usage_events</code> ledger. New: <code>orgBilling</code>, <code>platformSetTenantPlan</code>, and a provider-agnostic, secret-guarded public <code>billingWebhook</code>. UI: Billing &amp; plan (usage bars) + tenant plan selector.</li>
+                        <li><strong>Stage 5a — DB hardening + MFA + audit export:</strong> <code>organization_id</code> made <strong>NOT NULL</strong> on all tenant tables + a <code>forbid_org_change</code> BEFORE-UPDATE trigger (tenant-move protection that works even under the service role). RFC-6238 <strong>TOTP MFA</strong> (opt-in): <code>mfaStatus</code>/<code>mfaEnrollStart</code>/<code>mfaEnrollVerify</code>/<code>mfaDisable</code>, enforced in <code>loginUser</code> for enrolled accounts (existing logins unaffected); login gate prompts for a code; Organization → Security enrols. Platform audit → Export JSON. New table: <code>platform_audit</code>; new columns on <code>users</code> (<code>mfa_*</code>).</li>
+                        <li><strong>Remaining:</strong> Stage 5b — enterprise <strong>SSO (SAML/OIDC) + SCIM</strong> (needs an external IdP to configure/test). Stage 6 — tenant lifecycle automation, self-serve export/delete, recovery tooling, and provisioning a 2nd org to switch on the cross-org leakage tests.</li>
+                    </ul>
+                </div>
+                <div class="implications-box">
+                    <strong>Known risks &amp; follow-ups (as-built):</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li><strong>DB read-path isolation is application-layer</strong> (the <code>tdb</code> helper + tests), not DB-enforced. Org-scoped Postgres <strong>RLS is inert against the service-role client</strong> (the service role bypasses RLS), so it was <em>not</em> added as security theater. True DB-level read enforcement needs a re-architecture: run tenant queries through a dedicated <strong>non-bypassing role</strong> with per-request <code>set_config('request.org', …)</code> and org-scoped policies. Effective DB defenses shipped instead: NOT NULL + the org-immutability trigger (write-side).</li>
+                        <li><strong>Cross-org leakage is unproven end-to-end</strong> — only one organization exists, so the cross-org tests stay skipped. Provisioning a 2nd tenant (Stage 6) is required to switch them on; until then isolation rests on the <code>tdb</code> choke point + code review.</li>
+                        <li><strong>Client-supplied storage paths</strong> (<code>addDocument.storagePath</code>, <code>suggestFileMetadata.path</code>) are org-scoped at the row level but not path-prefix-validated; cross-tenant access needs an unguessable UUID path. Tightening these is a later hardening.</li>
+                        <li><strong>AI metering undercounts</strong> two secondary Claude calls (<code>summarizeRequirementSource</code>, CELLAR <code>inferDirectiveRelations</code>); the 10 primary AI actions are metered + capped. The cap check sums the ledger per request — a rollup table would help a very high-volume tenant.</li>
+                        <li><strong>MFA has no recovery codes</strong> — a lost authenticator requires an operator to disable MFA on the user (small follow-up). The org-immutability trigger also blocks any legitimate tenant-merge/reassign until a guarded exception is added.</li>
+                        <li><strong>Live payments not wired</strong> — <code>billingWebhook</code> is a provider-agnostic scaffold; Stripe Checkout + signature-verified webhooks need the account's keys. Impersonation logs the <em>start</em>, not each impersonated action (per-action attribution is a later hardening).</li>
+                        <li><strong>Deploy dependencies:</strong> each stage ships additive SQL applied via the Supabase SQL Editor (there is no <code>migrations/</code> dir); the edge function is written to be backward-compatible before its SQL runs (try/catch fallbacks). Frontend rides the GitHub-Pages <code>?v=N</code> cache-bust.</li>
                     </ul>
                 </div>
             </div>
