@@ -36,7 +36,7 @@
     });
     let data = {};
     try { data = await res.json(); } catch { /* ignore */ }
-    if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status})`);
+    if (!res.ok) { const e = new Error(data.error || `Request failed (HTTP ${res.status})`); e.code = data.code; e.status = res.status; throw e; }
     return data;
   }
 
@@ -56,9 +56,13 @@
       saveSession({ token: r.token, role: r.role, admin: r.role === "rushroom", name: role });
       return r.token;
     },
-    // Individual email + password login. Returns the full session.
-    async loginUser(email, password) {
-      const r = await call({ action: "loginUser", email, password });
+    // Individual email + password login. Returns the full session. When the
+    // account has MFA, the first call throws with code "mfa_required"; pass
+    // mfaCode on a second call. The raw error carries .code for the UI.
+    async loginUser(email, password, mfaCode) {
+      let r;
+      try { r = await call({ action: "loginUser", email, password, mfaCode }); }
+      catch (e) { throw e; }
       saveSession({ token: r.token, role: r.role, admin: !!r.admin, name: r.name, urole: r.urole, email });
       return r;
     },
@@ -87,7 +91,12 @@
     platformTenants: (token) => call({ action: "platformTenants", token }),
     platformSetTenantStatus: (token, organizationId, status) => call({ action: "platformSetTenantStatus", token, organizationId, status }),
     platformImpersonate: (token, organizationId, reason) => call({ action: "platformImpersonate", token, organizationId, reason }),
-    platformAudit: (token) => call({ action: "platformAudit", token }),
+    platformAudit: (token, limit) => call({ action: "platformAudit", token, limit }),
+    // Stage 5: MFA (TOTP) self-service
+    mfaStatus: (token) => call({ action: "mfaStatus", token }),
+    mfaEnrollStart: (token) => call({ action: "mfaEnrollStart", token }),
+    mfaEnrollVerify: (token, code) => call({ action: "mfaEnrollVerify", token, code }),
+    mfaDisable: (token, code) => call({ action: "mfaDisable", token, code }),
     orgBilling: (token) => call({ action: "orgBilling", token }),
     platformSetTenantPlan: (token, organizationId, plan) => call({ action: "platformSetTenantPlan", token, organizationId, plan }),
     // Swap the active session for an impersonation token, parking the operator's

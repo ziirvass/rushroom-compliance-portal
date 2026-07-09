@@ -125,6 +125,38 @@ async function verifyPassword(pw: string, stored: string | null): Promise<boolea
   return eq(b64url(new Uint8Array(bits)), hashB64);
 }
 
+// ---- Stage 5: TOTP multi-factor auth (RFC 6238, base32 secret) -----------
+const B32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function base32Decode(s: string): Uint8Array {
+  const clean = String(s || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+  let bits = 0, value = 0; const out: number[] = [];
+  for (const ch of clean) { value = (value << 5) | B32_ALPHABET.indexOf(ch); bits += 5; if (bits >= 8) { out.push((value >>> (bits - 8)) & 0xff); bits -= 8; } }
+  return new Uint8Array(out);
+}
+function base32Encode(bytes: Uint8Array): string {
+  let bits = 0, value = 0, out = "";
+  for (const b of bytes) { value = (value << 8) | b; bits += 8; while (bits >= 5) { out += B32_ALPHABET[(value >>> (bits - 5)) & 31]; bits -= 5; } }
+  if (bits > 0) out += B32_ALPHABET[(value << (5 - bits)) & 31];
+  return out;
+}
+function newTotpSecret(): string { const b = new Uint8Array(20); crypto.getRandomValues(b); return base32Encode(b); }
+async function totpAt(secretB32: string, counter: number): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", ab(base32Decode(secretB32)), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const msg = new Uint8Array(8); let c = counter;
+  for (let i = 7; i >= 0; i--) { msg[i] = c & 0xff; c = Math.floor(c / 256); }
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, ab(msg)));
+  const off = sig[sig.length - 1] & 0x0f;
+  const bin = ((sig[off] & 0x7f) << 24) | (sig[off + 1] << 16) | (sig[off + 2] << 8) | sig[off + 3];
+  return String(bin % 1_000_000).padStart(6, "0");
+}
+async function totpVerify(secretB32: string, code: string): Promise<boolean> {
+  const c = String(code || "").trim();
+  if (!secretB32 || !/^\d{6}$/.test(c)) return false;
+  const t = Math.floor(Date.now() / 30000);
+  for (const w of [-1, 0, 1]) { if ((await totpAt(secretB32, t + w)) === c) return true; } // ±30s clock skew
+  return false;
+}
+
 const isSupplierStep = (audience: string[] | null) => Array.isArray(audience) && audience.includes("supplier");
 const safeName = (n: string) => (n || "file").replace(/[^\w.\-]+/g, "_").slice(-120);
 
@@ -731,6 +763,13 @@ Deno.serve(async (req) => {
         : "Your account is awaiting administrator approval.";
       return json({ error: msg }, 403);
     }
+    // Stage 5: second factor. Only enforced for accounts that enrolled in MFA,
+    // so existing users are unaffected. A missing code signals the UI to prompt.
+    if (u.mfa_enabled) {
+      const code = String(body.mfaCode ?? "").trim();
+      if (!code) return json({ error: "Enter your authenticator code.", code: "mfa_required" }, 401);
+      if (!(await totpVerify(u.mfa_secret ?? "", code))) return json({ error: "That authenticator code isn't valid.", code: "mfa_invalid" }, 401);
+    }
     const assigned = String(u.role || u.requested_role || "supplier");
     const tier = roleTier(assigned);
     const admin = assigned === "admin";
@@ -905,6 +944,40 @@ Deno.serve(async (req) => {
       await db.from("ai_usage_events").insert({ organization_id: organizationId, period: usagePeriod(), action, input_tokens: u.input_tokens || 0, output_tokens: u.output_tokens || 0 });
     } catch { /* metering must never break an action */ }
   };
+
+  // --- Stage 5: MFA (TOTP) self-service for individual accounts -----------
+  if (action === "mfaStatus") {
+    if (!session.uid) return json({ enabled: false, available: false });
+    const { data: u } = await db.from("users").select("mfa_enabled").eq("id", session.uid).maybeSingle();
+    return json({ enabled: !!u?.mfa_enabled, available: true });
+  }
+  if (action === "mfaEnrollStart") {
+    if (!session.uid) return json({ error: "MFA is available for individual accounts, not the shared login." }, 400);
+    const secret = newTotpSecret();
+    const { error } = await db.from("users").update({ mfa_pending_secret: secret }).eq("id", session.uid);
+    if (error) return json({ error: error.message }, 500);
+    const label = encodeURIComponent(`Rushroom Portal:${session.email || session.uid}`);
+    const otpauth = `otpauth://totp/${label}?secret=${secret}&issuer=Rushroom%20Portal&period=30&digits=6`;
+    return json({ ok: true, secret, otpauth });
+  }
+  if (action === "mfaEnrollVerify") {
+    if (!session.uid) return json({ error: "Not available" }, 400);
+    const { data: u } = await db.from("users").select("mfa_pending_secret").eq("id", session.uid).maybeSingle();
+    if (!u?.mfa_pending_secret) return json({ error: "Start MFA setup first." }, 400);
+    if (!(await totpVerify(u.mfa_pending_secret, String(body.code ?? "")))) return json({ error: "That code isn't valid — check the time on your device and try again." }, 400);
+    const { error } = await db.from("users").update({ mfa_enabled: true, mfa_secret: u.mfa_pending_secret, mfa_pending_secret: null }).eq("id", session.uid);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+  if (action === "mfaDisable") {
+    if (!session.uid) return json({ error: "Not available" }, 400);
+    const { data: u } = await db.from("users").select("mfa_secret, mfa_enabled").eq("id", session.uid).maybeSingle();
+    if (!u?.mfa_enabled) return json({ ok: true });
+    if (!(await totpVerify(u.mfa_secret ?? "", String(body.code ?? "")))) return json({ error: "Enter a valid code to turn MFA off." }, 400);
+    const { error } = await db.from("users").update({ mfa_enabled: false, mfa_secret: null, mfa_pending_secret: null }).eq("id", session.uid);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
 
   // --- admin account management (requires the admin privilege) ------------
   if (action === "adminListUsers") {
@@ -1085,9 +1158,10 @@ Deno.serve(async (req) => {
 
   if (action === "platformAudit") {
     if (!isPlatformOwner) return json({ error: "Platform operators only" }, 403);
+    const limit = Math.min(2000, Math.max(1, Number(body.limit) || 100)); // higher for export
     const { data, error } = await db.from("platform_audit")
       .select("id, actor_email, action, target_organization_id, detail, created_at")
-      .order("created_at", { ascending: false }).limit(100);
+      .order("created_at", { ascending: false }).limit(limit);
     if (error) return json({ error: error.message }, 500);
     return json({ entries: data ?? [] });
   }

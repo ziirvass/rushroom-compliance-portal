@@ -654,3 +654,45 @@ create table if not exists public.ai_usage_events (
 );
 create index if not exists ai_usage_events_org_period_idx on public.ai_usage_events (organization_id, period);
 alter table public.ai_usage_events enable row level security;
+
+-- ============================================================================
+-- MULTI-TENANT SaaS — Stage 5: DB hardening + MFA
+-- ============================================================================
+-- (1) organization_id becomes NOT NULL on every tenant table (safe now that
+--     Stage 2 stamps every write), and (2) an immutability trigger blocks a bug
+--     from ever moving a row between tenants. The trigger fires even for the
+--     service role (unlike RLS, which the service role bypasses). Idempotent.
+
+-- Block changing organization_id on update (tenant-move protection).
+create or replace function public.forbid_org_change() returns trigger
+language plpgsql as $$
+begin
+  if new.organization_id is distinct from old.organization_id then
+    raise exception 'organization_id is immutable (tenant boundary)';
+  end if;
+  return new;
+end $$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'steps','documents','document_versions','uploads','standards','standard_versions',
+    'deviation_scans','deviation_findings','standard_clauses','as_operates_interpretations',
+    'product_passports','passport_interpretation_links','product_directive_applicability',
+    'classification_log','requirement_links','document_statements'
+  ] loop
+    -- backfill any stragglers, then enforce NOT NULL
+    execute format('update public.%I set organization_id = %L where organization_id is null', t, '11111111-1111-4111-8111-111111111111');
+    execute format('alter table public.%I alter column organization_id set not null', t);
+    -- tenant-move protection
+    execute format('drop trigger if exists trg_forbid_org_change on public.%I', t);
+    execute format('create trigger trg_forbid_org_change before update on public.%I for each row execute function public.forbid_org_change()', t);
+  end loop;
+end $$;
+
+-- Multi-factor auth (TOTP) — opt-in per user; mfa_enabled defaults false so
+-- existing accounts are unaffected until they enrol.
+alter table public.users add column if not exists mfa_enabled boolean not null default false;
+alter table public.users add column if not exists mfa_secret text;
+alter table public.users add column if not exists mfa_pending_secret text;

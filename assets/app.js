@@ -2309,6 +2309,7 @@
       { id: "members", label: "Members", icon: "layers", build: () => lazy(orgMembersView) },
       { id: "org", label: "Organization", icon: "tag", build: () => orgSettingsView(ctx) },
       { id: "billing", label: "Billing & plan", icon: "sparkles", build: () => lazy(billingView) },
+      { id: "security", label: "Security", icon: "tag", build: () => lazy(securityView) },
     ];
     if (isPlatform) {
       tabs.push({ id: "users", label: "All users", icon: "eye", build: () => lazy(() => usersAdminView(role)) });
@@ -2484,6 +2485,43 @@
   }
   const usagePeriodLabel = (p) => { try { const [y, m] = String(p).split("-"); return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" }); } catch { return p; } };
 
+  // Per-user two-factor authentication (TOTP) enrolment / removal.
+  async function securityView() {
+    const wrap = el("div");
+    const box = el("div");
+    const load = async () => {
+      box.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+      let s; try { s = await API.mfaStatus(API.getToken()); } catch (ex) { box.replaceChildren(el("div", { class: "error" }, ex.message)); return; }
+      if (!s.available) { box.replaceChildren(el("div", { class: "notice warn" }, "Two-factor authentication is available for individual email accounts, not the shared password login.")); return; }
+      if (s.enabled) {
+        const code = el("input", { class: "up-text", inputmode: "numeric", placeholder: "6-digit code", maxlength: "6", style: "max-width:140px" });
+        const note = el("span", { class: "up-status" }, "");
+        const disable = actionBtn("Turn off MFA", "trash", { danger: true, onClick: async () => { note.className = "up-status"; note.textContent = "…"; try { await API.mfaDisable(API.getToken(), code.value.trim()); await load(); } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; } } });
+        box.replaceChildren(el("div", { class: "notice ok" }, "Two-factor authentication is ON for your account."), el("div", { class: "rl-controls", style: "margin-top:0.5rem" }, [el("span", { class: "form-label" }, "Enter a code to disable"), code, disable, note]));
+        return;
+      }
+      const start = actionBtn("Set up two-factor auth", "sparkles", { primary: true, onClick: async () => {
+        let r; try { r = await API.mfaEnrollStart(API.getToken()); } catch (ex) { box.replaceChildren(el("div", { class: "error" }, ex.message)); return; }
+        const code = el("input", { class: "up-text", inputmode: "numeric", placeholder: "6-digit code", maxlength: "6", style: "max-width:140px" });
+        const note = el("span", { class: "up-status" }, "");
+        const verify = actionBtn("Verify & enable", "edit", { primary: true, onClick: async () => { note.className = "up-status"; note.textContent = "Verifying…"; try { await API.mfaEnrollVerify(API.getToken(), code.value.trim()); await load(); } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; } } });
+        box.replaceChildren(
+          el("p", { class: "muted" }, "Add this account to an authenticator app (Google Authenticator, 1Password, Authy…), then enter a code to confirm."),
+          el("div", { class: "acct-card", style: "display:block" }, [
+            el("div", { class: "name" }, "Setup key"),
+            el("code", { style: "user-select:all; word-break:break-all" }, r.secret),
+            el("div", { style: "margin-top:0.4rem" }, el("a", { href: r.otpauth, class: "btn btn-sm" }, "Open in authenticator app")),
+          ]),
+          el("div", { class: "rl-controls", style: "margin-top:0.5rem" }, [el("span", { class: "form-label" }, "Code"), code, verify, note]),
+        );
+      } });
+      box.replaceChildren(el("p", { class: "muted" }, "Protect your sign-in with a second factor — a 6-digit code from an authenticator app."), start);
+    };
+    wrap.append(el("h3", {}, "Two-factor authentication (MFA)"), box);
+    await load();
+    return wrap;
+  }
+
   const TENANT_PLANS = ["trial", "starter", "professional", "enterprise", "internal"];
   const TENANT_STATUSES = ["trial", "active", "past_due", "suspended", "cancelled"];
 
@@ -2545,8 +2583,12 @@
     const wrap = el("div");
     let r; try { r = await API.platformAudit(API.getToken()); } catch (ex) { wrap.append(el("div", { class: "error" }, ex.message)); return wrap; }
     const entries = r.entries || [];
+    const exportBtn = actionBtn("Export JSON", "external", { onClick: async () => {
+      try { const full = await API.platformAudit(API.getToken(), 2000); downloadBlob(JSON.stringify(full.entries || [], null, 2), `platform-audit-${new Date().toISOString().slice(0, 10)}.json`, "application/json"); }
+      catch (ex) { alert(ex.message); }
+    } });
     wrap.append(
-      el("h3", {}, "Platform audit log"),
+      el("div", { style: "display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap" }, [el("h3", { style: "margin:0" }, "Platform audit log"), exportBtn]),
       entries.length ? el("div", { class: "acct-list" }, entries.map((e) => el("div", { class: "acct-card" }, [
         el("div", {}, [el("div", { class: "name" }, el("strong", {}, e.action)), el("div", { class: "muted", style: "font-size:0.82rem" }, `${e.actor_email || "operator"}${e.detail && e.detail.reason ? " · " + e.detail.reason : ""}`)]),
         el("span", { class: "muted", style: "font-size:0.8rem" }, fmtDate(e.created_at)),
@@ -4101,18 +4143,27 @@
 
     const email = el("input", { type: "email", id: "login-email", class: "up-text", autocomplete: "username", placeholder: "you@company.com", required: "" });
     const pass = el("input", { type: "password", id: "login-password", class: "up-text", autocomplete: "current-password", placeholder: "Your password", required: "" });
+    const mfaInput = el("input", { type: "text", class: "up-text", inputmode: "numeric", autocomplete: "one-time-code", placeholder: "6-digit code", maxlength: "6" });
+    const mfaRow = el("label", { class: "form-row", style: "display:none" }, [el("span", { class: "form-label" }, "Authenticator code"), mfaInput]);
     const err = el("p", { class: "form-error", role: "alert", "aria-live": "assertive" }, "");
     const btn = el("button", { class: "btn btn-primary", type: "submit" }, "Sign in");
     const form = el("form", { novalidate: "" }, [
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Email"), email]),
       el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Password"), pass]),
+      mfaRow,
       el("div", { style: "margin-top:0.6rem" }, btn), err,
     ]);
     form.addEventListener("submit", async (e) => {
       e.preventDefault(); err.textContent = ""; btn.disabled = true;
-      try { await API.loginUser(email.value.trim(), pass.value); reveal(); }
-      catch (ex) { err.textContent = ex.message || "Sign in failed."; pass.select(); }
-      finally { btn.disabled = false; }
+      try {
+        await API.loginUser(email.value.trim(), pass.value, mfaInput.value.trim() || undefined);
+        reveal();
+      } catch (ex) {
+        if (ex && (ex.code === "mfa_required" || ex.code === "mfa_invalid")) {
+          mfaRow.style.display = ""; mfaInput.focus();
+          err.textContent = ex.code === "mfa_invalid" ? "That code isn't valid — try again." : "Enter the code from your authenticator app.";
+        } else { err.textContent = ex.message || "Sign in failed."; pass.select(); }
+      } finally { btn.disabled = false; }
     });
 
     // Shared-password fallback (bootstrap admin / legacy).
