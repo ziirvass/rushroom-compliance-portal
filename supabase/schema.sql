@@ -636,3 +636,21 @@ create table if not exists public.platform_audit (
 );
 create index if not exists platform_audit_created_idx on public.platform_audit (created_at desc);
 alter table public.platform_audit enable row level security;
+
+-- ============================================================================
+-- MULTI-TENANT SaaS — Stage 4: usage metering (append-only AI token ledger)
+-- ============================================================================
+-- One row per AI call. Monthly usage = sum(input+output) for (org, period).
+-- Append-only avoids read-modify-write races on a counter. Plan/entitlements
+-- live in code (portal-api); the plan itself is organizations.plan.
+create table if not exists public.ai_usage_events (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid references public.organizations(id) on delete cascade,
+  period          text not null,                    -- 'YYYY-MM'
+  action          text,
+  input_tokens    integer not null default 0,
+  output_tokens   integer not null default 0,
+  created_at      timestamptz not null default now()
+);
+create index if not exists ai_usage_events_org_period_idx on public.ai_usage_events (organization_id, period);
+alter table public.ai_usage_events enable row level security;

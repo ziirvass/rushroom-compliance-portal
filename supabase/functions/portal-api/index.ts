@@ -259,6 +259,51 @@ const addUsage = (a: any, b: any) => ({
   output_tokens: (a.output_tokens || 0) + (b?.output_tokens ?? 0),
   cache_read_input_tokens: (a.cache_read_input_tokens || 0) + (b?.cache_read_input_tokens ?? 0),
 });
+
+// --- Stage 4: plan entitlements, feature gating & AI metering --------------
+// Plans are code-defined (operator config). A tenant's plan is organizations.plan.
+// The seed/operator org uses 'internal' = every feature, no AI cap.
+const PLANS: Record<string, { label: string; features: string[]; aiTokensPerMonth: number | null; maxSeats: number | null }> = {
+  trial:        { label: "Trial",        features: ["core"], aiTokensPerMonth: 100_000, maxSeats: 3 },
+  starter:      { label: "Starter",      features: ["core", "deviation"], aiTokensPerMonth: 1_000_000, maxSeats: 10 },
+  professional: { label: "Professional", features: ["core", "deviation", "level2", "links", "classification"], aiTokensPerMonth: 5_000_000, maxSeats: 30 },
+  enterprise:   { label: "Enterprise",   features: ["core", "deviation", "level2", "links", "classification", "cellar"], aiTokensPerMonth: null, maxSeats: null },
+  internal:     { label: "Operator",     features: ["core", "deviation", "level2", "links", "classification", "cellar"], aiTokensPerMonth: null, maxSeats: null },
+};
+const PLAN_IDS = Object.keys(PLANS);
+const planOf = (p: string) => PLANS[p] || PLANS.trial;
+const usagePeriod = () => new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+
+// Which paywalled feature (if any) an action requires. Unlisted actions = core.
+const FEATURE_FOR_ACTION: Record<string, string> = {
+  runDeviationScan: "deviation", deviations: "deviation",
+  extractStandardClauses: "level2", getClausesForStandard: "level2", generateInterpretations: "level2",
+  saveInterpretation: "level2", getInterpretations: "level2", complianceMatrix: "level2",
+  listProductPassports: "level2", getProductPassport: "level2", createProductPassport: "level2",
+  updateProductPassport: "level2", deleteProductPassport: "level2", linkPassportInterpretation: "level2",
+  unlinkPassportInterpretation: "level2", exportProductPassport: "level2",
+  listRequirementLinks: "links", listRequirementLinksForClauses: "links", listRequirementLinksForDocumentVersions: "links",
+  listRequirementLinksForStatements: "links", createRequirementLink: "links", setRequirementLinkStatus: "links",
+  deleteRequirementLink: "links", listRequirementLinksQueue: "links", suggestRequirementLinks: "links",
+  detectClauseCitations: "links", listDocumentStatements: "links", saveDocumentStatements: "links",
+  listDirectives: "cellar", addDirective: "cellar", syncDirectiveRelations: "cellar",
+  inferDirectiveRelations: "cellar", analyseComplianceGraph: "cellar", setDirectiveApplicability: "cellar",
+  getComplianceCoverage: "cellar", generateComplianceNarrative: "cellar",
+};
+// Actions that spend Anthropic tokens (metered + capped).
+const AI_ACTIONS = new Set([
+  "suggestDocumentVersion", "suggestStandardMetadata", "suggestFileMetadata", "runDeviationScan",
+  "extractStandardClauses", "generateInterpretations", "suggestRequirementLinks",
+  "inferDirectiveRelations", "generateComplianceNarrative", "suggestClassifications",
+]);
+// Monthly AI token usage for an org (sum of the append-only ledger; best-effort).
+async function aiTokensUsed(orgId: string, period: string): Promise<number> {
+  try {
+    const { data } = await db.from("ai_usage_events").select("input_tokens, output_tokens").eq("organization_id", orgId).eq("period", period);
+    return (data ?? []).reduce((n: number, r: any) => n + (r.input_tokens || 0) + (r.output_tokens || 0), 0);
+  } catch { return 0; }
+}
+
 const SEVERITIES = ["Critical", "High", "Medium", "Low", "Info"];
 const TEXT_CAP = 40000; // per-file char cap fed to the model
 const DOCUMENT_DRAFT_SCHEMA = {
@@ -773,6 +818,26 @@ Deno.serve(async (req) => {
     return json({ ok: true, name: u.name, email: u.email });
   }
 
+  // --- Stage 4: billing webhook (provider callback; no session) -----------
+  // Provider-agnostic: a billing system posts { secret, organizationId, plan?,
+  // status? } to move a tenant between plans/statuses. Guarded by a shared
+  // secret; disabled entirely when BILLING_WEBHOOK_SECRET is unset.
+  if (action === "billingWebhook") {
+    const secret = Deno.env.get("BILLING_WEBHOOK_SECRET");
+    if (!secret) return json({ error: "Billing webhook is not configured." }, 404);
+    if (String(body.secret ?? "") !== secret) return json({ error: "Forbidden" }, 403);
+    const orgId = String(body.organizationId ?? "");
+    if (!orgId) return json({ error: "organizationId required" }, 400);
+    const patch: Record<string, unknown> = {};
+    if (body.plan !== undefined) { if (!PLAN_IDS.includes(String(body.plan))) return json({ error: "Unknown plan" }, 400); patch.plan = String(body.plan); }
+    if (body.status !== undefined) { if (!["trial", "active", "past_due", "suspended", "cancelled"].includes(String(body.status))) return json({ error: "Invalid status" }, 400); patch.status = String(body.status); }
+    if (!Object.keys(patch).length) return json({ error: "Nothing to update" }, 400);
+    const { error } = await db.from("organizations").update(patch).eq("id", orgId);
+    if (error) return json({ error: error.message }, 500);
+    await db.from("platform_audit").insert({ actor_email: "billing_webhook", action: "billing_update", target_organization_id: orgId, detail: patch });
+    return json({ ok: true });
+  }
+
   // --- everything else requires a valid token -----------------------------
   const session = await verifySession(body.token);
   if (!session) return json({ error: "Not authenticated" }, 401);
@@ -804,6 +869,42 @@ Deno.serve(async (req) => {
       platform_owner: isPlatformOwner, impersonating: session.imp === true,
     });
   }
+
+  // --- Stage 4: plan entitlements, feature gating & AI metering -----------
+  // Plan resolved lazily and cached per request (only when a gate needs it), so
+  // non-gated actions pay no extra query. The seed org is 'internal' = unlimited.
+  let _plan: string | null = null;
+  const getPlan = async (): Promise<string> => {
+    if (_plan === null) {
+      try { const { data } = await db.from("organizations").select("plan").eq("id", organizationId).maybeSingle(); _plan = (data?.plan as string) || "internal"; }
+      catch { _plan = "internal"; }
+    }
+    return _plan;
+  };
+  // Feature gate: block paywalled modules the plan doesn't include.
+  const requiredFeature = FEATURE_FOR_ACTION[action];
+  if (requiredFeature) {
+    const p = planOf(await getPlan());
+    if (!p.features.includes(requiredFeature)) {
+      return json({ error: "Your plan doesn't include this feature — upgrade to use it.", code: "feature_locked", feature: requiredFeature }, 402);
+    }
+  }
+  // AI cap: refuse new AI work once the monthly token budget is spent.
+  if (AI_ACTIONS.has(action)) {
+    const limit = planOf(await getPlan()).aiTokensPerMonth;
+    if (limit !== null) {
+      const used = await aiTokensUsed(organizationId, usagePeriod());
+      if (used >= limit) return json({ error: "Monthly AI limit reached for your plan — upgrade to continue.", code: "ai_limit", used, limit }, 402);
+    }
+  }
+  // Record one AI call's token usage (append-only ledger; best-effort, non-fatal).
+  const meterAi = async (aj: any) => {
+    try {
+      const u = usageOf(aj);
+      if (!((u.input_tokens || 0) + (u.output_tokens || 0))) return;
+      await db.from("ai_usage_events").insert({ organization_id: organizationId, period: usagePeriod(), action, input_tokens: u.input_tokens || 0, output_tokens: u.output_tokens || 0 });
+    } catch { /* metering must never break an action */ }
+  };
 
   // --- admin account management (requires the admin privilege) ------------
   if (action === "adminListUsers") {
@@ -989,6 +1090,35 @@ Deno.serve(async (req) => {
       .order("created_at", { ascending: false }).limit(100);
     if (error) return json({ error: error.message }, 500);
     return json({ entries: data ?? [] });
+  }
+
+  // --- Stage 4: plan & usage for the caller's org (Org Admin) -------------
+  if (action === "orgBilling") {
+    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    const plan = await getPlan();
+    const p = planOf(plan);
+    const period = usagePeriod();
+    const used = await aiTokensUsed(organizationId, period);
+    let seats = 0;
+    try { const { count } = await db.from("memberships").select("id", { count: "exact", head: true }).eq("organization_id", organizationId).eq("status", "active"); seats = count ?? 0; } catch { /* memberships absent */ }
+    return json({
+      plan, plan_label: p.label, features: p.features, period,
+      ai: { used, limit: p.aiTokensPerMonth },
+      seats: { used: seats, limit: p.maxSeats },
+      plans: PLAN_IDS.map((id) => ({ id, label: PLANS[id].label, features: PLANS[id].features, aiTokensPerMonth: PLANS[id].aiTokensPerMonth, maxSeats: PLANS[id].maxSeats })),
+    });
+  }
+
+  // --- Stage 4: set a tenant's plan (Platform operator) ------------------
+  if (action === "platformSetTenantPlan") {
+    if (!isPlatformOwner) return json({ error: "Platform operators only" }, 403);
+    const orgId = String(body.organizationId ?? "");
+    const plan = String(body.plan ?? "");
+    if (!orgId || !PLAN_IDS.includes(plan)) return json({ error: "Valid organizationId and plan required" }, 400);
+    const { error } = await db.from("organizations").update({ plan }).eq("id", orgId);
+    if (error) return json({ error: error.message }, 500);
+    await db.from("platform_audit").insert({ actor_user_id: session.uid ?? null, actor_email: session.email ?? null, action: "tenant_plan_change", target_organization_id: orgId, detail: { plan } });
+    return json({ ok: true });
   }
 
   if (action === "data") {
@@ -1320,6 +1450,7 @@ Deno.serve(async (req) => {
         }),
       });
       apiJson = await res.json();
+      await meterAi(apiJson);
       if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
     } catch (e) {
       return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
@@ -1613,6 +1744,7 @@ Deno.serve(async (req) => {
         }),
       });
       apiJson = await res.json();
+      await meterAi(apiJson);
       if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
     } catch (e) {
       return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
@@ -1675,6 +1807,7 @@ Deno.serve(async (req) => {
         }),
       });
       apiJson = await res.json();
+      await meterAi(apiJson);
       if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
     } catch (e) {
       return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
@@ -1830,6 +1963,7 @@ Be specific: name the exact document and the exact standard (and clause where po
           }),
         });
         const apiJson = await res.json();
+        await meterAi(apiJson);
         if (!res.ok) throw new Error(`Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}`);
         if (apiJson.stop_reason === "refusal") throw new Error("the AI declined to complete the analysis (refusal)");
         const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
@@ -1941,6 +2075,7 @@ Be specific: name the exact document and the exact standard (and clause where po
         }),
       });
       apiJson = await res.json();
+      await meterAi(apiJson);
       if (!res.ok) return json({ error: `Claude API error: ${apiJson?.error?.message || "unknown"}` }, 502);
     } catch (e) {
       return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
@@ -2069,6 +2204,7 @@ Be specific: name the exact document and the exact standard (and clause where po
           }),
         });
         const apiJson = await res.json();
+        await meterAi(apiJson);
         usageTotal = addUsage(usageTotal, usageOf(apiJson));
         if (!res.ok || apiJson.stop_reason === "refusal") { markPending(); continue; }
         const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
@@ -2448,6 +2584,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
           body: JSON.stringify({ model: SCAN_MODEL, max_tokens: 4000, thinking: { type: "adaptive" }, output_config: { effort: "medium", format: { type: "json_schema", schema: SUG_SCHEMA } }, system, messages: [{ role: "user", content: [{ type: "text", text: user }] }] }),
         });
         apiJson = await res.json();
+        await meterAi(apiJson);
         if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
       } catch (e) { return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502); }
       if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to suggest links." }, 502);
@@ -2973,6 +3110,7 @@ Be conservative — prefer precision over recall; only match when a compliance r
         body: JSON.stringify({ model: SCAN_MODEL, max_tokens: 2000, thinking: { type: "adaptive" }, output_config: { effort: "medium" }, system, messages: [{ role: "user", content: [{ type: "text", text: user }] }] }),
       });
       apiJson = await res.json();
+      await meterAi(apiJson);
       if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
     } catch (e) { return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502); }
     if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to generate the narrative." }, 502);
@@ -3119,6 +3257,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
         body: JSON.stringify({ model: SCAN_MODEL, max_tokens: 4000, thinking: { type: "adaptive" }, output_config: { effort: "low", format: { type: "json_schema", schema: SUGGEST_SCHEMA } }, system, messages: [{ role: "user", content: [{ type: "text", text: `Classify these ${unclassified.length} unclassified items:\n${list}` }] }] }),
       });
       apiJson = await res.json();
+      await meterAi(apiJson);
       if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
     } catch (e) { return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502); }
     if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to classify these items." }, 502);

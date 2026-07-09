@@ -88,6 +88,8 @@
     platformSetTenantStatus: (token, organizationId, status) => call({ action: "platformSetTenantStatus", token, organizationId, status }),
     platformImpersonate: (token, organizationId, reason) => call({ action: "platformImpersonate", token, organizationId, reason }),
     platformAudit: (token) => call({ action: "platformAudit", token }),
+    orgBilling: (token) => call({ action: "orgBilling", token }),
+    platformSetTenantPlan: (token, organizationId, plan) => call({ action: "platformSetTenantPlan", token, organizationId, plan }),
     // Swap the active session for an impersonation token, parking the operator's
     // own session so it can be restored on exit.
     startImpersonation(r, orgName) {

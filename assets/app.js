@@ -2308,6 +2308,7 @@
     const tabs = [
       { id: "members", label: "Members", icon: "layers", build: () => lazy(orgMembersView) },
       { id: "org", label: "Organization", icon: "tag", build: () => orgSettingsView(ctx) },
+      { id: "billing", label: "Billing & plan", icon: "sparkles", build: () => lazy(billingView) },
     ];
     if (isPlatform) {
       tabs.push({ id: "users", label: "All users", icon: "eye", build: () => lazy(() => usersAdminView(role)) });
@@ -2449,6 +2450,41 @@
     return mount;
   }
 
+  const FEATURE_LABELS = { core: "Core", deviation: "Deviation scan", level2: "Clauses & DPP", links: "Requirement links", classification: "Classification", cellar: "Directive analyser" };
+  const fmtQuota = (n) => n == null ? "unlimited" : (n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n));
+
+  // Org admin: current plan, entitlements and this month's usage vs limits.
+  async function billingView() {
+    const wrap = el("div");
+    let r; try { r = await API.orgBilling(API.getToken()); } catch (ex) { wrap.append(el("div", { class: "error" }, ex.message)); return wrap; }
+    const aiPct = r.ai.limit ? Math.min(100, Math.round((r.ai.used / r.ai.limit) * 100)) : null;
+    const seatPct = r.seats.limit ? Math.min(100, Math.round((r.seats.used / r.seats.limit) * 100)) : null;
+    const bar = (pct, over) => el("div", { class: "progress", style: "max-width:320px" }, el("span", { style: `width:${pct == null ? 100 : pct}%${over ? ";background:var(--red)" : ""}` }));
+    wrap.append(
+      el("h3", {}, `Plan: ${r.plan_label}`),
+      el("p", { class: "muted", style: "margin:0 0 0.4rem" }, `Included: ${(r.features || []).map((f) => FEATURE_LABELS[f] || f).join(" · ")}`),
+      el("div", { class: "acct-card", style: "display:block" }, [
+        el("div", { class: "name" }, `AI usage · ${usagePeriodLabel(r.period)}`),
+        el("div", { class: "muted", style: "font-size:0.85rem; margin:0.2rem 0" }, `${fmtQuota(r.ai.used)} of ${fmtQuota(r.ai.limit)} tokens${aiPct != null ? ` (${aiPct}%)` : ""}`),
+        bar(aiPct, aiPct != null && aiPct >= 100),
+      ]),
+      el("div", { class: "acct-card", style: "display:block; margin-top:0.5rem" }, [
+        el("div", { class: "name" }, "Seats (active members)"),
+        el("div", { class: "muted", style: "font-size:0.85rem; margin:0.2rem 0" }, `${r.seats.used} of ${r.seats.limit == null ? "unlimited" : r.seats.limit}`),
+        bar(seatPct, seatPct != null && seatPct >= 100),
+      ]),
+      el("h3", { style: "margin-top:1rem" }, "Plans"),
+      el("div", { class: "acct-list" }, (r.plans || []).filter((p) => p.id !== "internal").map((p) => el("div", { class: "acct-card" }, [
+        el("div", {}, [el("div", { class: "name" }, [el("strong", {}, p.label), p.id === r.plan ? el("span", { class: "rl-status rl-s-accepted", style: "margin-left:0.4rem" }, "Current") : null]), el("div", { class: "muted", style: "font-size:0.8rem" }, (p.features || []).map((f) => FEATURE_LABELS[f] || f).join(" · "))]),
+        el("span", { class: "muted", style: "font-size:0.82rem" }, `${fmtQuota(p.aiTokensPerMonth)} AI · ${p.maxSeats == null ? "∞" : p.maxSeats} seats`),
+      ]))),
+      el("p", { class: "muted", style: "font-size:0.8rem; margin-top:0.6rem" }, "To change plan, contact your account manager. (Self-serve checkout is on the roadmap.)"),
+    );
+    return wrap;
+  }
+  const usagePeriodLabel = (p) => { try { const [y, m] = String(p).split("-"); return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" }); } catch { return p; } };
+
+  const TENANT_PLANS = ["trial", "starter", "professional", "enterprise", "internal"];
   const TENANT_STATUSES = ["trial", "active", "past_due", "suspended", "cancelled"];
 
   // Platform operator: the internal Admin Console — tenants list, status control
@@ -2479,6 +2515,12 @@
       try { await API.platformSetTenantStatus(API.getToken(), t.id, statusSel.value); note.className = "up-status ok"; note.textContent = "Saved."; }
       catch (ex) { note.className = "up-status err"; note.textContent = ex.message; statusSel.value = t.status; }
     });
+    const planSel = el("select", { class: "up-text", title: "Plan" }, TENANT_PLANS.map((p) => el("option", { value: p, selected: t.plan === p ? "selected" : null }, p)));
+    planSel.addEventListener("change", async () => {
+      note.className = "up-status"; note.textContent = "Saving…";
+      try { await API.platformSetTenantPlan(API.getToken(), t.id, planSel.value); note.className = "up-status ok"; note.textContent = "Saved."; }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; planSel.value = t.plan; }
+    });
     const actAs = actionBtn("Act as", "external", { onClick: async () => {
       const reason = prompt(`Start a support session as “${t.name}”? Optionally note a reason (logged):`, "");
       if (reason === null) return;
@@ -2494,7 +2536,7 @@
         el("div", { class: "name" }, [el("strong", {}, t.name), t.is_seed ? el("span", { class: "pill-priority", style: "margin-left:0.4rem" }, "operator") : null]),
         el("div", { class: "muted", style: "font-size:0.82rem" }, `${t.slug || "—"} · ${t.active_members} member${t.active_members === 1 ? "" : "s"} · plan ${t.plan || "—"}`),
       ]),
-      el("div", { style: "display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap" }, [statusSel, t.is_seed ? null : actAs, note].filter(Boolean)),
+      el("div", { style: "display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap" }, [planSel, statusSel, t.is_seed ? null : actAs, note].filter(Boolean)),
     ]);
   }
 
