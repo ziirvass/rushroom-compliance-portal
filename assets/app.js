@@ -773,7 +773,7 @@
 
   // Sub-tabs within a panel (e.g. Library vs Add). Remembers the active tab
   // per key so it survives re-renders (reload after an add).
-  const paneSubTab = { compliance: "status", documents: "list", standards: "list", level2: "clauses", deviations: "monitoring" };
+  const paneSubTab = { compliance: "status", documents: "list", standards: "list", level2: "clauses", deviations: "monitoring", accounts: "members" };
   function subTabs(key, tabs) {
     const bar = el("div", { class: "subtabs", role: "tablist" });
     const body = el("div", { class: "subtab-body" });
@@ -2292,14 +2292,125 @@
       note,
     ]);
   }
+  const MROLE_LABELS = [["org_admin", "Org admin"], ["manager", "Manager"], ["reviewer", "Reviewer"], ["collaborator", "Collaborator"]];
+  const mroleLabel = (r) => (MROLE_LABELS.find((x) => x[0] === r) || [, r])[1];
+
+  // Stage 3: the Accounts tab becomes an Organization area of sub-tabs. Org
+  // admins get Members + Organization; platform operators also get All users,
+  // Tenants (admin console) and the platform Audit log.
   async function renderAccounts(role, mount) {
     if (!API.isAdmin()) { mount.replaceChildren(el("div", { class: "empty" }, "Administrators only.")); return; }
-    mount.replaceChildren(el("div", { class: "loading" }, "Loading accounts…"));
+    mount.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+    let ctx = {};
+    try { ctx = await API.orgContext(API.getToken()); } catch { /* treat as a plain org admin */ }
+    const isPlatform = !!ctx.platform_owner;
+    const lazy = (loader) => { const m = el("div", {}, el("div", { class: "loading" }, "Loading…")); loader().then((n) => m.replaceChildren(n)).catch((ex) => m.replaceChildren(el("div", { class: "error" }, ex.message))); return m; };
+    const tabs = [
+      { id: "members", label: "Members", icon: "layers", build: () => lazy(orgMembersView) },
+      { id: "org", label: "Organization", icon: "tag", build: () => orgSettingsView(ctx) },
+    ];
+    if (isPlatform) {
+      tabs.push({ id: "users", label: "All users", icon: "eye", build: () => lazy(() => usersAdminView(role)) });
+      tabs.push({ id: "tenants", label: "Tenants", icon: "grid", build: () => lazy(tenantsView) });
+      tabs.push({ id: "audit", label: "Audit", icon: "graph", build: () => lazy(auditView) });
+    }
+    mount.replaceChildren(subTabs("accounts", tabs));
+  }
+
+  // Members of the caller's organization (memberships), with invite + controls.
+  async function orgMembersView() {
+    const wrap = el("div");
+    const box = el("div");
+    const reload = async () => {
+      box.replaceChildren(el("div", { class: "loading" }, "Loading members…"));
+      let r; try { r = await API.orgMembers(API.getToken()); } catch (ex) { box.replaceChildren(el("div", { class: "error" }, ex.message)); return; }
+      const members = r.members || [];
+      box.replaceChildren(members.length
+        ? el("div", { class: "acct-list" }, members.map((m) => memberRow(m, reload)))
+        : el("div", { class: "empty" }, "No members yet — invite someone below."));
+    };
+    // Invite form
+    const email = el("input", { type: "email", class: "up-text", placeholder: "teammate@company.com", style: "max-width:260px" });
+    const roleSel = el("select", { class: "up-text" }, MROLE_LABELS.map(([v, l]) => el("option", { value: v, selected: v === "collaborator" ? "selected" : null }, l)));
+    const note = el("span", { class: "up-status" }, "");
+    const invite = actionBtn("Invite", "plus", { primary: true, onClick: async () => {
+      const e = email.value.trim();
+      if (!e) { note.className = "up-status warn"; note.textContent = "Enter an email."; return; }
+      note.className = "up-status"; note.textContent = "Inviting…";
+      try {
+        const res = await API.orgInviteMember(API.getToken(), e, roleSel.value);
+        note.className = "up-status ok";
+        note.textContent = res.created ? (res.emailed ? "Invited — a set-password email was sent." : "Invited. Copy this link: " + res.setUrl) : "Existing user added to this organization.";
+        email.value = ""; await reload();
+      } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    } });
+    wrap.append(
+      el("p", { class: "muted", style: "margin:0 0 0.6rem" }, "People with access to this organization. Invite a teammate by email and choose their role; new accounts get a set-password link."),
+      el("div", { class: "rl-controls" }, [el("span", { class: "form-label" }, "Invite"), email, roleSel, invite, note]),
+      box,
+    );
+    await reload();
+    return wrap;
+  }
+
+  function memberRow(m, reload) {
+    const note = el("span", { class: "up-status" }, "");
+    const roleSel = el("select", { class: "up-text" }, MROLE_LABELS.map(([v, l]) => el("option", { value: v, selected: m.role === v ? "selected" : null }, l)));
+    roleSel.addEventListener("change", async () => {
+      note.className = "up-status"; note.textContent = "Saving…";
+      try { await API.orgUpdateMember(API.getToken(), m.membership_id, { role: roleSel.value }); note.className = "up-status ok"; note.textContent = "Saved."; }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; roleSel.value = m.role; }
+    });
+    const suspended = m.status === "suspended";
+    const toggle = actionBtn(suspended ? "Reactivate" : "Suspend", suspended ? "refresh" : "trash", { danger: !suspended, onClick: async () => {
+      try { await API.orgUpdateMember(API.getToken(), m.membership_id, { status: suspended ? "active" : "suspended" }); await reload(); }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    } });
+    return el("div", { class: "acct-card" }, [
+      el("div", {}, [
+        el("div", { class: "name" }, [el("strong", {}, m.name || m.email), m.account_status && m.account_status !== "approved" ? el("span", { class: "pill-priority", style: "margin-left:0.4rem" }, m.account_status) : null]),
+        el("div", { class: "muted", style: "font-size:0.82rem" }, m.email),
+      ]),
+      el("div", { style: "display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap" }, [
+        el("span", { class: "rl-status " + (suspended ? "rl-s-suspended" : "rl-s-accepted") }, suspended ? "Suspended" : "Active"),
+        roleSel, toggle, note,
+      ]),
+    ]);
+  }
+
+  // Organization settings (name + read-only plan/status).
+  function orgSettingsView(ctx) {
+    const wrap = el("div");
+    const nameInput = el("input", { type: "text", class: "up-text", style: "max-width:320px" });
+    const note = el("span", { class: "up-status" }, "");
+    const info = el("div", { class: "muted", style: "margin-top:0.6rem; font-size:0.85rem" }, "Loading…");
+    API.orgSettings(API.getToken()).then((r) => {
+      const o = r.organization || {};
+      nameInput.value = o.name || ctx.organization_name || "";
+      info.textContent = `Plan: ${o.plan || "—"} · Status: ${o.status || "—"} · Active members: ${r.activeMembers ?? "—"}`;
+    }).catch((ex) => { info.textContent = ex.message; });
+    const save = actionBtn("Save", "edit", { primary: true, onClick: async () => {
+      note.className = "up-status"; note.textContent = "Saving…";
+      try { await API.orgUpdateSettings(API.getToken(), { name: nameInput.value.trim() }); note.className = "up-status ok"; note.textContent = "Saved."; renderSessionActions(); }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    } });
+    wrap.append(
+      el("h3", {}, "Organization settings"),
+      el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Name"), nameInput]),
+      el("div", { style: "display:flex; gap:0.5rem; align-items:center" }, [save, note]),
+      info,
+    );
+    return wrap;
+  }
+
+  // Platform operator: all global user accounts (the former Accounts view).
+  async function usersAdminView(role) {
+    const mount = el("div");
     let payload;
     try { payload = await API.adminListUsers(API.getToken(role)); }
-    catch (ex) { mount.replaceChildren(el("div", { class: "error" }, `Couldn't load accounts: ${ex.message}`)); return; }
+    catch (ex) { mount.replaceChildren(el("div", { class: "error" }, `Couldn't load accounts: ${ex.message}`)); return mount; }
     const users = payload.users || [];
-    const reload = () => renderAccounts(role, mount);
+    const reload = () => usersAdminView(role).then((n) => mount.replaceChildren(...n.childNodes));
 
     // Email-delivery status + a test-send. When Resend isn't configured, links
     // must be copied by hand; when it is, verification/reset links are emailed.
@@ -2335,6 +2446,71 @@
       users.length ? listWrap : el("div", { class: "empty", style: "margin-top:0.75rem" }, "No registrations yet."),
     ]));
     render();
+    return mount;
+  }
+
+  const TENANT_STATUSES = ["trial", "active", "past_due", "suspended", "cancelled"];
+
+  // Platform operator: the internal Admin Console — tenants list, status control
+  // and audited time-boxed impersonation ("Act as").
+  async function tenantsView() {
+    const wrap = el("div");
+    const box = el("div");
+    const reload = async () => {
+      box.replaceChildren(el("div", { class: "loading" }, "Loading tenants…"));
+      let r; try { r = await API.platformTenants(API.getToken()); } catch (ex) { box.replaceChildren(el("div", { class: "error" }, ex.message)); return; }
+      const tenants = r.tenants || [];
+      box.replaceChildren(el("div", { class: "acct-list" }, tenants.map((t) => tenantRow(t, reload))));
+    };
+    wrap.append(
+      el("p", { class: "muted", style: "margin:0 0 0.6rem" }, "All organizations on this platform. Change a tenant's status, or start a time-boxed, audited support session as that tenant."),
+      box,
+    );
+    await reload();
+    return wrap;
+  }
+
+  function tenantRow(t, reload) {
+    const note = el("span", { class: "up-status" }, "");
+    const statusSel = el("select", { class: "up-text" }, TENANT_STATUSES.map((s) => el("option", { value: s, selected: t.status === s ? "selected" : null }, s)));
+    statusSel.disabled = !!t.is_seed;
+    statusSel.addEventListener("change", async () => {
+      note.className = "up-status"; note.textContent = "Saving…";
+      try { await API.platformSetTenantStatus(API.getToken(), t.id, statusSel.value); note.className = "up-status ok"; note.textContent = "Saved."; }
+      catch (ex) { note.className = "up-status err"; note.textContent = ex.message; statusSel.value = t.status; }
+    });
+    const actAs = actionBtn("Act as", "external", { onClick: async () => {
+      const reason = prompt(`Start a support session as “${t.name}”? Optionally note a reason (logged):`, "");
+      if (reason === null) return;
+      note.className = "up-status"; note.textContent = "Starting…";
+      try {
+        const r = await API.platformImpersonate(API.getToken(), t.id, reason);
+        API.startImpersonation(r, t.name);
+        location.reload();
+      } catch (ex) { note.className = "up-status err"; note.textContent = ex.message; }
+    } });
+    return el("div", { class: "acct-card" }, [
+      el("div", {}, [
+        el("div", { class: "name" }, [el("strong", {}, t.name), t.is_seed ? el("span", { class: "pill-priority", style: "margin-left:0.4rem" }, "operator") : null]),
+        el("div", { class: "muted", style: "font-size:0.82rem" }, `${t.slug || "—"} · ${t.active_members} member${t.active_members === 1 ? "" : "s"} · plan ${t.plan || "—"}`),
+      ]),
+      el("div", { style: "display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap" }, [statusSel, t.is_seed ? null : actAs, note].filter(Boolean)),
+    ]);
+  }
+
+  // Platform operator: the append-only platform audit log.
+  async function auditView() {
+    const wrap = el("div");
+    let r; try { r = await API.platformAudit(API.getToken()); } catch (ex) { wrap.append(el("div", { class: "error" }, ex.message)); return wrap; }
+    const entries = r.entries || [];
+    wrap.append(
+      el("h3", {}, "Platform audit log"),
+      entries.length ? el("div", { class: "acct-list" }, entries.map((e) => el("div", { class: "acct-card" }, [
+        el("div", {}, [el("div", { class: "name" }, el("strong", {}, e.action)), el("div", { class: "muted", style: "font-size:0.82rem" }, `${e.actor_email || "operator"}${e.detail && e.detail.reason ? " · " + e.detail.reason : ""}`)]),
+        el("span", { class: "muted", style: "font-size:0.8rem" }, fmtDate(e.created_at)),
+      ]))) : el("div", { class: "empty" }, "No operator activity yet."),
+    );
+    return wrap;
   }
 
   /* ================= Level 2: clauses · interpretations · matrix · passports ===========
@@ -3838,6 +4014,19 @@
 
   // Header session cluster: an admin/super-admin badge, the (admin-only)
   // Supplier-view link, and Sign out — grouped so they read as one identity.
+  // Sticky banner shown while an operator is impersonating a tenant.
+  function renderImpersonationBanner() {
+    const app = $("#portal-app"); if (!app) return;
+    let banner = $("#imp-banner");
+    const imp = API.impersonation();
+    if (!imp) { if (banner) banner.remove(); return; }
+    if (!banner) { banner = el("div", { id: "imp-banner", class: "imp-banner" }); app.insertBefore(banner, app.firstChild); }
+    banner.replaceChildren(
+      el("span", {}, [el("strong", {}, "Support session · "), `Acting as ${imp.impOrg || "a tenant"}${imp.expiresAt ? " (expires " + fmtDate(imp.expiresAt) + ")" : ""}`]),
+      el("button", { class: "btn btn-sm", type: "button", onclick: () => { API.endImpersonation(); location.reload(); } }, "Exit support session"),
+    );
+  }
+
   function renderSessionActions() {
     const nav = $("#session-actions");
     if (!nav) return;
@@ -3862,6 +4051,7 @@
       applyAccess(s.role, s.admin);
       gate.hidden = true; appEl.hidden = false;
       renderSessionActions();
+      renderImpersonationBanner();
       onUnlock(s);
       const h = appEl.querySelector("h2, h3"); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); }
     };

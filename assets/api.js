@@ -12,6 +12,7 @@
   // one key so an individual email/password login and the shared-role login
   // share the same plumbing (role is decided by the server, not the page).
   const SESSION_KEY = "rushroom_portal_session";
+  const IMP_BACKUP_KEY = "rushroom_portal_session_backup"; // operator session, parked during impersonation
   const LEGACY_KEYS = ["rushroom_portal_token_rushroom", "rushroom_portal_token_supplier"];
   function saveSession(s) { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* ignore */ } }
   function getSession() {
@@ -75,6 +76,28 @@
     adminUserVerifyLink: (token, id) => call({ action: "adminUserVerifyLink", token, id }),
     adminUserResetLink: (token, id) => call({ action: "adminUserResetLink", token, id }),
     adminSendTestEmail: (token, to) => call({ action: "adminSendTestEmail", token, to }),
+
+    // --- Stage 3: organization management, admin console, impersonation ---
+    orgContext: (token) => call({ action: "orgContext", token }),
+    orgMembers: (token) => call({ action: "orgMembers", token }),
+    orgInviteMember: (token, email, role) => call({ action: "orgInviteMember", token, email, role }),
+    orgUpdateMember: (token, membershipId, fields) => call({ action: "orgUpdateMember", token, membershipId, ...fields }),
+    orgSettings: (token) => call({ action: "orgSettings", token }),
+    orgUpdateSettings: (token, fields) => call({ action: "orgUpdateSettings", token, ...fields }),
+    platformTenants: (token) => call({ action: "platformTenants", token }),
+    platformSetTenantStatus: (token, organizationId, status) => call({ action: "platformSetTenantStatus", token, organizationId, status }),
+    platformImpersonate: (token, organizationId, reason) => call({ action: "platformImpersonate", token, organizationId, reason }),
+    platformAudit: (token) => call({ action: "platformAudit", token }),
+    // Swap the active session for an impersonation token, parking the operator's
+    // own session so it can be restored on exit.
+    startImpersonation(r, orgName) {
+      try { const cur = sessionStorage.getItem(SESSION_KEY); if (cur) sessionStorage.setItem(IMP_BACKUP_KEY, cur); } catch { /* ignore */ }
+      saveSession({ token: r.token, role: "rushroom", admin: false, name: "support", imp: true, impOrg: orgName || "", expiresAt: r.expires_at || "" });
+    },
+    endImpersonation() {
+      try { const raw = sessionStorage.getItem(IMP_BACKUP_KEY); if (raw) { sessionStorage.setItem(SESSION_KEY, raw); sessionStorage.removeItem(IMP_BACKUP_KEY); } } catch { /* ignore */ }
+    },
+    impersonation() { const s = getSession(); return (s && s.imp) ? s : null; },
 
     setStatus: (token, step, status, supplierLabel) =>
       call({ action: "setStatus", token, step, status, supplierLabel }),

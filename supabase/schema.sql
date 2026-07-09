@@ -619,3 +619,20 @@ begin
     execute format('create index if not exists %I on public.%I (organization_id)', t || '_org_idx', t);
   end loop;
 end $$;
+
+-- ============================================================================
+-- MULTI-TENANT SaaS — Stage 3: platform audit (operator actions)
+-- ============================================================================
+-- Append-only trail of internal/operator actions — impersonation and tenant
+-- status changes especially. Distinct from the per-tenant classification_log.
+create table if not exists public.platform_audit (
+  id                     uuid primary key default gen_random_uuid(),
+  actor_user_id          uuid,
+  actor_email            text,
+  action                 text not null,               -- 'impersonate_start' | 'tenant_status_change' | …
+  target_organization_id uuid references public.organizations(id) on delete set null,
+  detail                 jsonb not null default '{}'::jsonb,
+  created_at             timestamptz not null default now()
+);
+create index if not exists platform_audit_created_idx on public.platform_audit (created_at desc);
+alter table public.platform_audit enable row level security;

@@ -89,8 +89,8 @@ function eq(a: string, b: string): boolean {
 }
 
 // A session token carries the access tier (role) + admin flag + user identity.
-async function issueSession(payload: Record<string, unknown>): Promise<string> {
-  const body = { ...payload, exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS };
+async function issueSession(payload: Record<string, unknown>, ttlSeconds = TOKEN_TTL_SECONDS): Promise<string> {
+  const body = { ...payload, exp: Math.floor(Date.now() / 1000) + ttlSeconds };
   const p = b64url(enc.encode(JSON.stringify(body)));
   const sig = b64url(new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(), ab(enc.encode(p)))));
   return `${p}.${sig}`;
@@ -781,6 +781,10 @@ Deno.serve(async (req) => {
   // Stage 1: the caller's tenant, taken ONLY from the signed session (never the
   // request body). Legacy tokens without an org fall back to the seed org.
   const organizationId = (session.org as string) || RUSHROOM_ORG_ID;
+  // Stage 3: a "platform owner" is an admin of the seed (operator) organization
+  // — the only role allowed to see cross-tenant/global surfaces (all users, the
+  // tenant list, impersonation). A tenant's own Org Admin manages only its org.
+  const isPlatformOwner = isAdmin && organizationId === RUSHROOM_ORG_ID;
 
   // --- Stage 2: central tenant scoping (per-request instance) -------------
   const tdb = makeTdb(organizationId);
@@ -797,12 +801,13 @@ Deno.serve(async (req) => {
     return json({
       organization_id: organizationId, organization_name: organizationName,
       role, urole: session.urole ?? null, admin: isAdmin, membership_role: session.mrole ?? null,
+      platform_owner: isPlatformOwner, impersonating: session.imp === true,
     });
   }
 
   // --- admin account management (requires the admin privilege) ------------
   if (action === "adminListUsers") {
-    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    if (!isPlatformOwner) return json({ error: "Admin only" }, 403);
     const { data, error } = await db.from("users").select("*").order("created_at", { ascending: false });
     if (error) return json({ error: (/does not exist|schema cache|Could not find the table/i.test(error.message)) ? "The users table isn't set up yet — run the account SQL first." : error.message }, 500);
     // Strip the password hash before returning; surface email-delivery status.
@@ -810,7 +815,7 @@ Deno.serve(async (req) => {
     return json({ users, emailConfigured: !!Deno.env.get("RESEND_API_KEY"), mailFrom: Deno.env.get("MAIL_FROM") || "" });
   }
   if (action === "adminSendTestEmail") {
-    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    if (!isPlatformOwner) return json({ error: "Admin only" }, 403);
     const to = String(body.to ?? session.email ?? "").trim().toLowerCase();
     if (!emailOk(to)) return json({ error: "Enter a valid recipient email address." }, 400);
     if (!Deno.env.get("RESEND_API_KEY")) return json({ error: "Email is not configured yet — set RESEND_API_KEY in the function secrets." }, 400);
@@ -820,7 +825,7 @@ Deno.serve(async (req) => {
     return json({ ok: true, emailed: true, to });
   }
   if (action === "adminUpdateUser") {
-    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    if (!isPlatformOwner) return json({ error: "Admin only" }, 403);
     const id = String(body.id ?? "");
     if (!id) return json({ error: "id required" }, 400);
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -835,7 +840,7 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
   if (action === "adminDeleteUser") {
-    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    if (!isPlatformOwner) return json({ error: "Admin only" }, 403);
     const id = String(body.id ?? "");
     if (!id) return json({ error: "id required" }, 400);
     const { error } = await db.from("users").delete().eq("id", id);
@@ -843,7 +848,7 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
   if (action === "adminUserVerifyLink") {
-    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    if (!isPlatformOwner) return json({ error: "Admin only" }, 403);
     const id = String(body.id ?? "");
     if (!id) return json({ error: "id required" }, 400);
     const { data: u } = await db.from("users").select("id,email,name").eq("id", id).maybeSingle();
@@ -853,7 +858,7 @@ Deno.serve(async (req) => {
     return json({ ok: true, verifyUrl: url, emailed });
   }
   if (action === "adminUserResetLink") {
-    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    if (!isPlatformOwner) return json({ error: "Admin only" }, 403);
     const id = String(body.id ?? "");
     if (!id) return json({ error: "id required" }, 400);
     const { data: u } = await db.from("users").select("id,email,name").eq("id", id).maybeSingle();
@@ -861,6 +866,129 @@ Deno.serve(async (req) => {
     const url = await resetLinkFor(u.id);
     const emailed = await sendPasswordEmail(u.email, u.name, url);
     return json({ ok: true, resetUrl: url, emailed });
+  }
+
+  // ================= Stage 3: Organization management ====================
+  // Org Admins manage their OWN organization's members / invitations /
+  // settings; "platform owner" = an admin of the seed (operator) organization.
+  const MEMBERSHIP_ROLES = ["org_admin", "manager", "reviewer", "collaborator"];
+
+  if (action === "orgMembers") {
+    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    const { data, error } = await db.from("memberships")
+      .select("id, role, status, created_at, user:user_id(id, name, email, status)")
+      .eq("organization_id", organizationId).order("created_at");
+    if (error) return json({ error: (/does not exist|schema cache|Could not find/i.test(error.message)) ? "The membership tables aren't set up yet — run the Stage 1 SQL first." : error.message }, 500);
+    const members = (data ?? []).map((m: any) => ({
+      membership_id: m.id, role: m.role, status: m.status, created_at: m.created_at,
+      user_id: m.user?.id, name: m.user?.name || "", email: m.user?.email || "", account_status: m.user?.status || "",
+    }));
+    return json({ members });
+  }
+
+  if (action === "orgInviteMember") {
+    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    const email = String(body.email ?? "").trim().toLowerCase();
+    const role = String(body.role ?? "collaborator");
+    if (!emailOk(email)) return json({ error: "Enter a valid email address." }, 400);
+    if (!MEMBERSHIP_ROLES.includes(role)) return json({ error: "Invalid role" }, 400);
+    // Global user identity — reuse an existing account, or create one. The org
+    // admin's invite IS the approval (status=approved); the invitee still sets a
+    // password (email_verified stays false until they do).
+    let { data: u } = await db.from("users").select("id,email,name,status").eq("email", email).maybeSingle();
+    let created = false;
+    if (!u) {
+      const assignedRole = role === "org_admin" ? "admin" : role === "manager" ? "internal" : role === "reviewer" ? "reviewer" : "supplier";
+      const ins = await db.from("users").insert({ name: email.split("@")[0], email, requested_role: assignedRole, role: assignedRole, status: "approved", email_verified: false }).select("id,email,name").maybeSingle();
+      if (ins.error) return json({ error: ins.error.message }, 500);
+      u = ins.data as any; created = true;
+    }
+    const up = await db.from("memberships").upsert({ organization_id: organizationId, user_id: u!.id, role, status: "active", updated_at: new Date().toISOString() }, { onConflict: "organization_id,user_id" });
+    if (up.error) return json({ error: up.error.message }, 500);
+    await db.from("invitations").upsert({ organization_id: organizationId, email, role, status: "pending", invited_by: session.uid ?? null }, { onConflict: "organization_id,email" });
+    let emailed = false, setUrl = "";
+    if (created) { setUrl = await resetLinkFor(u!.id); emailed = await sendPasswordEmail(u!.email, u!.name, setUrl); }
+    return json({ ok: true, created, emailed, setUrl: emailed ? "" : setUrl, role });
+  }
+
+  if (action === "orgUpdateMember") {
+    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    const membershipId = String(body.membershipId ?? "");
+    if (!membershipId) return json({ error: "membershipId required" }, 400);
+    const { data: m } = await db.from("memberships").select("id, user_id, organization_id").eq("id", membershipId).maybeSingle();
+    if (!m || m.organization_id !== organizationId) return json({ error: "Member not found" }, 404); // no cross-tenant edits
+    if (m.user_id && m.user_id === session.uid) return json({ error: "You can't change your own membership here." }, 400);
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (body.role !== undefined) { if (!MEMBERSHIP_ROLES.includes(String(body.role))) return json({ error: "Invalid role" }, 400); patch.role = String(body.role); }
+    if (body.status !== undefined) { if (!["active", "suspended", "invited"].includes(String(body.status))) return json({ error: "Invalid status" }, 400); patch.status = String(body.status); }
+    const { error } = await db.from("memberships").update(patch).eq("id", membershipId).eq("organization_id", organizationId);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  if (action === "orgSettings") {
+    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    const { data: o } = await db.from("organizations").select("id,name,slug,status,plan,created_at").eq("id", organizationId).maybeSingle();
+    const { count } = await db.from("memberships").select("id", { count: "exact", head: true }).eq("organization_id", organizationId).eq("status", "active");
+    return json({ organization: o || null, activeMembers: count ?? 0 });
+  }
+
+  if (action === "orgUpdateSettings") {
+    if (!isAdmin) return json({ error: "Admin only" }, 403);
+    const patch: Record<string, unknown> = {};
+    if (body.name !== undefined) patch.name = String(body.name).slice(0, 160);
+    if (!Object.keys(patch).length) return json({ error: "Nothing to update" }, 400);
+    const { error } = await db.from("organizations").update(patch).eq("id", organizationId);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true });
+  }
+
+  // ================= Stage 3: Internal Admin Console + impersonation ======
+  if (action === "platformTenants") {
+    if (!isPlatformOwner) return json({ error: "Platform operators only" }, 403);
+    const { data: orgs, error } = await db.from("organizations").select("id,name,slug,status,plan,created_at").order("created_at");
+    if (error) return json({ error: error.message }, 500);
+    const { data: mem } = await db.from("memberships").select("organization_id, status");
+    const counts: Record<string, number> = {};
+    for (const m of mem ?? []) if (m.status === "active") counts[m.organization_id] = (counts[m.organization_id] || 0) + 1;
+    const tenants = (orgs ?? []).map((o: any) => ({ ...o, active_members: counts[o.id] || 0, is_seed: o.id === RUSHROOM_ORG_ID }));
+    return json({ tenants });
+  }
+
+  if (action === "platformSetTenantStatus") {
+    if (!isPlatformOwner) return json({ error: "Platform operators only" }, 403);
+    const orgId = String(body.organizationId ?? "");
+    const status = String(body.status ?? "");
+    if (!orgId || !["trial", "active", "past_due", "suspended", "cancelled"].includes(status)) return json({ error: "Valid organizationId and status required" }, 400);
+    if (orgId === RUSHROOM_ORG_ID) return json({ error: "The operator organization can't be suspended." }, 400);
+    const { error } = await db.from("organizations").update({ status }).eq("id", orgId);
+    if (error) return json({ error: error.message }, 500);
+    await db.from("platform_audit").insert({ actor_user_id: session.uid ?? null, actor_email: session.email ?? null, action: "tenant_status_change", target_organization_id: orgId, detail: { status } });
+    return json({ ok: true });
+  }
+
+  if (action === "platformImpersonate") {
+    if (!isPlatformOwner) return json({ error: "Platform operators only" }, 403);
+    const orgId = String(body.organizationId ?? "");
+    const reason = String(body.reason ?? "").slice(0, 300);
+    if (!orgId) return json({ error: "organizationId required" }, 400);
+    const { data: o } = await db.from("organizations").select("id,name,status").eq("id", orgId).maybeSingle();
+    if (!o) return json({ error: "Organization not found" }, 404);
+    const IMP_TTL = 30 * 60; // time-boxed: 30 minutes
+    const expIso = new Date((Math.floor(Date.now() / 1000) + IMP_TTL) * 1000).toISOString();
+    // Least privilege: act as a non-admin member of the target tenant.
+    const token = await issueSession({ role: "rushroom", admin: false, org: orgId, imp: true, actor: session.email ?? session.uid ?? "operator", urole: "support" }, IMP_TTL);
+    await db.from("platform_audit").insert({ actor_user_id: session.uid ?? null, actor_email: session.email ?? null, action: "impersonate_start", target_organization_id: orgId, detail: { reason, expires_at: expIso } });
+    return json({ ok: true, token, organization: { id: o.id, name: o.name }, expires_at: expIso });
+  }
+
+  if (action === "platformAudit") {
+    if (!isPlatformOwner) return json({ error: "Platform operators only" }, 403);
+    const { data, error } = await db.from("platform_audit")
+      .select("id, actor_email, action, target_organization_id, detail, created_at")
+      .order("created_at", { ascending: false }).limit(100);
+    if (error) return json({ error: error.message }, 500);
+    return json({ entries: data ?? [] });
   }
 
   if (action === "data") {
