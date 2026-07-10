@@ -43,7 +43,7 @@ Built as plain HTML/CSS/JavaScript (no build step, no framework), so it deploys 
 │   ├── api.js            # Supabase Edge Function client (login/edit/upload)
 │   └── config.js         # ← edit: password, sheet URL, document links, api.functionUrl
 ├── supabase/
-│   ├── schema.sql        # database tables + RLS + seed (run once)
+│   ├── migrations/       # numbered migration files, apply with supabase db push
 │   └── functions/portal-api/index.ts   # auth + edit/upload API gateway
 ├── google-apps-script/
 │   └── setup-action-plan.gs   # one-time: adds Status/Priority dropdowns + colours to the Sheet
