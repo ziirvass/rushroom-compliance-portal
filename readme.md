@@ -17,6 +17,10 @@ Built as plain HTML/CSS/JavaScript (no build step, no framework), so it deploys 
   `BLOCKER`/gate), and every step grouped by phase with owner, evidence and priority.
 - **Print / Save as PDF** — one click produces a clean, light-themed readiness report.
 - **Document library** — tidy links to the real source files in Google Drive.
+- **Clauses & DPP (Level 2, Rushroom-only)** — with the Supabase backend: AI-extract standard
+  clauses, capture clause-level compliance interpretations, view a documents × clauses
+  **compliance matrix**, and export an EU **Digital Product Passport** as JSON-LD (schema.org +
+  ESPR, 2027-ready). See [docs/SYSTEM_OVERVIEW.html](docs/SYSTEM_OVERVIEW.html).
 - **Supplier view** (`supplier.html`) — a slimmed page for suppliers: only their documents,
   the status of the supplier steps, and an optional **upload declaration** panel; nothing
   internal.
@@ -43,7 +47,7 @@ Built as plain HTML/CSS/JavaScript (no build step, no framework), so it deploys 
 │   └── functions/portal-api/index.ts   # auth + edit/upload API gateway
 ├── google-apps-script/
 │   └── setup-action-plan.gs   # one-time: adds Status/Priority dropdowns + colours to the Sheet
-├── SUPABASE_SETUP.md     # how to turn on login/editing/uploads
+├── docs/                 # SUPABASE_SETUP.md, SYSTEM_OVERVIEW.html, ROADMAP.md, and more
 ├── .gitignore
 ├── CNAME.example         # rename to CNAME for a custom domain
 ├── .nojekyll             # serve files as-is on GitHub Pages
@@ -58,7 +62,7 @@ Built as plain HTML/CSS/JavaScript (no build step, no framework), so it deploys 
   status editing**, **supplier uploads**, and **document management** — Rushroom edits
   every step and uploads/deletes library files (stored in Supabase, no Google Drive
   needed); suppliers edit only their steps and submit files. This can fully replace
-  Google. See **[SUPABASE_SETUP.md](SUPABASE_SETUP.md)**.
+  Google. See **[docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md)**.
 
 Everything you normally change lives in **`assets/config.js`**.
 
@@ -138,7 +142,7 @@ published Google Sheet (CSV) at runtime; documents are hosted in Google Drive.
 ## Roadmap (optional, for later)
 
 - **Per-role login + editing + uploads** — available now via the optional Supabase
-  backend (`SUPABASE_SETUP.md`): Rushroom and supplier passwords, server-side rules,
+  backend (`docs/SUPABASE_SETUP.md`): Rushroom and supplier passwords, server-side rules,
   in-portal status editing, and native file uploads. Currently shared-password-per-role;
   a future step is per-supplier accounts with a full `who-changed-what` audit trail
   (the data model already records `updated_by`).

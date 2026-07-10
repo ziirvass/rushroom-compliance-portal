@@ -20,7 +20,7 @@ window.PORTAL_CONFIG = {
 
   /* ---- Live editing backend (Supabase) ----------------------------------
    * Set api.functionUrl to your deployed `portal-api` Edge Function URL to turn
-   * on in-portal LOGIN + EDITING + UPLOADS. See SUPABASE_SETUP.md.
+   * on in-portal LOGIN + EDITING + UPLOADS. See docs/SUPABASE_SETUP.md.
    *   • When set: Rushroom logs in (full edit) and suppliers log in (edit the
    *     status of their steps + upload files). Role passwords live as Supabase
    *     secrets, NOT in this file.
