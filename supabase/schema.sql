@@ -1,3 +1,4 @@
+-- REFERENCE ONLY. Apply via supabase/migrations/ not this file.
 -- ============================================================================
 -- Rushroom Compliance Portal — Supabase schema
 -- Run this once in your Supabase project: SQL Editor → New query → paste → Run.

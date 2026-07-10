@@ -1,0 +1,44 @@
+{
+  "model": "claude-sonnet-4-6",
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(supabase db push:*)",
+      "Bash(supabase functions deploy:*)",
+      "Read",
+      "Edit",
+      "Write",
+      "Grep"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [[ \"$CLAUDE_FILE_PATH\" == *\"portal-api/index.ts\"* || \"$CLAUDE_FILE_PATH\" == *\"assets/app.js\"* ]]; then echo '⚠️  Core file edited. Remember to run /ship when the feature is done.'; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Check: were portal-api/index.ts or assets/app.js modified in this session? If yes and /ship has not been run, output exactly: 'REMINDER: Run /ship before closing — docs are out of sync.' If /ship was run or no core files changed, output exactly: 'ok'"
+          }
+        ]
+      }
+    ]
+  }
+}
