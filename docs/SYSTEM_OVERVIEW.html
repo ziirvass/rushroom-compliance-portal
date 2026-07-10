@@ -1721,7 +1721,7 @@
                         <li><strong>AI metering undercounts</strong> two secondary Claude calls (<code>summarizeRequirementSource</code>, CELLAR <code>inferDirectiveRelations</code>); the 10 primary AI actions are metered + capped. The cap check sums the ledger per request — a rollup table would help a very high-volume tenant.</li>
                         <li><strong>MFA has no recovery codes</strong> — a lost authenticator requires an operator to disable MFA on the user (small follow-up). The org-immutability trigger also blocks any legitimate tenant-merge/reassign until a guarded exception is added.</li>
                         <li><strong>Live payments not wired</strong> — <code>billingWebhook</code> is a provider-agnostic scaffold; Stripe Checkout + signature-verified webhooks need the account's keys. Impersonation logs the <em>start</em>, not each impersonated action (per-action attribution is a later hardening).</li>
-                        <li><strong>Deploy dependencies:</strong> each stage ships additive SQL applied via the Supabase SQL Editor (there is no <code>migrations/</code> dir); the edge function is written to be backward-compatible before its SQL runs (try/catch fallbacks). Frontend rides the GitHub-Pages <code>?v=N</code> cache-bust.</li>
+                        <li><strong>Deploy dependencies:</strong> schema changes ship as numbered files in the <code>supabase/migrations/</code> dir, applied in order with <code>supabase db push</code>; the edge function is written to be backward-compatible before its SQL runs (try/catch fallbacks). Frontend rides the GitHub-Pages <code>?v=N</code> cache-bust.</li>
                     </ul>
                 </div>
             </div>
@@ -1979,7 +1979,7 @@
                     <li>Extract clauses (<code>extractStandardClauses</code>) and generate interpretations (<code>generateInterpretations</code>) for the main As-Operated documents, then human-review them.</li>
                     <li>Run the <strong>deviation scan</strong> periodically; triage findings by severity and the NEW-since-last-scan markers.</li>
                     <li>Maintain the <strong>Directive Graph</strong> (sync CELLAR relations, mark applicability per passport) and export the compliance narrative when a DoC/passport is needed.</li>
-                    <li>To deploy changes: push the frontend (bump <code>?v=N</code>), <code>supabase functions deploy portal-api</code>, and paste <code>schema.sql</code> into the SQL Editor if the schema changed.</li>
+                    <li>To deploy changes: push the frontend (bump <code>?v=N</code>), <code>supabase functions deploy portal-api</code>, and run <code>supabase db push</code> (applies <code>supabase/migrations/</code> in order) if the schema changed.</li>
                 </ol>
             </div>
         </div>
