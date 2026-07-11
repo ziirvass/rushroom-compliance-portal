@@ -14,3 +14,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** supabase db push --local confirmed working. All 6 migration files (0001–0006) apply cleanly to a fresh database. supabase db diff --local returns "No schema changes found" — local DB matches migrations exactly. All 25 tables present and correct.
 **Why:** Needed to verify the documented workflow was proven, not just correct on paper. Local Docker + Supabase CLI used as test environment before touching production.
 **Files changed:** none — verification only
+
+---
+**Date:** 2026-07-10
+**Feature:** Production migration verification
+**Decision:** Ran supabase migration repair --status applied 0001–0006 to register existing production schema under migration tracking. supabase db diff returns "No schema changes found" against production. NOTICE about trg_forbid_org_change is expected — trigger not yet applied (ships with PROP-012).
+**Why:** Production DB was built via SQL Editor before migrations existed. Repair registers history without re-running SQL against live data.
+**Files changed:** none — remote state change only
