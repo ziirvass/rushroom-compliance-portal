@@ -3439,99 +3439,126 @@
   // --- BOM tree view ---------------------------------------------------------
   async function bomTreeView(token) {
     const wrap = el("div", { class: "pis-tree-wrap" });
+    const treeArea = el("div", { class: "pis-tree-area", style: "margin-top:0.75rem" });
+    const detailPanel = el("div", { class: "pis-detail-panel", style: "display:none;margin-top:1rem;padding:1rem;background:var(--bg-2,#f5f5f5);border-radius:6px" });
 
-    // Fetch all root-level components (type=finished_good or sub_assembly with no parent)
-    const roots = el("div", { class: "pis-roots" });
-    const loadingMsg = el("div", { class: "loading" }, "Loading components…");
-    wrap.append(
-      el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem" }, [
-        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => refreshRoots()) }, "+ Add component"),
+    wrap.replaceChildren(
+      el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap" }, [
+        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => refreshTree()) }, "+ New component"),
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => refreshTree() }, "↺ Refresh"),
       ]),
-      loadingMsg,
-      roots,
+      treeArea,
+      detailPanel,
     );
 
-    async function refreshRoots() {
-      loadingMsg.style.display = "";
-      loadingMsg.textContent = "Loading components…";
+    async function refreshTree() {
+      treeArea.replaceChildren(el("div", { class: "loading" }, "Loading BOM…"));
       try {
-        // Fetch components — we list all bom_components for the org and show those without a parent as roots
-        const r = await API.post(token, "getBom", { root_component_id: "_all_roots_placeholder_" });
-        // Fallback: list via a direct addComponent approach — show all components with type=finished_good first
-        loadingMsg.style.display = "none";
-        // We show a searchable component picker here since getBom needs a root_component_id
-        // Render a "pick a product root" dropdown from any known finished_good or sub_assembly
-        roots.replaceChildren(el("div", { class: "notice" }, [
-          "Select a root product to view its BOM tree, or ",
-          el("a", { href: "#", onclick: (e) => { e.preventDefault(); openAddComponent(token, refreshRoots); } }, "add a new component"),
-          ".",
-        ]));
+        const { components, root_ids } = await API.post(token, "listComponents", {});
+        if (!components.length) {
+          treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, [
+            "No components yet. Use ", el("strong", {}, "+ New component"), " to create the first one.",
+          ]));
+          return;
+        }
+        if (!root_ids.length) {
+          treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, "All components have a parent — no root found. Create a Finished good."));
+          return;
+        }
+        // Render each root as its own tree (parallel BOM fetches)
+        treeArea.replaceChildren(el("div", { class: "loading" }, `Loading ${root_ids.length} product tree${root_ids.length > 1 ? "s" : ""}…`));
+        const trees = await Promise.all(root_ids.map((id) => API.post(token, "getBom", { root_component_id: id, max_depth: 10 })));
+        treeArea.replaceChildren();
+        trees.forEach((bom, i) => {
+          const rootId = root_ids[i];
+          const section = el("div", { style: i > 0 ? "margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border,#e2e8f0)" : "" });
+          renderBomTree(rootId, bom, section, detailPanel, token);
+          treeArea.append(section);
+        });
       } catch (ex) {
-        loadingMsg.style.display = "none";
-        roots.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
+        treeArea.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
       }
     }
 
-    // Component picker with live BOM tree render
-    const rootInput = el("input", { class: "up-text", type: "text", placeholder: "Paste a root component ID or use the tree below…", style: "width:100%;max-width:400px" });
-    const loadTreeBtn = el("button", { class: "btn btn-sm", type: "button" }, "Load BOM");
-    const treeContainer = el("div", { class: "pis-tree-container" });
-    const detailPanel = el("div", { class: "pis-detail-panel", style: "display:none;margin-top:1rem;padding:1rem;background:var(--bg-2,#f5f5f5);border-radius:6px" });
-
-    loadTreeBtn.onclick = async () => {
-      const rootId = rootInput.value.trim();
-      if (!rootId) return;
-      await renderBomTree(rootId, token, treeContainer, detailPanel);
-    };
-
-    wrap.replaceChildren(
-      el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap" }, [
-        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, (id) => { rootInput.value = id; renderBomTree(id, token, treeContainer, detailPanel); }) }, "+ New component"),
-        rootInput, loadTreeBtn,
-      ]),
-      treeContainer,
-      detailPanel,
-    );
+    refreshTree();
     return wrap;
   }
 
-  async function renderBomTree(rootId, token, container, detailPanel) {
-    container.replaceChildren(el("div", { class: "loading" }, "Loading BOM…"));
-    try {
-      const { nodes, edges, cogs_by_node } = await API.post(token, "getBom", { root_component_id: rootId, max_depth: 4 });
-      if (!nodes || !nodes.length) { container.replaceChildren(el("div", { class: "notice" }, "No components found for this ID.")); return; }
-      const nodeMap = Object.fromEntries(nodes.map((n) => [n.id, n]));
-      // Build child-lists from edges
-      const childrenOf = {};
-      (edges || []).forEach((e) => { if (!childrenOf[e.parent_id]) childrenOf[e.parent_id] = []; childrenOf[e.parent_id].push(e); });
+  function renderBomTree(rootId, bom, container, detailPanel, token) {
+    const { nodes = [], edges = [], cogs_by_node = {} } = bom;
+    if (!nodes.length) { container.replaceChildren(el("div", { class: "notice" }, "Empty BOM.")); return; }
 
-      function renderNode(nodeId, qty, depth) {
-        const n = nodeMap[nodeId];
-        if (!n) return null;
-        const cogsPct = (cogs_by_node || {})[nodeId];
-        const heatColor = cogsPct >= 50 ? "#e05454" : cogsPct >= 20 ? "#e5a326" : cogsPct >= 5 ? "#e5a32640" : "transparent";
-        const children = (childrenOf[nodeId] || []).map((e) => renderNode(e.child_id, e.quantity, depth + 1)).filter(Boolean);
-        const summary = el("summary", { style: `display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0.4rem;cursor:pointer;border-radius:4px;background:${heatColor}` }, [
-          el("span", { style: "font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis" }, `${n.part_number} — ${n.name}`),
-          qty > 1 ? el("span", { class: "muted", style: "font-size:0.8rem" }, `×${qty}`) : null,
-          lifecycleBadge(n.lifecycle_status),
-          cogsPct != null ? el("span", { class: "muted", style: "font-size:0.75rem" }, `${cogsPct}% COGS`) : null,
-          el("button", { class: "btn btn-sm", type: "button", style: "margin-left:auto;flex-shrink:0", onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); openComponentDetail(n.id, token, detailPanel); } }, "Details"),
-        ].filter(Boolean));
-        const details = el("details", { open: depth < 2 }, [summary]);
-        if (children.length) {
-          const ul = el("ul", { style: `margin:0;padding-left:1.2rem;list-style:none` });
-          children.forEach((c) => { const li = el("li"); li.append(c); ul.append(li); });
-          details.append(ul);
-        }
-        return details;
+    const nodeMap = Object.fromEntries(nodes.map((n) => [n.id, n]));
+    const childrenOf = {};
+    edges.forEach((e) => {
+      if (!childrenOf[e.parent_id]) childrenOf[e.parent_id] = [];
+      childrenOf[e.parent_id].push(e);
+    });
+
+    function renderNode(nodeId, qty, depth, isLast) {
+      const n = nodeMap[nodeId];
+      if (!n) return null;
+      const children = (childrenOf[nodeId] || []);
+      const hasChildren = children.length > 0;
+      const cogsPct = (cogs_by_node || {})[nodeId];
+      const heatBg = cogsPct >= 50 ? "#e0545415" : cogsPct >= 20 ? "#e5a32615" : "transparent";
+      const heatBorder = cogsPct >= 50 ? "#e05454" : cogsPct >= 20 ? "#e5a326" : cogsPct >= 5 ? "#4a9eed" : "var(--border,#e2e8f0)";
+
+      // Row: icon + part# + name + badges + details btn
+      const toggleIcon = el("span", { style: "width:1rem;text-align:center;flex-shrink:0;font-size:0.75rem;color:var(--muted,#8b93a1);user-select:none;cursor:pointer" }, hasChildren ? "▼" : "·");
+      const row = el("div", {
+        style: `display:flex;align-items:center;gap:0.4rem;padding:0.28rem 0.4rem;border-radius:5px;background:${heatBg};border-left:3px solid ${heatBorder};margin-bottom:2px;cursor:default`,
+      }, [
+        toggleIcon,
+        el("span", { style: "font-family:monospace;font-size:0.78rem;color:var(--muted,#8b93a1);flex-shrink:0" }, n.part_number),
+        el("span", { style: "font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, n.name),
+        qty > 1 ? el("span", { style: "font-size:0.75rem;color:var(--muted,#8b93a1);flex-shrink:0" }, `×${qty}`) : null,
+        lifecycleBadge(n.lifecycle_status),
+        cogsPct != null ? el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);flex-shrink:0" }, `${cogsPct}%`) : null,
+        el("button", {
+          class: "btn btn-sm", type: "button",
+          style: "padding:1px 6px;font-size:0.75rem;flex-shrink:0",
+          onclick: () => openComponentDetail(n.id, token, detailPanel),
+        }, "Details"),
+      ].filter(Boolean));
+
+      // Children container
+      const childWrap = el("div", {
+        style: `margin-left:1.1rem;padding-left:0.75rem;border-left:1px solid var(--border,#e2e8f0);${!hasChildren ? "display:none" : ""}`,
+      });
+
+      let open = depth < 2;
+      function applyOpen() {
+        childWrap.style.display = open ? "" : "none";
+        toggleIcon.textContent = hasChildren ? (open ? "▼" : "▶") : "·";
+      }
+      applyOpen();
+
+      if (hasChildren) {
+        toggleIcon.onclick = row.ondblclick = () => { open = !open; applyOpen(); };
+        children.forEach((e, idx) => {
+          const child = renderNode(e.child_id, e.quantity, depth + 1, idx === children.length - 1);
+          if (child) childWrap.append(child);
+        });
       }
 
-      const tree = renderNode(rootId, 1, 0);
-      container.replaceChildren(el("div", { class: "pis-tree", style: "font-size:0.9rem" }, tree || el("div", { class: "notice" }, "Empty BOM.")));
-    } catch (ex) {
-      container.replaceChildren(el("div", { class: "error" }, `Couldn't load BOM: ${ex.message}`));
+      const node = el("div", { class: "bom-node" });
+      node.append(row, childWrap);
+      return node;
     }
+
+    const legend = el("div", { style: "display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem;font-size:0.75rem;color:var(--muted,#8b93a1)" }, [
+      el("span", { style: "border-left:3px solid #e05454;padding-left:4px" }, "≥50% COGS"),
+      el("span", { style: "border-left:3px solid #e5a326;padding-left:4px" }, "≥20% COGS"),
+      el("span", { style: "border-left:3px solid #4a9eed;padding-left:4px" }, "≥5% COGS"),
+      el("span", { style: "border-left:3px solid var(--border,#e2e8f0);padding-left:4px" }, "<5% COGS"),
+    ]);
+
+    const tree = renderNode(rootId, 1, 0, true);
+    container.replaceChildren(
+      legend,
+      el("div", { class: "pis-tree", style: "font-size:0.88rem" }, tree || el("div", { class: "notice" }, "Empty BOM.")),
+    );
   }
 
   // --- Component detail panel (slide-in below the tree) ----------------------

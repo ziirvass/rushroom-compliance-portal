@@ -3363,6 +3363,22 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // PROP-013 · Product Information System — Vertical Integration Engine
   // ==========================================================================
 
+  // --- BOM: list all components + identify roots (no active parent edge) -----
+  if (action === "listComponents") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { data: comps, error: ce } = await tdb("bom_components")
+      .select("id, part_number, name, type, lifecycle_status, unit_of_measure")
+      .order("name");
+    if (ce) return json({ error: ce.message }, 400);
+    const { data: edges } = await db.from("bom_edges")
+      .select("child_id")
+      .is("effective_to", null)
+      .eq("organization_id", organizationId);
+    const childIds = new Set((edges || []).map((e: any) => e.child_id));
+    const rootIds = (comps || []).filter((c: any) => !childIds.has(c.id)).map((c: any) => c.id);
+    return json({ components: comps || [], root_ids: rootIds });
+  }
+
   // --- BOM: add a new component (creates the node + first version "A") ------
   if (action === "addComponent") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
