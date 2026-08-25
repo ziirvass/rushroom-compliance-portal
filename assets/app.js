@@ -3472,7 +3472,7 @@
         trees.forEach((bom, i) => {
           const rootId = root_ids[i];
           const section = el("div", { style: i > 0 ? "margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border,#e2e8f0)" : "" });
-          renderBomTree(rootId, bom, section, detailPanel, token);
+          renderBomTree(rootId, bom, section, detailPanel, token, components, refreshTree);
           treeArea.append(section);
         });
       } catch (ex) {
@@ -3484,7 +3484,7 @@
     return wrap;
   }
 
-  function renderBomTree(rootId, bom, container, detailPanel, token) {
+  function renderBomTree(rootId, bom, container, detailPanel, token, allComponents, onRefresh) {
     const { nodes = [], edges = [], cogs_by_node = {} } = bom;
     if (!nodes.length) { container.replaceChildren(el("div", { class: "notice" }, "Empty BOM.")); return; }
 
@@ -3495,7 +3495,7 @@
       childrenOf[e.parent_id].push(e);
     });
 
-    function renderNode(nodeId, qty, depth, isLast) {
+    function renderNode(nodeId, qty, depth) {
       const n = nodeMap[nodeId];
       if (!n) return null;
       const children = (childrenOf[nodeId] || []);
@@ -3504,40 +3504,54 @@
       const heatBg = cogsPct >= 50 ? "#e0545415" : cogsPct >= 20 ? "#e5a32615" : "transparent";
       const heatBorder = cogsPct >= 50 ? "#e05454" : cogsPct >= 20 ? "#e5a326" : cogsPct >= 5 ? "#4a9eed" : "var(--border,#e2e8f0)";
 
-      // Row: icon + part# + name + badges + details btn
-      const toggleIcon = el("span", { style: "width:1rem;text-align:center;flex-shrink:0;font-size:0.75rem;color:var(--muted,#8b93a1);user-select:none;cursor:pointer" }, hasChildren ? "▼" : "·");
+      const toggleIcon = el("span", {
+        style: "width:1.1rem;text-align:center;flex-shrink:0;font-size:0.75rem;color:var(--muted,#8b93a1);user-select:none;cursor:pointer;transition:transform 0.1s",
+      }, hasChildren ? "▼" : "·");
+
+      const addChildBtn = el("button", {
+        class: "btn btn-sm", type: "button",
+        title: "Add child component",
+        style: "padding:1px 6px;font-size:0.72rem;flex-shrink:0;opacity:0.6",
+        onclick: (ev) => { ev.stopPropagation(); openAddChildModal(n, allComponents, token, onRefresh); },
+      }, "+ child");
+
       const row = el("div", {
-        style: `display:flex;align-items:center;gap:0.4rem;padding:0.28rem 0.4rem;border-radius:5px;background:${heatBg};border-left:3px solid ${heatBorder};margin-bottom:2px;cursor:default`,
+        style: `display:flex;align-items:center;gap:0.35rem;padding:0.3rem 0.4rem;border-radius:5px;background:${heatBg};border-left:3px solid ${heatBorder};margin-bottom:2px`,
       }, [
         toggleIcon,
-        el("span", { style: "font-family:monospace;font-size:0.78rem;color:var(--muted,#8b93a1);flex-shrink:0" }, n.part_number),
+        el("span", { style: "font-family:monospace;font-size:0.76rem;color:var(--muted,#8b93a1);flex-shrink:0;white-space:nowrap" }, n.part_number),
         el("span", { style: "font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, n.name),
-        qty > 1 ? el("span", { style: "font-size:0.75rem;color:var(--muted,#8b93a1);flex-shrink:0" }, `×${qty}`) : null,
+        qty > 1 ? el("span", { style: "font-size:0.74rem;color:var(--muted,#8b93a1);flex-shrink:0" }, `×${qty}`) : null,
         lifecycleBadge(n.lifecycle_status),
-        cogsPct != null ? el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);flex-shrink:0" }, `${cogsPct}%`) : null,
+        cogsPct != null ? el("span", { style: "font-size:0.71rem;color:var(--muted,#8b93a1);flex-shrink:0" }, `${cogsPct}%`) : null,
+        addChildBtn,
         el("button", {
           class: "btn btn-sm", type: "button",
-          style: "padding:1px 6px;font-size:0.75rem;flex-shrink:0",
-          onclick: () => openComponentDetail(n.id, token, detailPanel),
+          style: "padding:1px 6px;font-size:0.72rem;flex-shrink:0",
+          onclick: (ev) => { ev.stopPropagation(); openComponentDetail(n.id, token, detailPanel); },
         }, "Details"),
       ].filter(Boolean));
 
-      // Children container
+      // Children container — always present so we can append dynamically
       const childWrap = el("div", {
-        style: `margin-left:1.1rem;padding-left:0.75rem;border-left:1px solid var(--border,#e2e8f0);${!hasChildren ? "display:none" : ""}`,
+        style: `margin-left:1.25rem;padding-left:0.6rem;border-left:2px solid var(--border,#e2e8f0);margin-top:1px`,
       });
 
       let open = depth < 2;
       function applyOpen() {
-        childWrap.style.display = open ? "" : "none";
+        childWrap.style.display = (hasChildren || open) ? (open ? "" : "none") : "none";
         toggleIcon.textContent = hasChildren ? (open ? "▼" : "▶") : "·";
+        toggleIcon.style.cursor = hasChildren ? "pointer" : "default";
       }
       applyOpen();
+      if (!hasChildren) childWrap.style.display = "none";
 
       if (hasChildren) {
-        toggleIcon.onclick = row.ondblclick = () => { open = !open; applyOpen(); };
-        children.forEach((e, idx) => {
-          const child = renderNode(e.child_id, e.quantity, depth + 1, idx === children.length - 1);
+        toggleIcon.onclick = () => { open = !open; applyOpen(); };
+        row.style.cursor = "pointer";
+        row.onclick = (ev) => { if (ev.target === row || ev.target === toggleIcon) { open = !open; applyOpen(); } };
+        children.forEach((e) => {
+          const child = renderNode(e.child_id, e.quantity, depth + 1);
           if (child) childWrap.append(child);
         });
       }
@@ -3547,18 +3561,98 @@
       return node;
     }
 
-    const legend = el("div", { style: "display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem;font-size:0.75rem;color:var(--muted,#8b93a1)" }, [
-      el("span", { style: "border-left:3px solid #e05454;padding-left:4px" }, "≥50% COGS"),
-      el("span", { style: "border-left:3px solid #e5a326;padding-left:4px" }, "≥20% COGS"),
-      el("span", { style: "border-left:3px solid #4a9eed;padding-left:4px" }, "≥5% COGS"),
-      el("span", { style: "border-left:3px solid var(--border,#e2e8f0);padding-left:4px" }, "<5% COGS"),
+    const legend = el("div", { style: "display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.6rem;font-size:0.72rem;color:var(--muted,#8b93a1);align-items:center" }, [
+      el("span", {}, "COGS heat-map:"),
+      el("span", { style: "border-left:3px solid #e05454;padding-left:4px" }, "≥50%"),
+      el("span", { style: "border-left:3px solid #e5a326;padding-left:4px" }, "≥20%"),
+      el("span", { style: "border-left:3px solid #4a9eed;padding-left:4px" }, "≥5%"),
+      el("span", { style: "border-left:3px solid var(--border,#e2e8f0);padding-left:4px" }, "<5%"),
     ]);
 
-    const tree = renderNode(rootId, 1, 0, true);
+    const tree = renderNode(rootId, 1, 0);
     container.replaceChildren(
       legend,
       el("div", { class: "pis-tree", style: "font-size:0.88rem" }, tree || el("div", { class: "notice" }, "Empty BOM.")),
     );
+  }
+
+  // --- Add-child modal: pick an existing component and link it ---------------
+  function openAddChildModal(parentNode, allComponents, token, onRefresh) {
+    const overlay = el("div", { style: "position:fixed;inset:0;background:#0009;z-index:1001;display:flex;align-items:center;justify-content:center" });
+    const dialog = el("div", { style: "background:var(--bg,#1a1f2e);border:1px solid var(--border,#2d3748);border-radius:8px;padding:1.5rem;width:min(500px,95vw);max-height:90vh;overflow-y:auto" });
+
+    // Searchable component list (exclude the parent itself)
+    const candidates = (allComponents || []).filter((c) => c.id !== parentNode.id).sort((a, b) => a.part_number.localeCompare(b.part_number));
+
+    const searchInput = el("input", { class: "up-text", type: "text", placeholder: "Search by part # or name…", style: "width:100%;margin-bottom:0.5rem" });
+    const listEl = el("div", { style: "max-height:220px;overflow-y:auto;border:1px solid var(--border,#2d3748);border-radius:4px;margin-bottom:0.75rem" });
+    let selectedId = null;
+    const selectedLabel = el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);margin-bottom:0.5rem;min-height:1.2rem" }, "");
+
+    function buildList(filter) {
+      const filtered = filter ? candidates.filter((c) => (c.part_number + " " + c.name).toLowerCase().includes(filter.toLowerCase())) : candidates;
+      listEl.replaceChildren(...filtered.map((c) => {
+        const row = el("div", {
+          style: `padding:0.35rem 0.6rem;cursor:pointer;border-bottom:1px solid var(--border,#2d3748);display:flex;gap:0.5rem;align-items:center;${selectedId === c.id ? "background:var(--accent,#2fa564)22;" : ""}`,
+          onclick: () => {
+            selectedId = c.id;
+            selectedLabel.textContent = `Selected: ${c.part_number} — ${c.name}`;
+            buildList(searchInput.value);
+          },
+        }, [
+          el("span", { style: "font-family:monospace;font-size:0.76rem;color:var(--muted,#8b93a1);flex-shrink:0" }, c.part_number),
+          el("span", { style: "flex:1" }, c.name),
+          lifecycleBadge(c.lifecycle_status),
+        ]);
+        return row;
+      }));
+      if (!filtered.length) listEl.replaceChildren(el("div", { style: "padding:0.5rem;color:var(--muted,#8b93a1);font-size:0.85rem" }, "No components match."));
+    }
+    buildList("");
+    searchInput.oninput = () => buildList(searchInput.value);
+
+    const qtyInput = el("input", { class: "up-text", type: "number", min: "0.001", step: "any", value: "1", style: "width:100px" });
+    const refInput = el("input", { class: "up-text", type: "text", placeholder: "e.g. J1, J2 (optional)", style: "flex:1" });
+    const errEl = el("span", { style: "color:#e05454;font-size:0.82rem;display:block;min-height:1.2rem;margin-top:0.25rem" }, "");
+
+    const submitBtn = el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Add to BOM");
+    const form = el("form", {
+      onsubmit: async (e) => {
+        e.preventDefault();
+        if (!selectedId) { errEl.textContent = "Select a component first."; return; }
+        const qty = parseFloat(qtyInput.value);
+        if (!qty || qty <= 0) { errEl.textContent = "Quantity must be greater than 0."; return; }
+        submitBtn.disabled = true; submitBtn.textContent = "Adding…";
+        try {
+          await API.post(token, "addBomEdge", { parent_id: parentNode.id, child_id: selectedId, quantity: qty, reference_designator: refInput.value.trim() || null });
+          overlay.remove();
+          if (onRefresh) onRefresh();
+        } catch (ex) {
+          errEl.textContent = ex.message;
+          submitBtn.disabled = false; submitBtn.textContent = "Add to BOM";
+        }
+      },
+    });
+
+    form.append(
+      el("h3", { style: "margin:0 0 0.25rem" }, "Add child component"),
+      el("p", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);margin:0 0 0.75rem" }, `Parent: ${parentNode.part_number} — ${parentNode.name}`),
+      el("label", { style: "display:block;margin-bottom:0.25rem;font-size:0.82rem;font-weight:600" }, "Select child"),
+      searchInput, listEl, selectedLabel,
+      el("div", { style: "display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem" }, [
+        el("label", { style: "display:flex;flex-direction:column;gap:0.2rem;font-size:0.82rem;font-weight:600" }, ["Quantity", qtyInput]),
+        el("label", { style: "display:flex;flex-direction:column;gap:0.2rem;font-size:0.82rem;font-weight:600;flex:1" }, ["Reference designator", refInput]),
+      ]),
+      errEl,
+      el("div", { style: "display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.75rem" }, [
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
+        submitBtn,
+      ]),
+    );
+    dialog.append(form);
+    overlay.append(dialog);
+    document.body.append(overlay);
+    searchInput.focus();
   }
 
   // --- Component detail panel (slide-in below the tree) ----------------------
