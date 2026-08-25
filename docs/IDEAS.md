@@ -88,7 +88,7 @@ All new tables: `organization_id NOT NULL FK → organizations` (PROP-012 contra
 - PROP-011 (Requirement Links — component documents link to standard clauses; full component→clause traceability for the Technical File)  
 - PROP-012 (Multi-tenancy — all new tables carry `organization_id`; cost and scenario data are the most sensitive per-tenant data)
 
-**Status:** Raw idea
+**Status:** Implemented as PROP-013 (2026-08-25)
 
 ---
 ### Compliance–BOM Integration: Component Evidence Bridge — 2026-08-25
