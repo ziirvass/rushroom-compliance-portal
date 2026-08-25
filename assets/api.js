@@ -327,6 +327,9 @@
     setClassification: (token, { entityType, ids, id, lifecyclePhase, scope, aiGenerated } = {}) =>
       call({ action: "setClassification", token, entityType, ids, id, lifecyclePhase, scope, aiGenerated }),
     suggestClassifications: (token, ids) => call({ action: "suggestClassifications", token, ids }),
+
+    // Generic escape hatch for actions not yet named on this object.
+    post: (token, action, body = {}) => call({ action, token, ...body }),
   };
 
   window.PortalAPI = API;

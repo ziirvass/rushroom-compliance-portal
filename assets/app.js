@@ -3456,7 +3456,7 @@
       loadingMsg.textContent = "Loading components…";
       try {
         // Fetch components — we list all bom_components for the org and show those without a parent as roots
-        const r = await API.call(token, "getBom", { root_component_id: "_all_roots_placeholder_" });
+        const r = await API.post(token, "getBom", { root_component_id: "_all_roots_placeholder_" });
         // Fallback: list via a direct addComponent approach — show all components with type=finished_good first
         loadingMsg.style.display = "none";
         // We show a searchable component picker here since getBom needs a root_component_id
@@ -3498,7 +3498,7 @@
   async function renderBomTree(rootId, token, container, detailPanel) {
     container.replaceChildren(el("div", { class: "loading" }, "Loading BOM…"));
     try {
-      const { nodes, edges, cogs_by_node } = await API.call(token, "getBom", { root_component_id: rootId, max_depth: 4 });
+      const { nodes, edges, cogs_by_node } = await API.post(token, "getBom", { root_component_id: rootId, max_depth: 4 });
       if (!nodes || !nodes.length) { container.replaceChildren(el("div", { class: "notice" }, "No components found for this ID.")); return; }
       const nodeMap = Object.fromEntries(nodes.map((n) => [n.id, n]));
       // Build child-lists from edges
@@ -3540,9 +3540,9 @@
     panel.replaceChildren(el("div", { class: "loading" }, "Loading…"));
     try {
       const [hist, docs, mats] = await Promise.all([
-        API.call(token, "getComponentHistory", { component_id: componentId }),
-        API.call(token, "getComponentDocuments", { component_id: componentId }),
-        API.call(token, "getComponentMaterials", { component_id: componentId }),
+        API.post(token, "getComponentHistory", { component_id: componentId }),
+        API.post(token, "getComponentDocuments", { component_id: componentId }),
+        API.post(token, "getComponentMaterials", { component_id: componentId }),
       ]);
       const history = hist.history || [];
       const current = history.find((v) => v.is_current) || history[0];
@@ -3557,7 +3557,7 @@
         e.preventDefault();
         const rev = bumpRevInput.value.trim(); const summary = bumpSumInput.value.trim();
         if (!rev) return;
-        try { await API.call(token, "bumpComponentVersion", { component_id: componentId, revision: rev, spec_summary: summary || null }); openComponentDetail(componentId, token, panel); }
+        try { await API.post(token, "bumpComponentVersion", { component_id: componentId, revision: rev, spec_summary: summary || null }); openComponentDetail(componentId, token, panel); }
         catch (ex) { bumpErr.textContent = ex.message; }
       } });
       const bumpRevInput = el("input", { class: "up-text", type: "text", placeholder: "New revision (e.g. B)", style: "width:8rem" });
@@ -3629,7 +3629,7 @@
     const form = el("form", { onsubmit: async (e) => {
       e.preventDefault();
       try {
-        const r = await API.call(token, "addComponent", { part_number: pn.value.trim(), name: nm.value.trim(), type: typ.value, unit_of_measure: uom.value.trim() || "ea", description: desc.value.trim() || null });
+        const r = await API.post(token, "addComponent", { part_number: pn.value.trim(), name: nm.value.trim(), type: typ.value, unit_of_measure: uom.value.trim() || "ea", description: desc.value.trim() || null });
         overlay.remove();
         if (onCreated) onCreated(r.id);
       } catch (ex) { errEl.textContent = ex.message; }
@@ -3759,11 +3759,11 @@
       try {
         let nodes, total, confidenceLabel, overridesMap = {};
         if (scenarioId) {
-          const r = await API.call(token, "getScenarioResult", { scenario_id: scenarioId });
+          const r = await API.post(token, "getScenarioResult", { scenario_id: scenarioId });
           nodes = r.nodes_with_cost || []; total = r.total_cogs || 0; confidenceLabel = r.confidence_label || "estimate";
           (r.overrides || []).filter((o) => o.override_type === "unit_price").forEach((o) => { overridesMap[o.component_id] = o.value?.unit_price; });
         } else {
-          const r = await API.call(token, "computeCogs", { root_component_id: rootId, scenario_id: null });
+          const r = await API.post(token, "computeCogs", { root_component_id: rootId, scenario_id: null });
           nodes = r.detail || []; total = r.total_cogs || 0; confidenceLabel = r.confidence_label || "estimate";
         }
         currentNodes = nodes; currentTotal = total; currentOverrides = { ...overridesMap };
@@ -3781,7 +3781,7 @@
           if (!scenarioId) { alert("Select or create a scenario first to save overrides."); return; }
           const entries = Object.entries(currentOverrides).filter(([, v]) => v != null);
           for (const [cid, price] of entries) {
-            await API.call(token, "applyScenarioOverride", { scenario_id: scenarioId, component_id: cid, override_type: "unit_price", value: { unit_price: Number(price) } });
+            await API.post(token, "applyScenarioOverride", { scenario_id: scenarioId, component_id: cid, override_type: "unit_price", value: { unit_price: Number(price) } });
           }
           await loadCanvas();
         });
@@ -3793,7 +3793,7 @@
     async function refreshScenarios(rootId) {
       if (!rootId) return;
       try {
-        const { scenarios } = await API.call(token, "listScenarios", { base_component_id: rootId });
+        const { scenarios } = await API.post(token, "listScenarios", { base_component_id: rootId });
         scenarioSel.replaceChildren(el("option", { value: "" }, "— Production BOM —"), ...(scenarios || []).map((s) => el("option", { value: s.id }, s.name)));
       } catch { /* non-fatal */ }
     }
@@ -3802,7 +3802,7 @@
       const rootId = rootIdInput.value.trim(); if (!rootId) { alert("Enter a root component ID first."); return; }
       const name = prompt("Scenario name:");
       if (!name) return;
-      const { id } = await API.call(token, "createScenario", { name, base_component_id: rootId });
+      const { id } = await API.post(token, "createScenario", { name, base_component_id: rootId });
       await refreshScenarios(rootId);
       scenarioSel.value = id;
     };
@@ -3829,7 +3829,7 @@
       const rootId = rootIdInput.value.trim(); if (!rootId) return;
       resultArea.replaceChildren(el("div", { class: "loading" }, "Analysing…"));
       try {
-        const { nodes } = await API.call(token, "getBom", { root_component_id: rootId, max_depth: 99 });
+        const { nodes } = await API.post(token, "getBom", { root_component_id: rootId, max_depth: 99 });
         if (!nodes || !nodes.length) { resultArea.replaceChildren(el("div", { class: "notice" }, "No components found.")); return; }
         // Lifecycle status distribution
         const lcCounts = {};
