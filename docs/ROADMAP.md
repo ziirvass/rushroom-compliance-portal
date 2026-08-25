@@ -1,11 +1,11 @@
 # Rushroom Compliance Portal — Roadmap
-_Last updated: 2026-07-10 · Auto-maintained by /ship_
+_Last updated: 2026-08-25 · Auto-maintained by /ship_
 
 ## Now — In Progress
-- PROP-012 Multi-tenant SaaS (organizations, memberships, invitations, platform_audit, ai_usage_events)
+- PROP-012 Multi-tenant SaaS (organizations, memberships, invitations, platform_audit, ai_usage_events) — Stages 5b+6 remaining
 
 ## Next — Approved for Build
-- _(nothing approved and ready to build right now)_
+- PROP-014 Compliance–BOM Integration: Component Evidence Bridge — spec complete, awaiting "go ahead"
 
 ## Backlog — Ideas to Spec
 - PROP-005 Generate DPP from compliance matrix
@@ -13,6 +13,7 @@ _Last updated: 2026-07-10 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **PROP-013 Product Information System — Vertical Integration Engine** (BOM tree, REACH/RoHS at component level, COGS simulation, Cost Canvas, Status Overview) — 2026-08-25
 - **Level 1 — Versioning & provenance** (immutable document/standard versions, audit trail, AI-assisted drafting, deviation scan) — live 2026-07-07
 - **Level 2 — Clauses / Interpretations / Matrix / Passports** (PROP-001) — 2026-07-05
 - **EU Directive Analyser (CELLAR)** — live 2026-07-07

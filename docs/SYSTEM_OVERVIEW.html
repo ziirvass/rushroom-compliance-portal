@@ -364,8 +364,8 @@
 
         <!-- AS-BUILT STATUS SECTION -->
         <div class="section doc-section-new">
-            <h2>0. As-Built Status <span class="doc-new-badge">Audited against production 2026-07-07</span></h2>
-            <p>This section reflects what is <strong>actually deployed and live</strong> as of <span class="doc-changed">2026-07-07</span>, superseding any "planned/pending" wording later in this document. Frontend is a no-framework static site on GitHub Pages (cache-busted assets, currently <span class="doc-changed"><code>?v=91</code></span>); backend is the single Supabase <code>portal-api</code> Edge Function (Deno, deployed <code>--no-verify-jwt</code>) plus Postgres + private Storage buckets. The whole document library, action plan, standards register, Level 2 and CELLAR data live in Postgres; the browser never touches the DB directly.</p>
+            <h2>0. As-Built Status <span class="doc-new-badge">Audited against production 2026-08-25</span></h2>
+            <p>This section reflects what is <strong>actually deployed and live</strong> as of <span class="doc-changed">2026-08-25</span>, superseding any "planned/pending" wording later in this document. Frontend is a no-framework static site on GitHub Pages (cache-busted assets, currently <span class="doc-changed"><code>?v=106</code></span>); backend is the single Supabase <code>portal-api</code> Edge Function (Deno, deployed <code>--no-verify-jwt</code>) plus Postgres + private Storage buckets. The whole document library, action plan, standards register, Level 2, CELLAR, and Product Information System data live in Postgres; the browser never touches the DB directly. PROP-013 adds a new <strong>Product</strong> tab (Rushroom-only) with BOM tree, Cost Canvas, and Status Overview; 10 new tables and 22 new API actions support unlimited-depth BOM trees, component versioning, REACH/RoHS materials at component level, internal cost/COGS intelligence, and scenario simulation. Migration <code>0007_product_information_system.sql</code> must be applied to production.</p>
 
             <div class="note"><strong>Single AI model.</strong> <span class="doc-changed">Every server-side AI call — draft generation, deviation scan, clause extraction, interpretations, classification suggestions, directive inference, compliance narrative — uses Anthropic <code>claude-opus-4-8</code></span> (constants <code>SCAN_MODEL</code> in <code>index.ts</code> and <code>CLAUDE_MODEL</code> in <code>cellar-service.ts</code>), via <code>api.anthropic.com/v1/messages</code> with adaptive thinking and JSON-schema structured output. No other model IDs are used.</div>
 
@@ -572,6 +572,21 @@
                 <tr><td><span class="doc-changed"><code>ai_usage_events</code></span></td><td>SaaS (PROP-012)</td><td>Append-only AI-token ledger; monthly usage = sum per (org, period)</td><td>organization_id, period (YYYY-MM), action, input_tokens, output_tokens</td></tr>
             </table>
             <div class="note doc-changed"><strong>Multi-tenant note (PROP-012):</strong> all 16 tenant tables above now carry a <strong>NOT NULL <code>organization_id</code></strong> (FK → <code>organizations</code>) with an org-immutability trigger; global tables (<code>users</code>, <code>eu_directives</code>, <code>directive_relations</code>, <code>cellar_cache</code>) do not. <code>users</code> also gained <code>mfa_enabled</code>/<code>mfa_secret</code>/<code>mfa_pending_secret</code> (Stage 5a TOTP). See PROP-012 for the full as-built + known risks.</div>
+
+            <div class="note doc-changed"><strong>PROP-013 — Product Information System (10 new tables, migration 0007):</strong></div>
+            <table style="font-size: 12px;">
+                <tr><th>Table</th><th>Domain</th><th>Purpose</th><th>Key fields</th></tr>
+                <tr><td><span class="doc-changed"><code>bom_components</code></span></td><td>PIS (PROP-013)</td><td>BOM node — the canonical component record</td><td>part_number (unique per org), name, type (raw_material|purchased_part|sub_assembly|finished_good), lifecycle_status, unit_of_measure</td></tr>
+                <tr><td><span class="doc-changed"><code>bom_component_versions</code></span></td><td>PIS (PROP-013)</td><td>Immutable spec history per component (mirrors document_versions)</td><td>component_id (FK), revision, spec_summary, is_current (managed by trigger) · unique(component_id, revision)</td></tr>
+                <tr><td><span class="doc-changed"><code>bom_edges</code></span></td><td>PIS (PROP-013)</td><td>Adjacency-list BOM tree — unlimited depth, time-versioned</td><td>parent_id, child_id, quantity, reference_designator, effective_from / effective_to (NULL = active) · cycle-detection BEFORE INSERT trigger</td></tr>
+                <tr><td><span class="doc-changed"><code>component_materials</code></span></td><td>PIS (PROP-013)</td><td>REACH/RoHS substance data at component level</td><td>substance_name, cas_number, percentage_w_w, reach_svhc, rohs_restricted, svhc_threshold_exceeded</td></tr>
+                <tr><td><span class="doc-changed"><code>component_documents</code></span></td><td>PIS (PROP-013)</td><td>Versioned documents attached to a component (datasheets, test reports, drawings…)</td><td>component_id (FK), document_version_id (FK), category, label, is_supplier_visible</td></tr>
+                <tr><td><span class="doc-changed"><code>component_costs</code></span></td><td>PIS (PROP-013)</td><td>Unit pricing — internal only, never exposed to suppliers</td><td>unit_price, currency, cost_maturity (estimate→actual), moq, supplier_name, external_ref (ERP sync anchor)</td></tr>
+                <tr><td><span class="doc-changed"><code>landed_cost_factors</code></span></td><td>PIS (PROP-013)</td><td>BI-layer freight / duty / currency / overhead inputs per component</td><td>factor_type, value, unit (percent|fixed_amount) · unique(org, component, factor_type)</td></tr>
+                <tr><td><span class="doc-changed"><code>cost_scenarios</code></span></td><td>PIS (PROP-013)</td><td>Named what-if simulation workspaces</td><td>name, base_component_id (FK), status (draft|published|archived)</td></tr>
+                <tr><td><span class="doc-changed"><code>scenario_overrides</code></span></td><td>PIS (PROP-013)</td><td>Per-scenario per-component price/quantity/status overrides</td><td>scenario_id (FK), component_id (FK), override_type, value (JSONB) · unique(scenario, component, type)</td></tr>
+                <tr><td><span class="doc-changed"><code>cogs_snapshots</code></span></td><td>PIS (PROP-013)</td><td>Append-only point-in-time COGS rollup</td><td>root_component_id (FK), scenario_id (nullable), total_cogs, confidence_label, detail (JSONB)</td></tr>
+            </table>
 
             <h3 class="doc-changed">Enums &amp; constraints</h3>
             <div class="list-grid">
@@ -858,7 +873,7 @@
                 <rect x="50" y="60" width="280" height="35" fill="#3498db" stroke="#3498db" stroke-width="2" rx="4"/>
                 <text x="190" y="87" font-weight="bold" fill="white" text-anchor="middle" font-size="14">FRONTEND (Browser)</text>
                 
-                <text x="70" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Static site · GitHub Pages (?v=91)</text>
+                <text x="70" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Static site · GitHub Pages (?v=106)</text>
                 <text x="80" y="135" fill="#555" font-size="10">index.html · supplier / verify / reset.html</text>
                 <text x="80" y="155" fill="#555" font-size="10">assets/app.js (portal UI)</text>
                 <text x="80" y="175" fill="#555" font-size="10">assets/api.js (edge-function client)</text>
@@ -1151,6 +1166,34 @@
                 <tr><td><code>getComplianceMatrix</code></td><td>—</td><td>{ok, quadrants, unclassified, totals} (pure aggregation, no LLM)</td><td>Rushroom</td></tr>
                 <tr><td><code>listClassificationItems</code></td><td>lifecyclePhase?, scope?, unclassified?, entityType?</td><td>{ok, items, total} (interps inherit parent-doc classification)</td><td>Rushroom</td></tr>
                 <tr><td><code>suggestClassifications</code></td><td>ids[]?</td><td><strong>AI</strong> → {ok, proposals, usage} (proposals only, never writes)</td><td>Rushroom</td></tr>
+            </table>
+
+            <h3 class="doc-changed">PROP-013 — Product Information System (BOM / Cost / Simulation) <span class="doc-new-badge">actions</span></h3>
+            <p style="font-size:12px;margin:4px 0 6px;">All cost/pricing actions (<code>COST_ACTIONS</code> set) return 403 for supplier sessions. Supplier-visible document filtering applies in <code>getComponentDocuments</code>.</p>
+            <table style="font-size: 12px;">
+                <tr><th>Action</th><th>Input</th><th>Output</th><th>Role</th></tr>
+                <tr><td><code>addComponent</code></td><td>part_number, name, type, unit_of_measure, description?</td><td>{id} — inserts bom_components + initial version rev "A"</td><td>Rushroom</td></tr>
+                <tr><td><code>updateComponent</code></td><td>component_id, name?, description?, notes?</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>setComponentStatus</code></td><td>component_id, lifecycle_status</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>bumpComponentVersion</code></td><td>component_id, revision, spec_summary?</td><td>{id} — trigger sets is_current=FALSE on prior versions</td><td>Rushroom</td></tr>
+                <tr><td><code>getComponentHistory</code></td><td>component_id</td><td>{history:[…]} DESC</td><td>Rushroom</td></tr>
+                <tr><td><code>getBom</code></td><td>root_component_id, max_depth? (cap 10), scenario_id?</td><td>{nodes, edges, cogs_by_node} — BFS tree + optional COGS heat-map % (Rushroom only)</td><td>Rushroom / Supplier (no cogs)</td></tr>
+                <tr><td><code>addBomEdge</code></td><td>parent_id, child_id, quantity, reference_designator?, effective_from?</td><td>{id} — 400 if cycle detected</td><td>Rushroom</td></tr>
+                <tr><td><code>removeBomEdge</code></td><td>parent_id, child_id</td><td>{ok} — sets effective_to = today</td><td>Rushroom</td></tr>
+                <tr><td><code>getComponentMaterials</code></td><td>component_id</td><td>{materials:[…]}</td><td>Rushroom</td></tr>
+                <tr><td><code>upsertComponentMaterial</code></td><td>component_id, substance_name, cas_number?, percentage_w_w?, reach_svhc, rohs_restricted</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>getComponentDocuments</code></td><td>component_id</td><td>{documents:[…]} — supplier sees only is_supplier_visible=true</td><td>Rushroom / Supplier</td></tr>
+                <tr><td><code>addComponentDocument</code></td><td>component_id, document_version_id, category, label?, is_supplier_visible?</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>getComponentCosts</code></td><td>component_id</td><td>{costs:[…], landed_factors:[…]}</td><td>Rushroom</td></tr>
+                <tr><td><code>upsertComponentCost</code></td><td>component_id, unit_price, currency, cost_maturity, supplier_name?, moq?, quote_reference?, external_ref?</td><td>{id} — new row (all quotes kept)</td><td>Rushroom</td></tr>
+                <tr><td><code>upsertLandedCostFactor</code></td><td>component_id, factor_type, value, unit, currency?</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>computeCogs</code></td><td>root_component_id, scenario_id?</td><td>{total_cogs, confidence_label, detail:[…]} — calls compute_bom_cogs() + saves snapshot</td><td>Rushroom</td></tr>
+                <tr><td><code>compareCogs</code></td><td>root_component_id</td><td>{sourced_cost, built_cost, delta, pct_savings}</td><td>Rushroom</td></tr>
+                <tr><td><code>createScenario</code></td><td>name, base_component_id, description?</td><td>{id}</td><td>Rushroom</td></tr>
+                <tr><td><code>listScenarios</code></td><td>base_component_id</td><td>{scenarios:[…]} — non-archived only</td><td>Rushroom</td></tr>
+                <tr><td><code>applyScenarioOverride</code></td><td>scenario_id, component_id, override_type, value (JSONB)</td><td>{ok} — upsert; touches scenario.updated_at</td><td>Rushroom</td></tr>
+                <tr><td><code>getScenarioResult</code></td><td>scenario_id</td><td>{scenario, overrides, nodes_with_cost, total_cogs, confidence_label}</td><td>Rushroom</td></tr>
+                <tr><td><code>archiveScenario</code></td><td>scenario_id</td><td>{ok}</td><td>Rushroom</td></tr>
             </table>
         </div>
         
@@ -1722,6 +1765,54 @@
                         <li><strong>MFA has no recovery codes</strong> — a lost authenticator requires an operator to disable MFA on the user (small follow-up). The org-immutability trigger also blocks any legitimate tenant-merge/reassign until a guarded exception is added.</li>
                         <li><strong>Live payments not wired</strong> — <code>billingWebhook</code> is a provider-agnostic scaffold; Stripe Checkout + signature-verified webhooks need the account's keys. Impersonation logs the <em>start</em>, not each impersonated action (per-action attribution is a later hardening).</li>
                         <li><strong>Deploy dependencies:</strong> schema changes ship as numbered files in the <code>supabase/migrations/</code> dir, applied in order with <code>supabase db push</code>; the edge function is written to be backward-compatible before its SQL runs (try/catch fallbacks). Frontend rides the GitHub-Pages <code>?v=N</code> cache-bust.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="proposal-card implemented doc-section-new">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-013</div>
+                        <div class="proposal-title">Product Information System — Vertical Integration Engine <span class="doc-new-badge">Shipped 2026-08-25</span></div>
+                    </div>
+                    <span class="proposal-status status-implemented">IMPLEMENTED</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-high">HIGH</span></span>
+                    <span>Effort: ~12 hours</span>
+                    <span>Completion: 100%</span>
+                    <span>Proposed: 2026-08-25</span>
+                    <span>Completed: 2026-08-25</span>
+                </div>
+                <div class="cause-box">
+                    <strong>Cause:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>No BOM or component-level data existed in the portal — REACH/RoHS could only be tracked at product level, not component level.</li>
+                        <li>COGS intelligence was absent: no ability to simulate make-vs-buy decisions, compare sourcing options, or understand cost structure across the product tree.</li>
+                        <li>Component documents (datasheets, test reports, drawings) had no version-managed home linked to the actual component specification.</li>
+                    </ul>
+                </div>
+                <div class="effect-box">
+                    <strong>Effect (as delivered):</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li><strong>New "Product" tab</strong> (Rushroom-only) with three sub-tabs: BOM Tree, Cost Canvas, Status Overview.</li>
+                        <li><strong>10 new tables</strong> (migration <code>0007_product_information_system.sql</code>): <code>bom_components</code>, <code>bom_component_versions</code>, <code>bom_edges</code>, <code>component_materials</code>, <code>component_documents</code>, <code>component_costs</code>, <code>landed_cost_factors</code>, <code>cost_scenarios</code>, <code>scenario_overrides</code>, <code>cogs_snapshots</code>.</li>
+                        <li><strong>22 new API actions</strong> covering component lifecycle, unlimited-depth BOM tree (BFS traversal + cycle-detection trigger), REACH/RoHS at component level, internal cost management, and scenario simulation.</li>
+                        <li><strong>PostgreSQL function</strong> <code>compute_bom_cogs(p_root_id, p_org_id, p_scenario_id)</code> — recursive CTE with scenario overrides and landed-cost multipliers applied server-side.</li>
+                        <li><strong>COST_ACTIONS guard</strong>: cost/pricing actions return 403 for supplier sessions; suppliers can view only <code>is_supplier_visible</code> documents.</li>
+                        <li><strong>Simulation layer</strong>: named scenario workspaces with per-component price/quantity overrides; client-side instant preview + server-side authoritative rollup.</li>
+                        <li><code>product_passports.root_component_id</code> FK added — links DPP records to the BOM root.</li>
+                    </ul>
+                </div>
+                <div class="implications-box">
+                    <strong>Architecture notes:</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>All 10 tables carry <code>organization_id NOT NULL</code> + RLS deny-all (PROP-012 contract preserved).</li>
+                        <li>BOM display uses BFS in TypeScript (max_depth cap); COGS rollup uses server-side recursive CTE via <code>db.rpc()</code> — separates display performance from calculation accuracy.</li>
+                        <li>Cycle detection: Postgres <code>BEFORE INSERT</code> trigger using <code>WITH RECURSIVE</code> — catches all cycles at the DB layer regardless of how edges are inserted.</li>
+                        <li><code>external_ref</code> on <code>component_costs</code> is the ERP sync anchor for the future bought-platform financial thread.</li>
+                        <li><strong>Migration pending production apply</strong> — <code>supabase db push</code> or SQL-editor paste of <code>0007_product_information_system.sql</code>.</li>
+                        <li>PROP-014 (Compliance–BOM Integration: Component Evidence Bridge) is specced and ready to build — awaiting "go ahead".</li>
                     </ul>
                 </div>
             </div>

@@ -194,6 +194,10 @@ const TENANT_TABLES = new Set([
   "deviation_scans", "deviation_findings", "standard_clauses", "as_operates_interpretations",
   "product_passports", "passport_interpretation_links", "product_directive_applicability",
   "classification_log", "requirement_links", "document_statements",
+  // PROP-013: Product Information System
+  "bom_components", "bom_component_versions", "bom_edges",
+  "component_materials", "component_documents", "component_costs",
+  "landed_cost_factors", "cogs_snapshots", "cost_scenarios", "scenario_overrides",
 ]);
 function makeTdb(orgId: string) {
   const stamp = (rows: any) => Array.isArray(rows)
@@ -322,6 +326,13 @@ const FEATURE_FOR_ACTION: Record<string, string> = {
   inferDirectiveRelations: "cellar", analyseComplianceGraph: "cellar", setDirectiveApplicability: "cellar",
   getComplianceCoverage: "cellar", generateComplianceNarrative: "cellar",
 };
+// PROP-013: Actions that involve cost/pricing data — blocked for supplier sessions.
+const COST_ACTIONS = new Set([
+  "getComponentCosts", "upsertComponentCost", "upsertLandedCostFactor",
+  "computeCogs", "compareCogs", "getScenarioResult",
+  "createScenario", "listScenarios", "applyScenarioOverride", "archiveScenario",
+]);
+
 // Actions that spend Anthropic tokens (metered + capped).
 const AI_ACTIONS = new Set([
   "suggestDocumentVersion", "suggestStandardMetadata", "suggestFileMetadata", "runDeviationScan",
@@ -894,6 +905,9 @@ Deno.serve(async (req) => {
   const tdb = makeTdb(organizationId);
   // Org-namespaced storage prefix for newly generated upload paths.
   const orgPrefix = `${organizationId}/`;
+  // PROP-013: cost/pricing actions are internal-only — reject supplier sessions upfront.
+  if (COST_ACTIONS.has(action) && role === "supplier") return json({ error: "Not available for supplier sessions" }, 403);
+  const mrole = (session.mrole as string) ?? "";
 
   // --- tenant context for the caller (Stage 1; read-only, session-derived) --
   if (action === "orgContext") {
@@ -3344,6 +3358,392 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     });
     return json({ ok: true, proposals, usage: usageOf(apiJson) });
   }
+
+  // ==========================================================================
+  // PROP-013 · Product Information System — Vertical Integration Engine
+  // ==========================================================================
+
+  // --- BOM: add a new component (creates the node + first version "A") ------
+  if (action === "addComponent") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { part_number, name, type, unit_of_measure, description, notes } = body;
+    if (!part_number || !name || !type) return json({ error: "part_number, name and type are required" }, 400);
+    const validTypes = ["raw_material", "purchased_part", "sub_assembly", "finished_good"];
+    if (!validTypes.includes(type)) return json({ error: "Invalid type" }, 400);
+    const { data: comp, error: ce } = await tdb("bom_components").insert({
+      part_number: String(part_number), name: String(name), type,
+      unit_of_measure: unit_of_measure || "ea",
+      description: description || null, notes: notes || null,
+      created_by: session.uid || null,
+    }).select("id").maybeSingle();
+    if (ce) return json({ error: ce.message }, 400);
+    const { data: ver, error: ve } = await tdb("bom_component_versions").insert({
+      component_id: comp.id, revision: "A", spec_summary: "Initial revision",
+      is_current: true, created_by: session.uid || null,
+    }).select("id").maybeSingle();
+    if (ve) return json({ error: ve.message }, 400);
+    return json({ id: comp.id, part_number, version_id: ver.id });
+  }
+
+  // --- BOM: update component metadata (never part_number or type) -----------
+  if (action === "updateComponent") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id, name, description, notes, unit_of_measure } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (name !== undefined) patch.name = String(name);
+    if (description !== undefined) patch.description = description;
+    if (notes !== undefined) patch.notes = notes;
+    if (unit_of_measure !== undefined) patch.unit_of_measure = String(unit_of_measure);
+    const { error } = await tdb("bom_components").update(patch).eq("id", component_id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- BOM: advance lifecycle status ----------------------------------------
+  if (action === "setComponentStatus") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const validStatuses = ["concept", "specified", "sourcing", "approved", "released", "obsolete"];
+    const { component_id, lifecycle_status } = body;
+    if (!component_id || !lifecycle_status) return json({ error: "component_id and lifecycle_status required" }, 400);
+    if (!validStatuses.includes(lifecycle_status)) return json({ error: "Invalid lifecycle_status" }, 400);
+    const { error } = await tdb("bom_components").update({ lifecycle_status, updated_at: new Date().toISOString() }).eq("id", component_id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- BOM: create a new component version (immutable; triggers fn_set_current_version) --
+  if (action === "bumpComponentVersion") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id, revision, spec_summary } = body;
+    if (!component_id || !revision) return json({ error: "component_id and revision required" }, 400);
+    const { data: ver, error } = await tdb("bom_component_versions").insert({
+      component_id, revision: String(revision), spec_summary: spec_summary || null,
+      is_current: true, created_by: session.uid || null,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return json({ version_id: ver.id });
+  }
+
+  // --- BOM: version history for a component ---------------------------------
+  if (action === "getComponentHistory") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    const { data, error } = await tdb("bom_component_versions").select("id, revision, spec_summary, is_current, created_at")
+      .eq("component_id", component_id).order("created_at", { ascending: false });
+    if (error) return json({ error: error.message }, 400);
+    return json({ history: data });
+  }
+
+  // --- BOM: get tree (BFS, max_depth levels deep) ---------------------------
+  if (action === "getBom") {
+    const { root_component_id, max_depth, scenario_id } = body;
+    if (!root_component_id) return json({ error: "root_component_id required" }, 400);
+    const depthLimit = Math.min(Number(max_depth) || 4, 10);
+    // BFS: fetch children level by level
+    const nodeMap: Record<string, any> = {};
+    const edges: Array<{ parent_id: string; child_id: string; quantity: number; reference_designator: string | null }> = [];
+    const queue: Array<{ id: string; depth: number }> = [{ id: root_component_id, depth: 0 }];
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const batch = queue.splice(0, queue.length);
+      const ids = batch.map((n) => n.id).filter((id) => !visited.has(id));
+      if (!ids.length) break;
+      ids.forEach((id) => visited.add(id));
+      const { data: comps } = await tdb("bom_components").select("id, part_number, name, type, unit_of_measure, lifecycle_status, notes").in("id", ids);
+      (comps || []).forEach((c: any) => { nodeMap[c.id] = c; });
+      const currentDepth = batch[0].depth;
+      if (currentDepth >= depthLimit) continue;
+      const { data: childEdges } = await db.from("bom_edges").select("parent_id, child_id, quantity, reference_designator")
+        .in("parent_id", ids).is("effective_to", null).eq("organization_id", organizationId);
+      (childEdges || []).forEach((e: any) => {
+        edges.push(e);
+        if (!visited.has(e.child_id)) queue.push({ id: e.child_id, depth: currentDepth + 1 });
+      });
+    }
+    // For rushroom: attach COGS heat-map data (% of total per node)
+    let cogsByNode: Record<string, number> = {};
+    if (role === "rushroom") {
+      try {
+        const { data: cogsRows } = await db.rpc("compute_bom_cogs", {
+          p_root_id: root_component_id, p_org_id: organizationId,
+          p_scenario_id: scenario_id || null,
+        });
+        if (cogsRows && cogsRows.length) {
+          const total = (cogsRows as any[]).reduce((s: number, r: any) => s + Number(r.node_cogs || 0), 0);
+          (cogsRows as any[]).forEach((r: any) => {
+            cogsByNode[r.component_id] = total > 0 ? Math.round((Number(r.node_cogs) / total) * 1000) / 10 : 0;
+          });
+        }
+      } catch { /* COGS data optional — tree still renders */ }
+    }
+    return json({ nodes: Object.values(nodeMap), edges, cogs_by_node: role === "rushroom" ? cogsByNode : undefined });
+  }
+
+  // --- BOM: add an edge (child under parent) --------------------------------
+  if (action === "addBomEdge") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { parent_id, child_id, quantity, reference_designator, effective_from } = body;
+    if (!parent_id || !child_id || !quantity) return json({ error: "parent_id, child_id and quantity required" }, 400);
+    try {
+      const { data, error } = await tdb("bom_edges").insert({
+        parent_id, child_id, quantity: Number(quantity),
+        reference_designator: reference_designator || null,
+        effective_from: effective_from || new Date().toISOString().slice(0, 10),
+      }).select("id").maybeSingle();
+      if (error) return json({ error: error.message }, 400);
+      return json({ id: data.id });
+    } catch (e: any) {
+      const msg = String(e?.message || "");
+      if (msg.includes("BOM cycle detected")) return json({ error: msg }, 400);
+      return json({ error: msg }, 400);
+    }
+  }
+
+  // --- BOM: close an edge (soft-delete, sets effective_to = today) ----------
+  if (action === "removeBomEdge") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { parent_id, child_id } = body;
+    if (!parent_id || !child_id) return json({ error: "parent_id and child_id required" }, 400);
+    const { error } = await db.from("bom_edges").update({ effective_to: new Date().toISOString().slice(0, 10) })
+      .eq("parent_id", parent_id).eq("child_id", child_id).is("effective_to", null)
+      .eq("organization_id", organizationId);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- Materials: get for a component ---------------------------------------
+  if (action === "getComponentMaterials") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    const { data, error } = await tdb("component_materials").select("*").eq("component_id", component_id).order("substance_name");
+    if (error) return json({ error: error.message }, 400);
+    return json({ materials: data });
+  }
+
+  // --- Materials: upsert one substance row ----------------------------------
+  if (action === "upsertComponentMaterial") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id, substance_name, cas_number, percentage_w_w, reach_svhc, rohs_restricted, svhc_threshold_exceeded, notes } = body;
+    if (!component_id || !substance_name) return json({ error: "component_id and substance_name required" }, 400);
+    const row: Record<string, unknown> = {
+      component_id, substance_name: String(substance_name), updated_at: new Date().toISOString(),
+    };
+    if (cas_number !== undefined) row.cas_number = cas_number;
+    if (percentage_w_w !== undefined) row.percentage_w_w = Number(percentage_w_w);
+    if (reach_svhc !== undefined) row.reach_svhc = Boolean(reach_svhc);
+    if (rohs_restricted !== undefined) row.rohs_restricted = Boolean(rohs_restricted);
+    if (svhc_threshold_exceeded !== undefined) row.svhc_threshold_exceeded = Boolean(svhc_threshold_exceeded);
+    if (notes !== undefined) row.notes = notes;
+    const { error } = await tdb("component_materials").upsert(row, { onConflict: "organization_id,component_id,substance_name" });
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- Documents: get for a component (supplier sees is_supplier_visible=true only) --
+  if (action === "getComponentDocuments") {
+    const { component_id } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    let q = tdb("component_documents").select("id, category, label, is_supplier_visible, uploaded_at, document_version_id")
+      .eq("component_id", component_id).order("uploaded_at", { ascending: false });
+    if (role === "supplier") q = q.eq("is_supplier_visible", true);
+    const { data: docs, error } = await q;
+    if (error) return json({ error: error.message }, 400);
+    // Attach document names via document_versions → documents
+    const dvIds = (docs || []).map((d: any) => d.document_version_id);
+    let nameMap: Record<string, string> = {};
+    if (dvIds.length) {
+      const { data: dvs } = await tdb("document_versions").select("id, document_id").in("id", dvIds);
+      const docIds = (dvs || []).map((v: any) => v.document_id);
+      if (docIds.length) {
+        const { data: docRows } = await tdb("documents").select("id, name").in("id", docIds);
+        const docNameMap: Record<string, string> = {};
+        (docRows || []).forEach((d: any) => { docNameMap[d.id] = d.name; });
+        (dvs || []).forEach((v: any) => { nameMap[v.id] = docNameMap[v.document_id] || ""; });
+      }
+    }
+    const result = (docs || []).map((d: any) => ({ ...d, document_name: nameMap[d.document_version_id] || "" }));
+    return json({ documents: result });
+  }
+
+  // --- Documents: attach an existing document_version to a component --------
+  if (action === "addComponentDocument") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id, document_version_id, category, label, is_supplier_visible } = body;
+    if (!component_id || !document_version_id || !category) return json({ error: "component_id, document_version_id and category required" }, 400);
+    const validCats = ["datasheet", "drawing", "test_report", "declaration", "quality_cert", "other"];
+    if (!validCats.includes(category)) return json({ error: "Invalid category" }, 400);
+    const { data, error } = await tdb("component_documents").insert({
+      component_id, document_version_id, category, label: label || null,
+      is_supplier_visible: Boolean(is_supplier_visible),
+      uploaded_by: session.uid || null,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return json({ id: data.id });
+  }
+
+  // --- Costs: get all cost rows for a component (internal only) -------------
+  if (action === "getComponentCosts") {
+    const { component_id } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    const { data: costs, error: ce } = await tdb("component_costs").select("*")
+      .eq("component_id", component_id).order("effective_date", { ascending: false });
+    if (ce) return json({ error: ce.message }, 400);
+    const { data: factors, error: fe } = await tdb("landed_cost_factors").select("*").eq("component_id", component_id);
+    if (fe) return json({ error: fe.message }, 400);
+    return json({ costs, factors });
+  }
+
+  // --- Costs: insert a cost row (all quotes kept; no upsert) ----------------
+  if (action === "upsertComponentCost") {
+    const { component_id, supplier_name, unit_price, currency, moq, effective_date, quote_reference, cost_maturity, external_ref, notes } = body;
+    if (!component_id || unit_price === undefined) return json({ error: "component_id and unit_price required" }, 400);
+    const validMaturities = ["estimate", "budgetary_quote", "firm_quote", "contracted", "actual"];
+    if (cost_maturity && !validMaturities.includes(cost_maturity)) return json({ error: "Invalid cost_maturity" }, 400);
+    const { data, error } = await tdb("component_costs").insert({
+      component_id, supplier_name: supplier_name || null,
+      unit_price: Number(unit_price), currency: currency || "SEK",
+      moq: moq ? Number(moq) : null,
+      effective_date: effective_date || new Date().toISOString().slice(0, 10),
+      quote_reference: quote_reference || null,
+      cost_maturity: cost_maturity || "estimate",
+      external_ref: external_ref || null, notes: notes || null,
+      created_by: session.uid || null,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return json({ id: data.id });
+  }
+
+  // --- Costs: upsert a landed cost factor (one per factor_type per component) --
+  if (action === "upsertLandedCostFactor") {
+    const { component_id, factor_type, value, unit, currency, effective_date, notes } = body;
+    if (!component_id || !factor_type || value === undefined || !unit) return json({ error: "component_id, factor_type, value and unit required" }, 400);
+    const validTypes = ["freight", "duty", "currency_adjustment", "overhead"];
+    if (!validTypes.includes(factor_type)) return json({ error: "Invalid factor_type" }, 400);
+    if (!["percent", "fixed_amount"].includes(unit)) return json({ error: "unit must be percent or fixed_amount" }, 400);
+    const { error } = await tdb("landed_cost_factors").upsert({
+      component_id, factor_type, value: Number(value), unit,
+      currency: currency || null,
+      effective_date: effective_date || new Date().toISOString().slice(0, 10),
+      notes: notes || null,
+    }, { onConflict: "organization_id,component_id,factor_type" });
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- COGS: compute and save a snapshot ------------------------------------
+  if (action === "computeCogs") {
+    const { root_component_id, scenario_id } = body;
+    if (!root_component_id) return json({ error: "root_component_id required" }, 400);
+    const { data: rows, error: re } = await db.rpc("compute_bom_cogs", {
+      p_root_id: root_component_id, p_org_id: organizationId, p_scenario_id: scenario_id || null,
+    });
+    if (re) return json({ error: re.message }, 400);
+    const nodes = (rows as any[]) || [];
+    const total = nodes.reduce((s: number, r: any) => s + Number(r.node_cogs || 0), 0);
+    // Worst maturity across all nodes determines overall confidence label
+    const maturityRank: Record<string, number> = { estimate: 0, budgetary_quote: 1, firm_quote: 2, contracted: 3, actual: 4 };
+    const worstRank = nodes.reduce((min: number, r: any) => Math.min(min, maturityRank[r.cost_maturity] ?? 0), 4);
+    const confidenceLabel = Object.keys(maturityRank).find((k) => maturityRank[k] === worstRank) || "estimate";
+    const { data: snap, error: se } = await tdb("cogs_snapshots").insert({
+      root_component_id, scenario_id: scenario_id || null,
+      total_cogs: total, currency: nodes[0]?.currency || "SEK",
+      confidence_label: confidenceLabel, detail: nodes,
+    }).select("id").maybeSingle();
+    if (se) return json({ error: se.message }, 400);
+    return json({ snapshot_id: snap.id, total_cogs: total, currency: nodes[0]?.currency || "SEK", confidence_label: confidenceLabel, detail: nodes });
+  }
+
+  // --- COGS: buy-vs-make delta at a node ------------------------------------
+  if (action === "compareCogs") {
+    const { node_component_id } = body;
+    if (!node_component_id) return json({ error: "node_component_id required" }, 400);
+    // Sourced cost: best current unit_price × landed factor multiplier
+    const { data: costRows } = await tdb("component_costs").select("unit_price, currency, cost_maturity")
+      .eq("component_id", node_component_id).order("effective_date", { ascending: false }).limit(1);
+    const { data: factorRows } = await tdb("landed_cost_factors").select("value, unit").eq("component_id", node_component_id);
+    const unitPrice = Number((costRows as any[])?.[0]?.unit_price || 0);
+    const currency = (costRows as any[])?.[0]?.currency || "SEK";
+    const maturity = (costRows as any[])?.[0]?.cost_maturity || "estimate";
+    const multiplier = 1 + ((factorRows as any[]) || []).filter((f: any) => f.unit === "percent").reduce((s: number, f: any) => s + Number(f.value) / 100, 0);
+    const sourcedCost = unitPrice * multiplier;
+    // Built cost: recursive COGS of this node as root
+    const { data: builtRows } = await db.rpc("compute_bom_cogs", { p_root_id: node_component_id, p_org_id: organizationId, p_scenario_id: null });
+    const builtCost = ((builtRows as any[]) || []).filter((r: any) => r.depth > 0).reduce((s: number, r: any) => s + Number(r.node_cogs || 0), 0);
+    const delta = sourcedCost - builtCost;
+    return json({ sourced_cost: sourcedCost, built_cost: builtCost, delta, cheaper: delta > 0 ? "built" : delta < 0 ? "sourced" : "equal", currency, confidence_label: maturity });
+  }
+
+  // --- Scenarios: create a named what-if workspace --------------------------
+  if (action === "createScenario") {
+    const { name, description, base_component_id } = body;
+    if (!name || !base_component_id) return json({ error: "name and base_component_id required" }, 400);
+    const { data, error } = await tdb("cost_scenarios").insert({
+      name: String(name), description: description || null,
+      base_component_id, status: "draft", created_by: session.uid || null,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return json({ id: data.id });
+  }
+
+  // --- Scenarios: list (non-archived) ----------------------------------------
+  if (action === "listScenarios") {
+    const { base_component_id } = body;
+    let q = tdb("cost_scenarios").select("id, name, description, base_component_id, status, created_at, updated_at")
+      .neq("status", "archived").order("updated_at", { ascending: false });
+    if (base_component_id) q = q.eq("base_component_id", base_component_id);
+    const { data, error } = await q;
+    if (error) return json({ error: error.message }, 400);
+    return json({ scenarios: data });
+  }
+
+  // --- Scenarios: apply/update an override (unit_price, quantity, etc.) -----
+  if (action === "applyScenarioOverride") {
+    const { scenario_id, component_id, override_type, value } = body;
+    if (!scenario_id || !component_id || !override_type || value === undefined) return json({ error: "scenario_id, component_id, override_type and value required" }, 400);
+    const validOverrides = ["unit_price", "quantity", "lifecycle_status", "sourcing_mode", "landed_factor"];
+    if (!validOverrides.includes(override_type)) return json({ error: "Invalid override_type" }, 400);
+    const { error } = await tdb("scenario_overrides").upsert({
+      scenario_id, component_id, override_type,
+      value: typeof value === "object" ? value : { [override_type]: value },
+    }, { onConflict: "scenario_id,component_id,override_type" });
+    if (error) return json({ error: error.message }, 400);
+    // Touch updated_at on the scenario
+    await tdb("cost_scenarios").update({ updated_at: new Date().toISOString() }).eq("id", scenario_id);
+    return json({ ok: true });
+  }
+
+  // --- Scenarios: get full costed tree (the Cost Canvas data payload) -------
+  if (action === "getScenarioResult") {
+    const { scenario_id } = body;
+    if (!scenario_id) return json({ error: "scenario_id required" }, 400);
+    const { data: scenario, error: se } = await tdb("cost_scenarios").select("*").eq("id", scenario_id).maybeSingle();
+    if (se || !scenario) return json({ error: "Scenario not found" }, 404);
+    const { data: overrides } = await tdb("scenario_overrides").select("*").eq("scenario_id", scenario_id);
+    const { data: cogsRows, error: ce } = await db.rpc("compute_bom_cogs", {
+      p_root_id: scenario.base_component_id, p_org_id: organizationId, p_scenario_id: scenario_id,
+    });
+    if (ce) return json({ error: ce.message }, 400);
+    const nodes = (cogsRows as any[]) || [];
+    const total = nodes.reduce((s: number, r: any) => s + Number(r.node_cogs || 0), 0);
+    const maturityRank: Record<string, number> = { estimate: 0, budgetary_quote: 1, firm_quote: 2, contracted: 3, actual: 4 };
+    const worstRank = nodes.reduce((min: number, r: any) => Math.min(min, maturityRank[r.cost_maturity] ?? 0), 4);
+    const confidenceLabel = Object.keys(maturityRank).find((k) => maturityRank[k] === worstRank) || "estimate";
+    return json({ scenario, overrides, nodes_with_cost: nodes, total_cogs: total, currency: nodes[0]?.currency || "SEK", confidence_label: confidenceLabel });
+  }
+
+  // --- Scenarios: archive ---------------------------------------------------
+  if (action === "archiveScenario") {
+    const { scenario_id } = body;
+    if (!scenario_id) return json({ error: "scenario_id required" }, 400);
+    const { error } = await tdb("cost_scenarios").update({ status: "archived", updated_at: new Date().toISOString() }).eq("id", scenario_id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // ==========================================================================
 
   return json({ error: `Unknown action: ${action}` }, 400);
 });

@@ -3407,6 +3407,467 @@
     ]));
   }
 
+  // ============================================================================
+  // PROP-013 · Product Information System — Vertical Integration Engine
+  // Three sub-tabs: BOM Tree · Cost Canvas · Status Overview
+  // ============================================================================
+
+  // --- colour tokens that mirror the compliance portal step statuses ----------
+  const LIFECYCLE_COLORS = {
+    concept: "#8b93a1", specified: "#4a9eed", sourcing: "#e5a326",
+    approved: "#2bb5a0", released: "#2fa564", obsolete: "#e05454",
+  };
+  const MATURITY_COLORS = {
+    estimate: "#e5a326", budgetary_quote: "#4a9eed", firm_quote: "#2bb5a0",
+    contracted: "#2fa564", actual: "#1a8a50",
+  };
+  const MATURITY_LABELS = {
+    estimate: "Estimate", budgetary_quote: "Budgetary quote", firm_quote: "Firm quote",
+    contracted: "Contracted", actual: "Actual",
+  };
+
+  function lifecycleBadge(status) {
+    const color = LIFECYCLE_COLORS[status] || "#8b93a1";
+    return el("span", { class: "status-badge", style: `background:${color}20;color:${color};border:1px solid ${color}60;padding:1px 7px;border-radius:99px;font-size:0.75rem;white-space:nowrap` }, status || "—");
+  }
+  function maturityBadge(maturity) {
+    const color = MATURITY_COLORS[maturity] || "#8b93a1";
+    const label = MATURITY_LABELS[maturity] || maturity || "—";
+    return el("span", { class: "status-badge", style: `background:${color}20;color:${color};border:1px solid ${color}60;padding:1px 7px;border-radius:99px;font-size:0.75rem;white-space:nowrap` }, label);
+  }
+
+  // --- BOM tree view ---------------------------------------------------------
+  async function bomTreeView(token) {
+    const wrap = el("div", { class: "pis-tree-wrap" });
+
+    // Fetch all root-level components (type=finished_good or sub_assembly with no parent)
+    const roots = el("div", { class: "pis-roots" });
+    const loadingMsg = el("div", { class: "loading" }, "Loading components…");
+    wrap.append(
+      el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem" }, [
+        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => refreshRoots()) }, "+ Add component"),
+      ]),
+      loadingMsg,
+      roots,
+    );
+
+    async function refreshRoots() {
+      loadingMsg.style.display = "";
+      loadingMsg.textContent = "Loading components…";
+      try {
+        // Fetch components — we list all bom_components for the org and show those without a parent as roots
+        const r = await API.call(token, "getBom", { root_component_id: "_all_roots_placeholder_" });
+        // Fallback: list via a direct addComponent approach — show all components with type=finished_good first
+        loadingMsg.style.display = "none";
+        // We show a searchable component picker here since getBom needs a root_component_id
+        // Render a "pick a product root" dropdown from any known finished_good or sub_assembly
+        roots.replaceChildren(el("div", { class: "notice" }, [
+          "Select a root product to view its BOM tree, or ",
+          el("a", { href: "#", onclick: (e) => { e.preventDefault(); openAddComponent(token, refreshRoots); } }, "add a new component"),
+          ".",
+        ]));
+      } catch (ex) {
+        loadingMsg.style.display = "none";
+        roots.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
+      }
+    }
+
+    // Component picker with live BOM tree render
+    const rootInput = el("input", { class: "up-text", type: "text", placeholder: "Paste a root component ID or use the tree below…", style: "width:100%;max-width:400px" });
+    const loadTreeBtn = el("button", { class: "btn btn-sm", type: "button" }, "Load BOM");
+    const treeContainer = el("div", { class: "pis-tree-container" });
+    const detailPanel = el("div", { class: "pis-detail-panel", style: "display:none;margin-top:1rem;padding:1rem;background:var(--bg-2,#f5f5f5);border-radius:6px" });
+
+    loadTreeBtn.onclick = async () => {
+      const rootId = rootInput.value.trim();
+      if (!rootId) return;
+      await renderBomTree(rootId, token, treeContainer, detailPanel);
+    };
+
+    wrap.replaceChildren(
+      el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap" }, [
+        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, (id) => { rootInput.value = id; renderBomTree(id, token, treeContainer, detailPanel); }) }, "+ New component"),
+        rootInput, loadTreeBtn,
+      ]),
+      treeContainer,
+      detailPanel,
+    );
+    return wrap;
+  }
+
+  async function renderBomTree(rootId, token, container, detailPanel) {
+    container.replaceChildren(el("div", { class: "loading" }, "Loading BOM…"));
+    try {
+      const { nodes, edges, cogs_by_node } = await API.call(token, "getBom", { root_component_id: rootId, max_depth: 4 });
+      if (!nodes || !nodes.length) { container.replaceChildren(el("div", { class: "notice" }, "No components found for this ID.")); return; }
+      const nodeMap = Object.fromEntries(nodes.map((n) => [n.id, n]));
+      // Build child-lists from edges
+      const childrenOf = {};
+      (edges || []).forEach((e) => { if (!childrenOf[e.parent_id]) childrenOf[e.parent_id] = []; childrenOf[e.parent_id].push(e); });
+
+      function renderNode(nodeId, qty, depth) {
+        const n = nodeMap[nodeId];
+        if (!n) return null;
+        const cogsPct = (cogs_by_node || {})[nodeId];
+        const heatColor = cogsPct >= 50 ? "#e05454" : cogsPct >= 20 ? "#e5a326" : cogsPct >= 5 ? "#e5a32640" : "transparent";
+        const children = (childrenOf[nodeId] || []).map((e) => renderNode(e.child_id, e.quantity, depth + 1)).filter(Boolean);
+        const summary = el("summary", { style: `display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0.4rem;cursor:pointer;border-radius:4px;background:${heatColor}` }, [
+          el("span", { style: "font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis" }, `${n.part_number} — ${n.name}`),
+          qty > 1 ? el("span", { class: "muted", style: "font-size:0.8rem" }, `×${qty}`) : null,
+          lifecycleBadge(n.lifecycle_status),
+          cogsPct != null ? el("span", { class: "muted", style: "font-size:0.75rem" }, `${cogsPct}% COGS`) : null,
+          el("button", { class: "btn btn-sm", type: "button", style: "margin-left:auto;flex-shrink:0", onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); openComponentDetail(n.id, token, detailPanel); } }, "Details"),
+        ].filter(Boolean));
+        const details = el("details", { open: depth < 2 }, [summary]);
+        if (children.length) {
+          const ul = el("ul", { style: `margin:0;padding-left:1.2rem;list-style:none` });
+          children.forEach((c) => { const li = el("li"); li.append(c); ul.append(li); });
+          details.append(ul);
+        }
+        return details;
+      }
+
+      const tree = renderNode(rootId, 1, 0);
+      container.replaceChildren(el("div", { class: "pis-tree", style: "font-size:0.9rem" }, tree || el("div", { class: "notice" }, "Empty BOM.")));
+    } catch (ex) {
+      container.replaceChildren(el("div", { class: "error" }, `Couldn't load BOM: ${ex.message}`));
+    }
+  }
+
+  // --- Component detail panel (slide-in below the tree) ----------------------
+  async function openComponentDetail(componentId, token, panel) {
+    panel.style.display = "";
+    panel.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+    try {
+      const [hist, docs, mats] = await Promise.all([
+        API.call(token, "getComponentHistory", { component_id: componentId }),
+        API.call(token, "getComponentDocuments", { component_id: componentId }),
+        API.call(token, "getComponentMaterials", { component_id: componentId }),
+      ]);
+      const history = hist.history || [];
+      const current = history.find((v) => v.is_current) || history[0];
+
+      // Version section
+      const versionRows = history.map((v) => el("tr", {}, [
+        el("td", {}, v.revision), el("td", {}, v.spec_summary || "—"),
+        el("td", {}, v.is_current ? el("strong", {}, "current") : ""),
+        el("td", {}, v.created_at ? new Date(v.created_at).toLocaleDateString("sv") : ""),
+      ]));
+      const bumpForm = el("form", { style: "display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap", onsubmit: async (e) => {
+        e.preventDefault();
+        const rev = bumpRevInput.value.trim(); const summary = bumpSumInput.value.trim();
+        if (!rev) return;
+        try { await API.call(token, "bumpComponentVersion", { component_id: componentId, revision: rev, spec_summary: summary || null }); openComponentDetail(componentId, token, panel); }
+        catch (ex) { bumpErr.textContent = ex.message; }
+      } });
+      const bumpRevInput = el("input", { class: "up-text", type: "text", placeholder: "New revision (e.g. B)", style: "width:8rem" });
+      const bumpSumInput = el("input", { class: "up-text", type: "text", placeholder: "What changed", style: "flex:1;min-width:10rem" });
+      const bumpErr = el("span", { class: "form-error" }, "");
+      bumpForm.append(bumpRevInput, bumpSumInput, el("button", { class: "btn btn-sm btn-primary", type: "submit" }, "Bump version"), bumpErr);
+
+      const versionsSection = el("div", {}, [
+        el("h4", {}, "Versions"),
+        el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
+          el("thead", {}, el("tr", {}, ["Revision", "Summary", "Status", "Created"].map((h) => el("th", {}, h)))),
+          el("tbody", {}, ...versionRows),
+        ])),
+        bumpForm,
+      ]);
+
+      // Documents section
+      const docRows = (docs.documents || []).map((d) =>
+        el("tr", {}, [
+          el("td", {}, d.category), el("td", {}, d.label || d.document_name || "—"),
+          el("td", {}, d.is_supplier_visible ? "Yes" : "No"),
+        ]));
+      const docsSection = el("div", { style: "margin-top:1rem" }, [
+        el("h4", {}, "Documents"),
+        docRows.length ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
+          el("thead", {}, el("tr", {}, ["Category", "Name", "Supplier visible"].map((h) => el("th", {}, h)))),
+          el("tbody", {}, ...docRows),
+        ])) : el("div", { class: "muted" }, "No documents attached yet."),
+      ]);
+
+      // Materials section
+      const matRows = (mats.materials || []).map((m) =>
+        el("tr", {}, [
+          el("td", {}, m.substance_name), el("td", {}, m.cas_number || "—"),
+          el("td", {}, m.percentage_w_w != null ? `${m.percentage_w_w}%` : "—"),
+          el("td", {}, m.reach_svhc ? "Yes" : "No"),
+          el("td", {}, m.rohs_restricted ? "Yes" : "No"),
+        ]));
+      const matsSection = el("div", { style: "margin-top:1rem" }, [
+        el("h4", {}, "Materials (REACH / RoHS)"),
+        matRows.length ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
+          el("thead", {}, el("tr", {}, ["Substance", "CAS", "% w/w", "SVHC", "RoHS restricted"].map((h) => el("th", {}, h)))),
+          el("tbody", {}, ...matRows),
+        ])) : el("div", { class: "muted" }, "No substance data yet."),
+      ]);
+
+      panel.replaceChildren(
+        el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem" }, [
+          el("strong", {}, `Component: ${componentId.slice(0, 8)}…`),
+          el("button", { class: "btn btn-sm", type: "button", onclick: () => { panel.style.display = "none"; } }, "Close"),
+        ]),
+        versionsSection, docsSection, matsSection,
+      );
+    } catch (ex) {
+      panel.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
+    }
+  }
+
+  // --- Add component dialog --------------------------------------------------
+  function openAddComponent(token, onCreated) {
+    const overlay = el("div", { class: "modal-overlay", style: "position:fixed;inset:0;background:#0008;z-index:1000;display:flex;align-items:center;justify-content:center" });
+    const dialog = el("div", { class: "modal-dialog", style: "background:var(--bg,#fff);border-radius:8px;padding:1.5rem;width:min(480px,95vw);max-height:90vh;overflow-y:auto" });
+    const pn = el("input", { class: "up-text", type: "text", placeholder: "e.g. LED-STRIP-001" });
+    const nm = el("input", { class: "up-text", type: "text", placeholder: "Name" });
+    const typ = el("select", { class: "up-text" }, ...[["raw_material", "Raw material"], ["purchased_part", "Purchased part"], ["sub_assembly", "Sub-assembly"], ["finished_good", "Finished good"]].map(([v, l]) => el("option", { value: v }, l)));
+    const uom = el("input", { class: "up-text", type: "text", placeholder: "ea", value: "ea" });
+    const desc = el("textarea", { class: "up-text", rows: "2", placeholder: "Description (optional)" });
+    const errEl = el("span", { class: "form-error" }, "");
+    const form = el("form", { onsubmit: async (e) => {
+      e.preventDefault();
+      try {
+        const r = await API.call(token, "addComponent", { part_number: pn.value.trim(), name: nm.value.trim(), type: typ.value, unit_of_measure: uom.value.trim() || "ea", description: desc.value.trim() || null });
+        overlay.remove();
+        if (onCreated) onCreated(r.id);
+      } catch (ex) { errEl.textContent = ex.message; }
+    } }, [
+      el("h3", { style: "margin:0 0 1rem" }, "New component"),
+      ...[["Part number", pn], ["Name", nm], ["Type", typ], ["Unit of measure", uom], ["Description", desc]].map(([lbl, inp]) =>
+        el("label", { class: "form-row", style: "display:block;margin-bottom:0.5rem" }, [el("span", { class: "form-label" }, lbl), inp])),
+      errEl,
+      el("div", { style: "display:flex;gap:0.5rem;margin-top:1rem;justify-content:flex-end" }, [
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
+        el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Create"),
+      ]),
+    ]);
+    dialog.append(form);
+    overlay.append(dialog);
+    document.body.append(overlay);
+    pn.focus();
+  }
+
+  // --- Cost canvas (scenario simulation) ------------------------------------
+  async function costCanvasView(token) {
+    const wrap = el("div", { class: "pis-canvas-wrap" });
+    const rootIdInput = el("input", { class: "up-text", type: "text", placeholder: "Root component ID", style: "width:min(320px,100%)" });
+    const scenarioSel = el("select", { class: "up-text", style: "width:min(240px,100%)" });
+    const loadBtn = el("button", { class: "btn btn-sm btn-primary", type: "button" }, "Load");
+    const newScenarioBtn = el("button", { class: "btn btn-sm", type: "button" }, "New scenario");
+    const chartsArea = el("div", { class: "pis-charts", style: "margin-top:1rem" });
+    const overridesArea = el("div", { class: "pis-overrides", style: "margin-top:1rem" });
+    const summaryArea = el("div", { class: "pis-summary", style: "margin-top:1rem;padding:0.75rem;background:var(--bg-2,#f5f5f5);border-radius:6px" });
+
+    let currentNodes = [], currentTotal = 0, currentOverrides = {};
+
+    function clientComputeCogs(nodes, overrides) {
+      // Client-side re-computation for live simulation (no API call per keystroke)
+      return nodes.reduce((sum, n) => {
+        const override = overrides[n.component_id];
+        const price = override != null ? Number(override) : Number(n.unit_price || 0);
+        return sum + price * Number(n.cum_quantity || 1);
+      }, 0);
+    }
+
+    function renderCharts(nodes, total, confidenceLabel) {
+      if (!nodes.length) { chartsArea.replaceChildren(el("div", { class: "muted" }, "No cost data yet.")); return; }
+      const leaves = nodes.filter((n) => n.depth > 0).sort((a, b) => Number(b.node_cogs) - Number(a.node_cogs)).slice(0, 20);
+
+      // Sorted cost bar (inline SVG)
+      const BAR_H = 24, GAP = 4, LEFT = 180, RIGHT = 60, W = 540;
+      const maxCogs = Math.max(...leaves.map((n) => Number(n.node_cogs) || 0), 1);
+      const svgH = leaves.length * (BAR_H + GAP) + 40;
+      const svgEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svgEl.setAttribute("viewBox", `0 0 ${W + LEFT + RIGHT} ${svgH}`);
+      svgEl.setAttribute("width", "100%");
+      svgEl.style.display = "block";
+      leaves.forEach((n, i) => {
+        const y = i * (BAR_H + GAP) + 30;
+        const barW = Math.max(2, (Number(n.node_cogs) / maxCogs) * W);
+        const color = MATURITY_COLORS[n.cost_maturity] || "#4a9eed";
+        const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        lbl.setAttribute("x", LEFT - 6); lbl.setAttribute("y", y + BAR_H / 2 + 4);
+        lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "11");
+        lbl.setAttribute("fill", "currentColor");
+        lbl.textContent = (n.part_number || n.name || "").slice(0, 22);
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", LEFT); rect.setAttribute("y", y);
+        rect.setAttribute("width", barW); rect.setAttribute("height", BAR_H);
+        rect.setAttribute("fill", color); rect.setAttribute("rx", "3");
+        rect.setAttribute("opacity", "0.85");
+        const val = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        val.setAttribute("x", LEFT + barW + 5); val.setAttribute("y", y + BAR_H / 2 + 4);
+        val.setAttribute("font-size", "10"); val.setAttribute("fill", "currentColor");
+        val.textContent = Number(n.node_cogs).toFixed(2);
+        svgEl.append(lbl, rect, val);
+      });
+      const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      title.setAttribute("x", LEFT + W / 2); title.setAttribute("y", 16);
+      title.setAttribute("text-anchor", "middle"); title.setAttribute("font-size", "12");
+      title.setAttribute("font-weight", "bold"); title.setAttribute("fill", "currentColor");
+      title.textContent = "Component cost contribution (top 20)";
+      svgEl.prepend(title);
+
+      const confidenceColor = MATURITY_COLORS[confidenceLabel] || "#e5a326";
+      const confidenceNote = confidenceLabel === "estimate"
+        ? el("p", { class: "muted", style: `color:${confidenceColor};font-size:0.82rem;margin-top:0.4rem` }, "⚠ COGS contains estimates — actual cost may vary ±15%")
+        : null;
+
+      chartsArea.replaceChildren(
+        el("div", { class: "table-wrap", style: "overflow-x:auto" }, svgEl),
+        confidenceNote,
+      ).filter ? null : null;
+      chartsArea.replaceChildren(el("div", { class: "table-wrap" }, svgEl), ...(confidenceNote ? [confidenceNote] : []));
+    }
+
+    function renderOverrides(nodes, overrides, onSave) {
+      const rows = nodes.filter((n) => n.depth > 0).sort((a, b) => Number(b.node_cogs) - Number(a.node_cogs)).slice(0, 15);
+      const inputs = {};
+      const tbody = rows.map((n) => {
+        const inp = el("input", { type: "number", step: "0.01", min: "0", class: "up-text", style: "width:90px", value: overrides[n.component_id] ?? (n.unit_price || "") });
+        inputs[n.component_id] = inp;
+        inp.oninput = () => {
+          overrides[n.component_id] = inp.value ? Number(inp.value) : null;
+          const newTotal = clientComputeCogs(currentNodes, overrides);
+          summaryArea.querySelector(".pis-total").textContent = `Total COGS: ${newTotal.toFixed(2)} ${n.currency || "SEK"} (preview)`;
+          renderCharts(currentNodes.map((nd) => nd.component_id === n.component_id ? { ...nd, node_cogs: Number(inp.value || 0) * Number(nd.cum_quantity) } : nd), newTotal, "estimate");
+        };
+        return el("tr", {}, [
+          el("td", {}, n.part_number || ""), el("td", {}, n.name || ""),
+          el("td", {}, maturityBadge(n.cost_maturity)), el("td", {}, inp),
+        ]);
+      });
+      overridesArea.replaceChildren(
+        el("h4", { style: "margin-bottom:0.5rem" }, "Override unit prices (simulation)"),
+        el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
+          el("thead", {}, el("tr", {}, ["Part #", "Name", "Cost maturity", "Unit price override"].map((h) => el("th", {}, h)))),
+          el("tbody", {}, ...tbody),
+        ])),
+        el("button", { class: "btn btn-sm btn-primary", type: "button", style: "margin-top:0.5rem", onclick: onSave }, "Save to scenario"),
+      );
+    }
+
+    async function loadCanvas() {
+      const rootId = rootIdInput.value.trim();
+      const scenarioId = scenarioSel.value || null;
+      if (!rootId) return;
+      chartsArea.replaceChildren(el("div", { class: "loading" }, "Computing…"));
+      overridesArea.replaceChildren();
+      summaryArea.replaceChildren();
+      try {
+        let nodes, total, confidenceLabel, overridesMap = {};
+        if (scenarioId) {
+          const r = await API.call(token, "getScenarioResult", { scenario_id: scenarioId });
+          nodes = r.nodes_with_cost || []; total = r.total_cogs || 0; confidenceLabel = r.confidence_label || "estimate";
+          (r.overrides || []).filter((o) => o.override_type === "unit_price").forEach((o) => { overridesMap[o.component_id] = o.value?.unit_price; });
+        } else {
+          const r = await API.call(token, "computeCogs", { root_component_id: rootId, scenario_id: null });
+          nodes = r.detail || []; total = r.total_cogs || 0; confidenceLabel = r.confidence_label || "estimate";
+        }
+        currentNodes = nodes; currentTotal = total; currentOverrides = { ...overridesMap };
+        summaryArea.replaceChildren(
+          el("p", { class: "pis-total", style: "font-weight:600;font-size:1.05rem" }, `Total COGS: ${Number(total).toFixed(2)} ${nodes[0]?.currency || "SEK"}`),
+          el("p", { class: "muted", style: "font-size:0.82rem" }, `Confidence: `).appendChild(maturityBadge(confidenceLabel)) && null,
+        );
+        const confBadge = maturityBadge(confidenceLabel);
+        summaryArea.replaceChildren(
+          el("p", { class: "pis-total", style: "font-weight:600;font-size:1.05rem" }, `Total COGS: ${Number(total).toFixed(2)} ${nodes[0]?.currency || "SEK"}`),
+          el("p", { class: "muted", style: "font-size:0.82rem;display:flex;gap:0.4rem;align-items:center" }, ["Confidence: ", confBadge]),
+        );
+        renderCharts(nodes, total, confidenceLabel);
+        renderOverrides(nodes, currentOverrides, async () => {
+          if (!scenarioId) { alert("Select or create a scenario first to save overrides."); return; }
+          const entries = Object.entries(currentOverrides).filter(([, v]) => v != null);
+          for (const [cid, price] of entries) {
+            await API.call(token, "applyScenarioOverride", { scenario_id: scenarioId, component_id: cid, override_type: "unit_price", value: { unit_price: Number(price) } });
+          }
+          await loadCanvas();
+        });
+      } catch (ex) {
+        chartsArea.replaceChildren(el("div", { class: "error" }, `Couldn't compute COGS: ${ex.message}`));
+      }
+    }
+
+    async function refreshScenarios(rootId) {
+      if (!rootId) return;
+      try {
+        const { scenarios } = await API.call(token, "listScenarios", { base_component_id: rootId });
+        scenarioSel.replaceChildren(el("option", { value: "" }, "— Production BOM —"), ...(scenarios || []).map((s) => el("option", { value: s.id }, s.name)));
+      } catch { /* non-fatal */ }
+    }
+
+    newScenarioBtn.onclick = async () => {
+      const rootId = rootIdInput.value.trim(); if (!rootId) { alert("Enter a root component ID first."); return; }
+      const name = prompt("Scenario name:");
+      if (!name) return;
+      const { id } = await API.call(token, "createScenario", { name, base_component_id: rootId });
+      await refreshScenarios(rootId);
+      scenarioSel.value = id;
+    };
+
+    loadBtn.onclick = async () => { await refreshScenarios(rootIdInput.value.trim()); await loadCanvas(); };
+
+    wrap.replaceChildren(
+      el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem" }, [
+        rootIdInput, scenarioSel, loadBtn, newScenarioBtn,
+      ]),
+      summaryArea, chartsArea, overridesArea,
+    );
+    return wrap;
+  }
+
+  // --- Status overview dashboard ---------------------------------------------
+  async function statusOverviewView(token) {
+    const wrap = el("div", { class: "pis-overview-wrap" });
+    const rootIdInput = el("input", { class: "up-text", type: "text", placeholder: "Root component ID", style: "width:min(320px,100%)" });
+    const loadBtn = el("button", { class: "btn btn-sm", type: "button" }, "Load");
+    const resultArea = el("div", { style: "margin-top:1rem" });
+
+    loadBtn.onclick = async () => {
+      const rootId = rootIdInput.value.trim(); if (!rootId) return;
+      resultArea.replaceChildren(el("div", { class: "loading" }, "Analysing…"));
+      try {
+        const { nodes } = await API.call(token, "getBom", { root_component_id: rootId, max_depth: 99 });
+        if (!nodes || !nodes.length) { resultArea.replaceChildren(el("div", { class: "notice" }, "No components found.")); return; }
+        // Lifecycle status distribution
+        const lcCounts = {};
+        const lcOrder = ["concept", "specified", "sourcing", "approved", "released", "obsolete"];
+        lcOrder.forEach((s) => { lcCounts[s] = 0; });
+        nodes.forEach((n) => { if (lcCounts[n.lifecycle_status] !== undefined) lcCounts[n.lifecycle_status]++; });
+        const lcPills = lcOrder.map((s) => {
+          const c = lcCounts[s];
+          const color = LIFECYCLE_COLORS[s];
+          return el("span", { style: `background:${color}20;color:${color};border:1px solid ${color}60;padding:4px 12px;border-radius:99px;font-size:0.85rem;cursor:default`, title: `${c} component${c !== 1 ? "s" : ""} at ${s}` }, `${s}: ${c}`);
+        });
+        resultArea.replaceChildren(
+          el("h4", { style: "margin-bottom:0.5rem" }, "Lifecycle status distribution"),
+          el("div", { style: "display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1.5rem" }, ...lcPills),
+          el("p", { class: "muted", style: "font-size:0.82rem" }, `${nodes.length} total components in BOM (all depths).`),
+        );
+      } catch (ex) {
+        resultArea.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
+      }
+    };
+
+    wrap.replaceChildren(
+      el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap" }, [rootIdInput, loadBtn]),
+      resultArea,
+    );
+    return wrap;
+  }
+
+  // --- Main renderProduct entry point ----------------------------------------
+  async function renderProduct(role, mount) {
+    const token = API.getToken();
+    mount.replaceChildren(subTabs("product", [
+      { id: "bom", label: "BOM Tree", icon: "layers", build: () => { const m = el("div", {}); bomTreeView(token).then((v) => m.replaceChildren(v)); return m; } },
+      { id: "canvas", label: "Cost Canvas", icon: "expand", build: () => { const m = el("div", {}); costCanvasView(token).then((v) => m.replaceChildren(v)); return m; } },
+      { id: "overview", label: "Status Overview", icon: "eye", build: () => { const m = el("div", {}); statusOverviewView(token).then((v) => m.replaceChildren(v)); return m; } },
+    ]));
+  }
+
   /* ---------------- EU Directive Relationship Analyser (D3) ---------------- */
   const D3_CDN = "https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js";
   // Node colour by compliance coverage; edge style by relation type / source.
@@ -4082,6 +4543,8 @@
     if (acctPanel && API.isAdmin()) renderAccounts(role, acctPanel);
     const l2Panel = $("#level2-panel");
     if (l2Panel && role === "rushroom") renderLevel2(role, l2Panel);
+    const prodPanel = $("#product-panel");
+    if (prodPanel && role === "rushroom") renderProduct(role, prodPanel);
   }
 
   // Hide tabs/panels the signed-in user isn't entitled to.
@@ -4093,6 +4556,7 @@
     };
     gate("tab-deviations", "deviations-panel", role === "rushroom");
     gate("tab-level2", "level2-panel", role === "rushroom");
+    gate("tab-product", "product-panel", role === "rushroom");
     gate("tab-accounts", "accounts-panel", !!admin);
   }
 
