@@ -335,7 +335,7 @@ const COST_ACTIONS = new Set([
 
 // Actions that spend Anthropic tokens (metered + capped).
 const AI_ACTIONS = new Set([
-  "suggestDocumentVersion", "suggestStandardMetadata", "suggestFileMetadata", "runDeviationScan",
+  "suggestDocumentVersion", "suggestStandardMetadata", "suggestFileMetadata", "suggestComponentMetadata", "runDeviationScan",
   "extractStandardClauses", "generateInterpretations", "suggestRequirementLinks",
   "inferDirectiveRelations", "generateComplianceNarrative", "suggestClassifications",
 ]);
@@ -400,6 +400,19 @@ const FILE_META_SCHEMA = {
     summary: { type: "string" },
   },
   required: ["name", "category", "version", "effective_date", "kind", "summary"],
+};
+const COMPONENT_META_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    part_number: { type: "string" },
+    name: { type: "string" },
+    type: { type: "string" },
+    unit_of_measure: { type: "string" },
+    description: { type: "string" },
+    summary: { type: "string" },
+  },
+  required: ["part_number", "name", "type", "unit_of_measure", "description", "summary"],
 };
 const FINDINGS_SCHEMA = {
   type: "object",
@@ -1851,6 +1864,64 @@ Deno.serve(async (req) => {
       jurisdiction: String(parsed.jurisdiction || ""),
       version: String(parsed.version || ""),
       effectiveDate: String(parsed.effective_date || ""),
+      summary: String(parsed.summary || ""),
+      usage: usageOf(apiJson),
+    });
+  }
+
+  if (action === "suggestComponentMetadata") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    if (!ANTHROPIC_API_KEY) return json({ error: "AI is not configured — set ANTHROPIC_API_KEY in the function secrets." }, 400);
+    const path = String(body.path ?? "").trim();
+    const fileName = String(body.fileName ?? "file").trim();
+    if (!path) return json({ error: "path required" }, 400);
+
+    const system = `You are reading a product datasheet, technical drawing, or component specification. Extract the component's catalogue metadata precisely from the document. Return a JSON object:
+- part_number: the manufacturer part number or SKU exactly as printed (e.g. "LED-STRIP-2835-24V-12W", "WAGO-221-412"). If none is visible, "".
+- name: the component's concise descriptive name (e.g. "LED Strip 24V 12W/m", "PSU 24V 60W", "Wago 221 Lever Connector 2-pin"). Should be specific enough to identify the part.
+- type: exactly one of "raw_material", "purchased_part", "sub_assembly", "finished_good". Discrete bought parts (strips, connectors, PSUs, cables) → "purchased_part"; raw bulk material → "raw_material"; pre-assembled unit with sub-parts → "sub_assembly"; a complete sellable product → "finished_good".
+- unit_of_measure: the natural unit this part is counted in. Use "ea" for discrete pieces, "m" for length, "kg" for mass, "l" for volume, "roll" for reeled goods. Default "ea" if unclear.
+- description: one sentence describing what this component is and what it does in the product.
+- summary: one sentence on the document itself (for the upload status bar).`;
+
+    const content: any[] = [
+      { type: "text", text: "Extract the component metadata from this document." },
+      await fileBlock(DOC_BUCKET, path, fileName),
+    ];
+
+    let apiJson: any;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+          model: SCAN_MODEL,
+          max_tokens: 1500,
+          thinking: { type: "adaptive" },
+          output_config: { effort: "low", format: { type: "json_schema", schema: COMPONENT_META_SCHEMA } },
+          system,
+          messages: [{ role: "user", content }],
+        }),
+      });
+      apiJson = await res.json();
+      await meterAi(apiJson);
+      if (!res.ok) return json({ error: `Claude API error (${res.status}): ${apiJson?.error?.message || "unknown"}` }, 502);
+    } catch (e) {
+      return json({ error: `Claude API request failed: ${(e as Error).message}` }, 502);
+    }
+    if (apiJson.stop_reason === "refusal") return json({ error: "The AI declined to read this document." }, 502);
+    const textBlock = (apiJson.content || []).find((b: any) => b.type === "text");
+    let parsed: any;
+    try { parsed = JSON.parse(textBlock?.text || "{}"); }
+    catch { return json({ error: "The AI response could not be parsed. Try again or fill the fields manually." }, 502); }
+    const VALID_TYPES = ["raw_material", "purchased_part", "sub_assembly", "finished_good"];
+    return json({
+      ok: true,
+      part_number: String(parsed.part_number || ""),
+      name: String(parsed.name || ""),
+      type: VALID_TYPES.includes(parsed.type) ? parsed.type : "purchased_part",
+      unit_of_measure: String(parsed.unit_of_measure || "ea"),
+      description: String(parsed.description || ""),
       summary: String(parsed.summary || ""),
       usage: usageOf(apiJson),
     });
