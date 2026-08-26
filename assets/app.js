@@ -3566,6 +3566,26 @@
           el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0" }, [
             el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh) }, "+ child"),
             el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openComponentDetail(n.id, token, detailPanel) }, "Details"),
+            el("button", {
+              class: "btn btn-sm", type: "button",
+              style: "padding:1px 5px;font-size:0.7rem;color:#e05454;border-color:#e0545440",
+              onclick: async (ev) => {
+                ev.stopPropagation();
+                const childCount = (childrenOf[n.id] || []).length;
+                const msg = childCount
+                  ? `Delete "${n.name}"?\n\nThis component has ${childCount} direct child${childCount > 1 ? "ren" : ""}. They will become top-level roots — their own sub-trees are preserved.\n\nThis cannot be undone.`
+                  : `Delete "${n.name}"?\n\nThis cannot be undone.`;
+                if (!confirm(msg)) return;
+                ev.target.disabled = true; ev.target.textContent = "…";
+                try {
+                  await API.post(token, "deleteComponent", { component_id: n.id });
+                  onRefresh();
+                } catch (ex) {
+                  ev.target.disabled = false; ev.target.textContent = "Delete";
+                  alert(`Delete failed: ${ex.message}`);
+                }
+              },
+            }, "Delete"),
           ]),
         ]);
         wrap.append(row);

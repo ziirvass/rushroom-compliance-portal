@@ -3600,6 +3600,51 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     return json({ ok: true });
   }
 
+  // --- Delete a component and all its related data --------------------------
+  // Children of the deleted component become top-level roots (their edges to
+  // this component are deleted; their own subtrees are untouched).
+  if (action === "deleteComponent") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    const { data: comp } = await tdb("bom_components").select("id").eq("id", component_id).maybeSingle();
+    if (!comp) return json({ error: "Component not found" }, 404);
+
+    // Null out any product_passport root references (nullable FK)
+    await tdb("product_passports").update({ root_component_id: null }).eq("root_component_id", component_id);
+
+    // Delete scenario overrides that reference this component
+    await tdb("scenario_overrides").delete().eq("component_id", component_id);
+
+    // Delete cost scenarios rooted at this component (and their overrides + snapshots)
+    const { data: ownScenarios } = await tdb("cost_scenarios").select("id").eq("base_component_id", component_id);
+    if (ownScenarios?.length) {
+      const ids = ownScenarios.map((s: any) => s.id);
+      await tdb("scenario_overrides").delete().in("scenario_id", ids);
+      await tdb("cogs_snapshots").delete().in("scenario_id", ids);
+      await tdb("cost_scenarios").delete().in("id", ids);
+    }
+
+    // Delete COGS snapshots for this root
+    await tdb("cogs_snapshots").delete().eq("root_component_id", component_id);
+
+    // Delete component-level data
+    await tdb("component_documents").delete().eq("component_id", component_id);
+    await tdb("component_costs").delete().eq("component_id", component_id);
+    await tdb("landed_cost_factors").delete().eq("component_id", component_id);
+    await tdb("component_materials").delete().eq("component_id", component_id);
+    await tdb("bom_component_versions").delete().eq("component_id", component_id);
+
+    // Delete all BOM edges where this component is parent or child (both directions)
+    await tdb("bom_edges").delete().eq("parent_id", component_id);
+    await tdb("bom_edges").delete().eq("child_id", component_id);
+
+    // Finally delete the component itself
+    const { error: delErr } = await tdb("bom_components").delete().eq("id", component_id);
+    if (delErr) return json({ error: delErr.message }, 400);
+    return json({ ok: true });
+  }
+
   // --- Materials: get for a component ---------------------------------------
   if (action === "getComponentMaterials") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
