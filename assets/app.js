@@ -3495,85 +3495,93 @@
       childrenOf[e.parent_id].push(e);
     });
 
-    function renderNode(nodeId, qty, depth) {
-      const n = nodeMap[nodeId];
-      if (!n) return null;
-      const children = (childrenOf[nodeId] || []);
-      const hasChildren = children.length > 0;
-      const cogsPct = (cogs_by_node || {})[nodeId];
-      const heatBg = cogsPct >= 50 ? "#e0545415" : cogsPct >= 20 ? "#e5a32615" : "transparent";
-      const heatBorder = cogsPct >= 50 ? "#e05454" : cogsPct >= 20 ? "#e5a326" : cogsPct >= 5 ? "#4a9eed" : "var(--border,#e2e8f0)";
+    // Collapsed set: posNums whose children are hidden
+    const collapsed = new Set();
 
-      const toggleIcon = el("span", {
-        style: "width:1.1rem;text-align:center;flex-shrink:0;font-size:0.75rem;color:var(--muted,#8b93a1);user-select:none;cursor:pointer;transition:transform 0.1s",
-      }, hasChildren ? "▼" : "·");
-
-      const addChildBtn = el("button", {
-        class: "btn btn-sm", type: "button",
-        title: "Add child component",
-        style: "padding:1px 6px;font-size:0.72rem;flex-shrink:0;opacity:0.6",
-        onclick: (ev) => { ev.stopPropagation(); openAddChildModal(n, allComponents, token, onRefresh); },
-      }, "+ child");
-
-      const row = el("div", {
-        style: `display:flex;align-items:center;gap:0.35rem;padding:0.3rem 0.4rem;border-radius:5px;background:${heatBg};border-left:3px solid ${heatBorder};margin-bottom:2px`,
-      }, [
-        toggleIcon,
-        el("span", { style: "font-family:monospace;font-size:0.76rem;color:var(--muted,#8b93a1);flex-shrink:0;white-space:nowrap" }, n.part_number),
-        el("span", { style: "font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, n.name),
-        qty > 1 ? el("span", { style: "font-size:0.74rem;color:var(--muted,#8b93a1);flex-shrink:0" }, `×${qty}`) : null,
-        lifecycleBadge(n.lifecycle_status),
-        cogsPct != null ? el("span", { style: "font-size:0.71rem;color:var(--muted,#8b93a1);flex-shrink:0" }, `${cogsPct}%`) : null,
-        addChildBtn,
-        el("button", {
-          class: "btn btn-sm", type: "button",
-          style: "padding:1px 6px;font-size:0.72rem;flex-shrink:0",
-          onclick: (ev) => { ev.stopPropagation(); openComponentDetail(n.id, token, detailPanel); },
-        }, "Details"),
-      ].filter(Boolean));
-
-      // Children container — always present so we can append dynamically
-      const childWrap = el("div", {
-        style: `margin-left:1.25rem;padding-left:0.6rem;border-left:2px solid var(--border,#e2e8f0);margin-top:1px`,
-      });
-
-      let open = depth < 2;
-      function applyOpen() {
-        childWrap.style.display = (hasChildren || open) ? (open ? "" : "none") : "none";
-        toggleIcon.textContent = hasChildren ? (open ? "▼" : "▶") : "·";
-        toggleIcon.style.cursor = hasChildren ? "pointer" : "default";
-      }
-      applyOpen();
-      if (!hasChildren) childWrap.style.display = "none";
-
-      if (hasChildren) {
-        toggleIcon.onclick = () => { open = !open; applyOpen(); };
-        row.style.cursor = "pointer";
-        row.onclick = (ev) => { if (ev.target === row || ev.target === toggleIcon) { open = !open; applyOpen(); } };
-        children.forEach((e) => {
-          const child = renderNode(e.child_id, e.quantity, depth + 1);
-          if (child) childWrap.append(child);
+    // DFS walk — builds a flat ordered list of rows with position numbers and
+    // ancestor-last flags (used to draw ├─ / └─ / │ connectors correctly at any depth)
+    function buildRows() {
+      const rows = [];
+      function walk(nodeId, qty, posNum, depth, ancestorLastFlags) {
+        const n = nodeMap[nodeId];
+        if (!n) return;
+        const children = childrenOf[nodeId] || [];
+        rows.push({ n, qty, posNum, depth, ancestorLastFlags: [...ancestorLastFlags], hasChildren: children.length > 0 });
+        if (collapsed.has(posNum)) return;
+        children.forEach((e, i) => {
+          walk(e.child_id, e.quantity, `${posNum}.${i + 1}`, depth + 1, [...ancestorLastFlags, i === children.length - 1]);
         });
       }
-
-      const node = el("div", { class: "bom-node" });
-      node.append(row, childWrap);
-      return node;
+      walk(rootId, 1, "1", 0, []);
+      return rows;
     }
 
-    const legend = el("div", { style: "display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.6rem;font-size:0.72rem;color:var(--muted,#8b93a1);align-items:center" }, [
-      el("span", {}, "COGS heat-map:"),
-      el("span", { style: "border-left:3px solid #e05454;padding-left:4px" }, "≥50%"),
-      el("span", { style: "border-left:3px solid #e5a326;padding-left:4px" }, "≥20%"),
-      el("span", { style: "border-left:3px solid #4a9eed;padding-left:4px" }, "≥5%"),
-      el("span", { style: "border-left:3px solid var(--border,#e2e8f0);padding-left:4px" }, "<5%"),
-    ]);
+    // Build ASCII tree connector: e.g. depth=3, flags=[false,true,false] → "│  └─ "
+    function connector(depth, ancestorLastFlags) {
+      if (depth === 0) return "";
+      let s = "";
+      for (let i = 0; i < depth - 1; i++) s += ancestorLastFlags[i] ? "   " : "│  ";
+      s += ancestorLastFlags[depth - 1] ? "└─ " : "├─ ";
+      return s;
+    }
 
-    const tree = renderNode(rootId, 1, 0);
-    container.replaceChildren(
-      legend,
-      el("div", { class: "pis-tree", style: "font-size:0.88rem" }, tree || el("div", { class: "notice" }, "Empty BOM.")),
-    );
+    function render() {
+      const rows = buildRows();
+      const wrap = el("div", { style: "font-size:0.84rem;overflow-x:auto" });
+
+      // Column header
+      wrap.append(el("div", {
+        style: "display:grid;grid-template-columns:6rem 1fr 4.5rem 7rem 3.5rem auto;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem",
+      }, ["Pos.", "Component", "Qty", "Status", "COGS", ""].map((t) => el("span", {}, t))));
+
+      rows.forEach(({ n, qty, posNum, depth, ancestorLastFlags, hasChildren }) => {
+        const cogsPct = (cogs_by_node || {})[n.id];
+        const heatColor = cogsPct >= 50 ? "#e05454" : cogsPct >= 20 ? "#e5a326" : cogsPct >= 5 ? "#4a9eed" : null;
+        const isCollapsed = collapsed.has(posNum);
+
+        // Toggle button (only for nodes with children)
+        const tog = hasChildren
+          ? el("span", {
+              style: "cursor:pointer;user-select:none;font-size:0.65rem;margin-right:2px;color:var(--muted,#8b93a1)",
+              onclick: (ev) => { ev.stopPropagation(); if (isCollapsed) collapsed.delete(posNum); else collapsed.add(posNum); render(); },
+            }, isCollapsed ? "▶" : "▼")
+          : el("span", { style: "display:inline-block;width:0.7rem" });
+
+        // Component cell: monospace connector + toggle + part# + name
+        const compCell = el("div", { style: "display:flex;align-items:center;min-width:0;overflow:hidden" }, [
+          el("span", { style: "font-family:monospace;white-space:pre;color:var(--muted,#8b93a1);font-size:0.76rem;flex-shrink:0;opacity:0.6" }, connector(depth, ancestorLastFlags)),
+          tog,
+          el("span", { style: "font-family:monospace;font-size:0.74rem;color:var(--muted,#8b93a1);flex-shrink:0;margin-right:0.35rem" }, n.part_number),
+          el("span", { style: "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, n.name),
+        ]);
+
+        const row = el("div", {
+          style: `display:grid;grid-template-columns:6rem 1fr 4.5rem 7rem 3.5rem auto;gap:0.5rem;align-items:center;padding:0.22rem 0.5rem;border-left:3px solid ${heatColor || "transparent"};border-radius:3px;margin-bottom:1px`,
+        }, [
+          el("span", { style: "font-family:monospace;font-size:0.78rem;font-weight:600;color:var(--muted,#8b93a1)" }, posNum),
+          compCell,
+          el("span", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);text-align:right" }, qty !== 1 ? `×${qty}` : ""),
+          lifecycleBadge(n.lifecycle_status),
+          heatColor ? el("span", { style: `font-size:0.72rem;font-weight:600;color:${heatColor}` }, `${cogsPct}%`) : el("span"),
+          el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0" }, [
+            el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh) }, "+ child"),
+            el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openComponentDetail(n.id, token, detailPanel) }, "Details"),
+          ]),
+        ]);
+        wrap.append(row);
+      });
+
+      const legend = el("div", { style: "display:flex;gap:0.6rem;flex-wrap:wrap;margin-top:0.75rem;font-size:0.7rem;color:var(--muted,#8b93a1);align-items:center" }, [
+        el("span", {}, "COGS:"),
+        el("span", { style: "border-left:3px solid #e05454;padding-left:4px" }, "≥50%"),
+        el("span", { style: "border-left:3px solid #e5a326;padding-left:4px" }, "≥20%"),
+        el("span", { style: "border-left:3px solid #4a9eed;padding-left:4px" }, "≥5%"),
+      ]);
+
+      container.replaceChildren(wrap, legend);
+    }
+
+    render();
   }
 
   // --- Add-child modal: pick an existing component and link it ---------------

@@ -1,5 +1,5 @@
 # Rushroom Compliance Portal — Roadmap
-_Last updated: 2026-08-25 · Auto-maintained by /ship_
+_Last updated: 2026-08-26 · Auto-maintained by /ship_
 
 ## Now — In Progress
 - PROP-012 Multi-tenant SaaS (organizations, memberships, invitations, platform_audit, ai_usage_events) — Stages 5b+6 remaining
