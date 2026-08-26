@@ -406,13 +406,13 @@ const COMPONENT_META_SCHEMA = {
   additionalProperties: false,
   properties: {
     part_number: { type: "string" },
-    name: { type: "string" },
-    type: { type: "string" },
-    unit_of_measure: { type: "string" },
+    oem_number:  { type: "string" },
+    name:        { type: "string" },
+    type:        { type: "string" },
     description: { type: "string" },
-    summary: { type: "string" },
+    summary:     { type: "string" },
   },
-  required: ["part_number", "name", "type", "unit_of_measure", "description", "summary"],
+  required: ["part_number", "oem_number", "name", "type", "description", "summary"],
 };
 const FINDINGS_SCHEMA = {
   type: "object",
@@ -1877,11 +1877,11 @@ Deno.serve(async (req) => {
     if (!path) return json({ error: "path required" }, 400);
 
     const system = `You are reading a product datasheet, technical drawing, or component specification. Extract the component's catalogue metadata precisely from the document. Return a JSON object:
-- part_number: the manufacturer part number or SKU exactly as printed (e.g. "LED-STRIP-2835-24V-12W", "WAGO-221-412"). If none is visible, "".
-- name: the component's concise descriptive name (e.g. "LED Strip 24V 12W/m", "PSU 24V 60W", "Wago 221 Lever Connector 2-pin"). Should be specific enough to identify the part.
-- type: exactly one of "raw_material", "purchased_part", "sub_assembly", "finished_good". Discrete bought parts (strips, connectors, PSUs, cables) → "purchased_part"; raw bulk material → "raw_material"; pre-assembled unit with sub-parts → "sub_assembly"; a complete sellable product → "finished_good".
-- unit_of_measure: the natural unit this part is counted in. Use "ea" for discrete pieces, "m" for length, "kg" for mass, "l" for volume, "roll" for reeled goods. Default "ea" if unclear.
-- description: one sentence describing what this component is and what it does in the product.
+- part_number: the manufacturer's own part number or SKU exactly as printed (e.g. "LED-STRIP-2835-24V-12W", "WAGO-221-412"). If none is visible, "".
+- oem_number: the OEM or distributor reference number if printed separately from the main part number (e.g. a Farnell order code, RS part number, or second manufacturer reference). If not present, "".
+- name: the component's concise descriptive name (e.g. "LED Strip 24V 12W/m", "PSU 24V 60W", "Wago 221 Lever Connector 2-pin").
+- type: exactly one of "Product", "Component", "SparePart", "Refurb". A complete sellable product → "Product"; a bought-in part or sub-assembly used inside a product → "Component"; a service/replacement part → "SparePart"; a refurbished unit → "Refurb".
+- description: one sentence describing what this component is and what purpose it serves.
 - summary: one sentence on the document itself (for the upload status bar).`;
 
     const content: any[] = [
@@ -1914,15 +1914,15 @@ Deno.serve(async (req) => {
     let parsed: any;
     try { parsed = JSON.parse(textBlock?.text || "{}"); }
     catch { return json({ error: "The AI response could not be parsed. Try again or fill the fields manually." }, 502); }
-    const VALID_TYPES = ["raw_material", "purchased_part", "sub_assembly", "finished_good"];
+    const VALID_TYPES = ["Product", "Component", "SparePart", "Refurb"];
     return json({
       ok: true,
       part_number: String(parsed.part_number || ""),
-      name: String(parsed.name || ""),
-      type: VALID_TYPES.includes(parsed.type) ? parsed.type : "purchased_part",
-      unit_of_measure: String(parsed.unit_of_measure || "ea"),
+      oem_number:  String(parsed.oem_number  || ""),
+      name:        String(parsed.name        || ""),
+      type:        VALID_TYPES.includes(parsed.type) ? parsed.type : "Component",
       description: String(parsed.description || ""),
-      summary: String(parsed.summary || ""),
+      summary:     String(parsed.summary     || ""),
       usage: usageOf(apiJson),
     });
   }
@@ -3438,7 +3438,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   if (action === "listComponents") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
     const { data: comps, error: ce } = await tdb("bom_components")
-      .select("id, part_number, name, type, lifecycle_status, unit_of_measure")
+      .select("id, part_number, oem_number, name, type, lifecycle_status")
       .order("name");
     if (ce) return json({ error: ce.message }, 400);
     const { data: edges } = await db.from("bom_edges")
@@ -3453,13 +3453,24 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // --- BOM: add a new component (creates the node + first version "A") ------
   if (action === "addComponent") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
-    const { part_number, name, type, unit_of_measure, description, notes } = body;
-    if (!part_number || !name || !type) return json({ error: "part_number, name and type are required" }, 400);
-    const validTypes = ["raw_material", "purchased_part", "sub_assembly", "finished_good"];
+    const { name, type, oem_number, description, notes } = body;
+    let { part_number } = body;
+    if (!name || !type) return json({ error: "name and type are required" }, 400);
+    const validTypes = ["Product", "Component", "SparePart", "Refurb"];
     if (!validTypes.includes(type)) return json({ error: "Invalid type" }, 400);
+    // Auto-generate part number if not supplied
+    if (!part_number || !String(part_number).trim()) {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const rand = new Uint8Array(8);
+      crypto.getRandomValues(rand);
+      const suffix = Array.from(rand).map((b) => chars[b % chars.length]).join("");
+      const d = new Date();
+      const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
+      part_number = `RR-${ym}-${suffix}`;
+    }
     const { data: comp, error: ce } = await tdb("bom_components").insert({
-      part_number: String(part_number), name: String(name), type,
-      unit_of_measure: unit_of_measure || "ea",
+      part_number: String(part_number).trim(), name: String(name), type,
+      oem_number: oem_number ? String(oem_number).trim() : null,
       description: description || null, notes: notes || null,
       created_by: session.uid || null,
     }).select("id").maybeSingle();
@@ -3475,13 +3486,13 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // --- BOM: update component metadata (never part_number or type) -----------
   if (action === "updateComponent") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
-    const { component_id, name, description, notes, unit_of_measure } = body;
+    const { component_id, name, description, notes, oem_number } = body;
     if (!component_id) return json({ error: "component_id required" }, 400);
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (name !== undefined) patch.name = String(name);
     if (description !== undefined) patch.description = description;
     if (notes !== undefined) patch.notes = notes;
-    if (unit_of_measure !== undefined) patch.unit_of_measure = String(unit_of_measure);
+    if (oem_number !== undefined) patch.oem_number = oem_number ? String(oem_number).trim() : null;
     const { error } = await tdb("bom_components").update(patch).eq("id", component_id);
     if (error) return json({ error: error.message }, 400);
     return json({ ok: true });

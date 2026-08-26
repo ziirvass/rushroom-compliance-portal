@@ -3770,79 +3770,82 @@
     const overlay = el("div", { class: "modal-overlay", style: "position:fixed;inset:0;background:#0008;z-index:1000;display:flex;align-items:center;justify-content:center;padding:1rem" });
     const dialog = el("div", { class: "modal-dialog", style: "background:var(--bg,#fff);border-radius:8px;padding:1.5rem;width:min(540px,95vw);max-height:90vh;overflow-y:auto" });
 
-    // --- Mode toggle: Parent (Product) vs Child (Component) ------------------
-    let mode = "parent"; // "parent" | "child"
+    // --- Mode toggle ---------------------------------------------------------
+    let mode = "parent";
     const modeBar = el("div", { style: "display:flex;gap:0;margin-bottom:1.25rem;border:1px solid var(--border,#e2e8f0);border-radius:6px;overflow:hidden" });
     function modeBtn(id, label, desc) {
-      const btn = el("button", {
+      return el("button", {
         class: "btn", type: "button",
         style: "flex:1;border-radius:0;border:none;padding:0.55rem 0.75rem;text-align:left;transition:background 0.1s",
         onclick: () => { mode = id; syncMode(); },
-      }, [
-        el("div", { style: "font-weight:700;font-size:0.84rem" }, label),
-        el("div", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);margin-top:1px" }, desc),
-      ]);
-      return btn;
+      }, [el("div", { style: "font-weight:700;font-size:0.84rem" }, label),
+          el("div", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);margin-top:1px" }, desc)]);
     }
-    const btnParent = modeBtn("parent", "Parent — Product / Assembly", "Top-level item or sub-assembly. Becomes a root in the BOM tree.");
-    const btnChild  = modeBtn("child",  "Child — Component / Part",   "Bought part, raw material, or sub-component. Attached to a parent.");
+    const btnParent = modeBtn("parent", "Parent — Product / Assembly", "Top-level item. Becomes a root in the BOM tree.");
+    const btnChild  = modeBtn("child",  "Child — Component / Part",   "Bought part or sub-component. Attached to a parent.");
     modeBar.append(btnParent, btnChild);
 
+    // --- Part-number generator (client-side pre-fill) ------------------------
+    function genPN() {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let s = "";
+      for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+      const now = new Date();
+      return `RR-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${s}`;
+    }
+
     // --- Fields --------------------------------------------------------------
-    const TYPE_OPTS = [["finished_good", "Finished good"], ["sub_assembly", "Sub-assembly"], ["purchased_part", "Purchased part"], ["raw_material", "Raw material"]];
-    const pn   = el("input",    { class: "up-text", type: "text", placeholder: "e.g. LED-STRIP-001 (optional)" });
+    const TYPE_OPTS = [["Product", "Product"], ["Component", "Component"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"]];
+    const pn   = el("input",    { class: "up-text", type: "text", placeholder: "Auto-generated if left empty" });
+    const oem  = el("input",    { class: "up-text", type: "text", placeholder: "OEM / distributor reference (optional)" });
     const nm   = el("input",    { class: "up-text", type: "text", placeholder: "Name" });
     const typ  = el("select",   { class: "up-text" }, ...TYPE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
-    const uom  = el("input",    { class: "up-text", type: "text", placeholder: "ea", value: "ea" });
-    const desc = el("textarea", { class: "up-text", rows: "2", placeholder: "Description (optional)" });
+    const desc = el("textarea", { class: "up-text", rows: "2", placeholder: "Purpose — what does this part do?" });
+
+    // Pre-fill part number so user can see what will be saved (still editable)
+    pn.value = genPN();
 
     function syncMode() {
       btnParent.style.background = mode === "parent" ? "var(--accent,#2fa564)" : "";
       btnParent.style.color      = mode === "parent" ? "#fff" : "";
       btnChild.style.background  = mode === "child"  ? "var(--accent,#2fa564)" : "";
       btnChild.style.color       = mode === "child"  ? "#fff" : "";
-      typ.value = mode === "parent" ? "finished_good" : "purchased_part";
+      typ.value = mode === "parent" ? "Product" : "Component";
     }
     syncMode();
 
-    // --- Upload zone + AI autofill (optional) --------------------------------
+    // --- Upload zone + AI autofill -------------------------------------------
     const statusEl = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
-    let uploadedFile = null;
 
     const autofill = async (up) => {
       if (!up) return;
-      uploadedFile = up;
       statusEl.className = "up-status"; statusEl.textContent = "✨ Reading the file with AI…";
       try {
         const meta = await API.post(token, "suggestComponentMetadata", { path: up.path, fileName: up.fileName });
-        if (meta.part_number) pn.value   = meta.part_number;
-        if (meta.name)        nm.value   = meta.name;
+        if (meta.part_number) pn.value  = meta.part_number;
+        if (meta.oem_number)  oem.value = meta.oem_number;
+        if (meta.name)        nm.value  = meta.name;
         if (meta.type && TYPE_OPTS.some(([v]) => v === meta.type)) typ.value = meta.type;
-        if (meta.unit_of_measure) uom.value = meta.unit_of_measure;
         if (meta.description) desc.value = meta.description;
         statusEl.className = "up-status ok";
-        statusEl.textContent = meta.summary ? `AI read: ${meta.summary} — review the fields and approve.` : "AI filled the fields — review and approve.";
+        statusEl.textContent = meta.summary ? `AI read: ${meta.summary} — review and create.` : "AI filled the fields — review and create.";
         zone.finishProcessing(true);
         nm.focus();
       } catch (ex) {
         statusEl.className = "up-status err";
-        statusEl.textContent = `Couldn't read the file automatically: ${ex.message}. Fill the fields manually.`;
+        statusEl.textContent = `Couldn't read the file: ${ex.message}. Fill the fields manually.`;
         zone.finishProcessing(false);
       }
     };
 
-    const zone = uploadZone(
-      "rushroom",
-      "documents",
-      {
-        ariaLabel: "Datasheet, drawing or specification (optional — drag & drop to auto-fill fields)",
-        hint: "Drag & drop a datasheet or spec to auto-fill fields (optional)",
-        processing: true,
-        onReady: (up) => autofill(up),
-      },
-    );
+    const zone = uploadZone("rushroom", "documents", {
+      ariaLabel: "Datasheet, drawing or specification (optional)",
+      hint: "Drag & drop a datasheet or spec to auto-fill fields (optional)",
+      processing: true,
+      onReady: (up) => autofill(up),
+    });
     const submitBtn = el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Create");
-    zone.register(submitBtn, false); // file optional; only block while uploading/processing
+    zone.register(submitBtn, false);
 
     // --- Form submit ---------------------------------------------------------
     const errEl = el("span", { class: "form-error" }, "");
@@ -3853,11 +3856,11 @@
       submitBtn.disabled = true; submitBtn.textContent = "Creating…";
       try {
         const r = await API.post(token, "addComponent", {
-          part_number:    pn.value.trim() || null,
-          name:           nm.value.trim(),
-          type:           typ.value,
-          unit_of_measure: uom.value.trim() || "ea",
-          description:    desc.value.trim() || null,
+          part_number: pn.value.trim() || null,
+          oem_number:  oem.value.trim() || null,
+          name:        nm.value.trim(),
+          type:        typ.value,
+          description: desc.value.trim() || null,
         });
         overlay.remove();
         if (onCreated) onCreated(r.id);
@@ -3874,11 +3877,22 @@
       ]),
       modeBar,
       el("p", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);margin:0 0 0.85rem" },
-        "Upload a datasheet or drawing and the AI will suggest the name and part number. Or skip the upload and fill the fields manually."),
+        "Upload a datasheet and the AI will suggest fields. Or skip the upload and fill in manually."),
       el("label", { class: "form-row", style: "display:block;margin-bottom:0.75rem" }, [
         el("span", { class: "form-label" }, "Document (optional)"), zone.el, statusEl]),
-      ...[["Part number", pn], ["Name *", nm], ["Type", typ], ["Unit of measure", uom], ["Description", desc]].map(([lbl, inp]) =>
-        el("label", { class: "form-row", style: "display:block;margin-bottom:0.5rem" }, [el("span", { class: "form-label" }, lbl), inp])),
+      ...[
+        ["Part number", pn,   "Auto-generated if left as-is — you can edit it."],
+        ["OEM number",  oem,  null],
+        ["Name *",      nm,   null],
+        ["Type",        typ,  null],
+        ["Description", desc, "What does this part do? Why is it in the product?"],
+      ].map(([lbl, inp, hint]) =>
+        el("label", { class: "form-row", style: "display:block;margin-bottom:0.5rem" }, [
+          el("span", { class: "form-label" }, lbl),
+          inp,
+          hint ? el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);display:block;margin-top:2px" }, hint) : null,
+        ].filter(Boolean)),
+      ),
       errEl,
       el("div", { style: "display:flex;gap:0.5rem;margin-top:1.1rem;justify-content:flex-end" }, [
         el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
