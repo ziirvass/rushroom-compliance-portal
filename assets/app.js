@@ -3688,10 +3688,11 @@
     panel.style.display = "";
     panel.replaceChildren(el("div", { class: "loading" }, "Loading…"));
     try {
-      const [hist, docs, mats] = await Promise.all([
-        API.post(token, "getComponentHistory", { component_id: componentId }),
+      const [hist, docs, mats, cl] = await Promise.all([
+        API.post(token, "getComponentHistory",  { component_id: componentId }),
         API.post(token, "getComponentDocuments", { component_id: componentId }),
         API.post(token, "getComponentMaterials", { component_id: componentId }),
+        API.post(token, "getComponentChangelog", { component_id: componentId }),
       ]);
       const history = hist.history || [];
       const current = history.find((v) => v.is_current) || history[0];
@@ -3753,12 +3754,59 @@
         ])) : el("div", { class: "muted" }, "No substance data yet."),
       ]);
 
+      // Change log section — immutable trigger-sourced audit trail
+      const changelog = cl.changelog || [];
+      const clRows = changelog.map((entry, i) => {
+        const prev = changelog[i + 1]; // next oldest entry
+        function diff(field, label) {
+          if (!prev) return null;
+          const a = prev[field], b = entry[field];
+          if (a === b || (a == null && b == null)) return null;
+          return el("div", { style: "font-size:0.75rem;color:var(--muted,#8b93a1);margin-top:1px" },
+            [el("span", { style: "font-weight:600;color:var(--text,#1a1f2e)" }, label + ": "),
+             el("span", { style: "text-decoration:line-through;opacity:0.6;margin-right:4px" }, a || "—"),
+             "→ ",
+             el("span", { style: "color:var(--accent,#2fa564)" }, b || "—")]);
+        }
+        const diffs = [
+          diff("part_number",      "Part #"),
+          diff("oem_number",       "OEM #"),
+          diff("name",             "Name"),
+          diff("type",             "Type"),
+          diff("description",      "Description"),
+          diff("lifecycle_status", "Status"),
+          diff("notes",            "Notes"),
+        ].filter(Boolean);
+
+        return el("tr", {}, [
+          el("td", { style: "white-space:nowrap;font-size:0.8rem" },
+            new Date(entry.changed_at).toLocaleString("sv", { dateStyle: "short", timeStyle: "short" })),
+          el("td", { style: "font-size:0.8rem" },
+            el("span", {
+              style: `display:inline-block;padding:1px 6px;border-radius:99px;font-size:0.72rem;font-weight:600;background:${entry.change_type === "created" ? "#2fa56420" : "#4a9eed20"};color:${entry.change_type === "created" ? "#2fa564" : "#4a9eed"}`,
+            }, entry.change_type)),
+          el("td", {}, diffs.length ? el("div", {}, diffs) : el("span", { style: "font-size:0.75rem;color:var(--muted,#8b93a1)" }, entry.change_type === "created" ? "Initial record" : "No tracked fields changed")),
+        ]);
+      });
+
+      const changelogSection = el("div", { style: "margin-top:1.25rem" }, [
+        el("h4", { style: "margin-bottom:0.4rem" }, "Change Log"),
+        el("p", { style: "font-size:0.75rem;color:var(--muted,#8b93a1);margin:0 0 0.5rem" },
+          "Immutable audit trail — every field change captured automatically by the database."),
+        clRows.length
+          ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem;width:100%" }, [
+              el("thead", {}, el("tr", {}, ["Date", "Event", "Changes"].map((h) => el("th", {}, h)))),
+              el("tbody", {}, ...clRows),
+            ]))
+          : el("div", { class: "muted" }, "No history yet — changes will appear here automatically."),
+      ]);
+
       panel.replaceChildren(
         el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem" }, [
           el("strong", {}, `Component: ${componentId.slice(0, 8)}…`),
           el("button", { class: "btn btn-sm", type: "button", onclick: () => { panel.style.display = "none"; } }, "Close"),
         ]),
-        versionsSection, docsSection, matsSection,
+        versionsSection, docsSection, matsSection, changelogSection,
       );
     } catch (ex) {
       panel.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));

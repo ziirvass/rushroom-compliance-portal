@@ -364,8 +364,8 @@
 
         <!-- AS-BUILT STATUS SECTION -->
         <div class="section doc-section-new">
-            <h2>0. As-Built Status <span class="doc-new-badge">Audited against production 2026-08-26</span></h2>
-            <p>This section reflects what is <strong>actually deployed and live</strong> as of <span class="doc-changed">2026-08-26</span>, superseding any "planned/pending" wording later in this document. Frontend is a no-framework static site on GitHub Pages (cache-busted assets, currently <span class="doc-changed"><code>?v=113</code></span>); backend is the single Supabase <code>portal-api</code> Edge Function (Deno, deployed <code>--no-verify-jwt</code>) plus Postgres + private Storage buckets. The whole document library, action plan, standards register, Level 2, CELLAR, and Product Information System data live in Postgres; the browser never touches the DB directly. PROP-013 adds a new <strong>Product</strong> tab (Rushroom-only) with BOM tree, Cost Canvas, and Status Overview; 10 new tables and 22 new API actions support unlimited-depth BOM trees (flat DFS grid with hierarchical position numbers 1/1.1/1.1.1, ASCII tree connectors, collapse/expand at any node), component versioning, REACH/RoHS materials at component level, internal cost/COGS intelligence, and scenario simulation. Migration <code>0007_product_information_system.sql</code> must be applied to production.</p>
+            <h2>0. As-Built Status <span class="doc-new-badge">Audited against production 2026-08-27</span></h2>
+            <p>This section reflects what is <strong>actually deployed and live</strong> as of <span class="doc-changed">2026-08-27</span>, superseding any "planned/pending" wording later in this document. Frontend is a no-framework static site on GitHub Pages (cache-busted assets, currently <span class="doc-changed"><code>?v=115</code></span>); backend is the single Supabase <code>portal-api</code> Edge Function (Deno, deployed <code>--no-verify-jwt</code>) plus Postgres + private Storage buckets. The whole document library, action plan, standards register, Level 2, CELLAR, and Product Information System data live in Postgres; the browser never touches the DB directly. PROP-013 adds a new <strong>Product</strong> tab (Rushroom-only) with BOM tree, Cost Canvas, and Status Overview; 11 new tables (migration 0009 adds <code>bom_component_history</code>) and 23 new API actions support unlimited-depth BOM trees (flat DFS grid with hierarchical position numbers 1/1.1/1.1.1, ASCII tree connectors, collapse/expand at any node), component versioning, REACH/RoHS materials at component level, internal cost/COGS intelligence, scenario simulation, and a <strong>full immutable audit trail</strong> — every INSERT and field-change UPDATE on <code>bom_components</code> is captured by Postgres triggers into <code>bom_component_history</code>, with diff rendering in the component detail panel. Migrations 0007–0009 must be applied to production.</p>
 
             <div class="note"><strong>Single AI model.</strong> <span class="doc-changed">Every server-side AI call — draft generation, deviation scan, clause extraction, interpretations, classification suggestions, directive inference, compliance narrative — uses Anthropic <code>claude-opus-4-8</code></span> (constants <code>SCAN_MODEL</code> in <code>index.ts</code> and <code>CLAUDE_MODEL</code> in <code>cellar-service.ts</code>), via <code>api.anthropic.com/v1/messages</code> with adaptive thinking and JSON-schema structured output. No other model IDs are used.</div>
 
@@ -586,6 +586,7 @@
                 <tr><td><span class="doc-changed"><code>cost_scenarios</code></span></td><td>PIS (PROP-013)</td><td>Named what-if simulation workspaces</td><td>name, base_component_id (FK), status (draft|published|archived)</td></tr>
                 <tr><td><span class="doc-changed"><code>scenario_overrides</code></span></td><td>PIS (PROP-013)</td><td>Per-scenario per-component price/quantity/status overrides</td><td>scenario_id (FK), component_id (FK), override_type, value (JSONB) · unique(scenario, component, type)</td></tr>
                 <tr><td><span class="doc-changed"><code>cogs_snapshots</code></span></td><td>PIS (PROP-013)</td><td>Append-only point-in-time COGS rollup</td><td>root_component_id (FK), scenario_id (nullable), total_cogs, confidence_label, detail (JSONB)</td></tr>
+                <tr><td><span class="doc-changed"><code>bom_component_history</code></span></td><td>PIS (PROP-013)</td><td>Immutable audit trail — one row per component state, written by Postgres AFTER INSERT / AFTER UPDATE triggers</td><td>component_id (no FK — rows survive component delete), changed_at, changed_by, change_type (created|updated), snapshot of all tracked fields (part_number, oem_number, name, description, type, lifecycle_status, notes) · migration 0009</td></tr>
             </table>
 
             <h3 class="doc-changed">Enums &amp; constraints</h3>
@@ -873,7 +874,7 @@
                 <rect x="50" y="60" width="280" height="35" fill="#3498db" stroke="#3498db" stroke-width="2" rx="4"/>
                 <text x="190" y="87" font-weight="bold" fill="white" text-anchor="middle" font-size="14">FRONTEND (Browser)</text>
                 
-                <text x="70" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Static site · GitHub Pages (?v=113)</text>
+                <text x="70" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Static site · GitHub Pages (?v=115)</text>
                 <text x="80" y="135" fill="#555" font-size="10">index.html · supplier / verify / reset.html</text>
                 <text x="80" y="155" fill="#555" font-size="10">assets/app.js (portal UI)</text>
                 <text x="80" y="175" fill="#555" font-size="10">assets/api.js (edge-function client)</text>
@@ -1174,7 +1175,7 @@
             <table style="font-size: 12px;">
                 <tr><th>Action</th><th>Input</th><th>Output</th><th>Role</th></tr>
                 <tr><td><code>addComponent</code></td><td><span class="doc-changed">name, type, part_number? (auto-generated if blank), oem_number?, description?</span></td><td>{id, part_number} — inserts bom_components + initial version rev "A"</td><td>Rushroom</td></tr>
-                <tr><td><code>updateComponent</code></td><td>component_id, name?, description?, notes?</td><td>{ok}</td><td>Rushroom</td></tr>
+                <tr><td><code>updateComponent</code></td><td>component_id, name?, description?, notes?, <span class="doc-changed">oem_number?, part_number?, type?</span></td><td>{ok} — triggers AFTER UPDATE writes history row if any tracked field changed</td><td>Rushroom</td></tr>
                 <tr><td><code>setComponentStatus</code></td><td>component_id, lifecycle_status</td><td>{ok}</td><td>Rushroom</td></tr>
                 <tr><td><code>bumpComponentVersion</code></td><td>component_id, revision, spec_summary?</td><td>{id} — trigger sets is_current=FALSE on prior versions</td><td>Rushroom</td></tr>
                 <tr><td><code>getComponentHistory</code></td><td>component_id</td><td>{history:[…]} DESC</td><td>Rushroom</td></tr>
@@ -1197,6 +1198,8 @@
                 <tr><td><code>getScenarioResult</code></td><td>scenario_id</td><td>{scenario, overrides, nodes_with_cost, total_cogs, confidence_label}</td><td>Rushroom</td></tr>
                 <tr><td><code>archiveScenario</code></td><td>scenario_id</td><td>{ok}</td><td>Rushroom</td></tr>
                 <tr><td><code>listComponents</code></td><td>—</td><td>{components:[…], root_ids:[…]} — all org components; root_ids = those with no active parent edge (used by BOM Tree auto-load)</td><td>Rushroom</td></tr>
+                <tr><td><span class="doc-changed"><code>getComponentChangelog</code></span></td><td>component_id</td><td>{changelog:[…]} DESC — reads bom_component_history; each entry is a full field snapshot at that point in time; UI renders field-level diffs vs the prior entry</td><td>Rushroom</td></tr>
+                <tr><td><span class="doc-changed"><code>suggestComponentMetadata</code></span></td><td>storage_path, bucket</td><td>{part_number, oem_number, name, type, description, summary} — Claude reads datasheet via JSON-schema structured output and suggests catalogue fields for the + New Component modal autofill</td><td>Rushroom</td></tr>
             </table>
         </div>
         
@@ -1799,8 +1802,9 @@
                     <strong>Effect (as delivered):</strong>
                     <ul class="proposal-list" style="margin-top: 5px;">
                         <li><strong>New "Product" tab</strong> (Rushroom-only) with three sub-tabs: BOM Tree, Cost Canvas, Status Overview.</li>
-                        <li><strong>10 new tables</strong> (migration <code>0007_product_information_system.sql</code>): <code>bom_components</code>, <code>bom_component_versions</code>, <code>bom_edges</code>, <code>component_materials</code>, <code>component_documents</code>, <code>component_costs</code>, <code>landed_cost_factors</code>, <code>cost_scenarios</code>, <code>scenario_overrides</code>, <code>cogs_snapshots</code>.</li>
-                        <li><strong>22 new API actions</strong> covering component lifecycle, unlimited-depth BOM tree (BFS traversal + cycle-detection trigger), REACH/RoHS at component level, internal cost management, and scenario simulation.</li>
+                        <li><strong>11 new tables</strong>: migrations 0007 (<code>bom_components</code>, <code>bom_component_versions</code>, <code>bom_edges</code>, <code>component_materials</code>, <code>component_documents</code>, <code>component_costs</code>, <code>landed_cost_factors</code>, <code>cost_scenarios</code>, <code>scenario_overrides</code>, <code>cogs_snapshots</code>) + 0009 (<code>bom_component_history</code> — immutable audit trail).</li>
+                        <li><strong>23 new API actions</strong> covering component lifecycle, unlimited-depth BOM tree (flat DFS grid + cycle-detection trigger), REACH/RoHS at component level, internal cost management, scenario simulation, AI datasheet autofill (<code>suggestComponentMetadata</code>), and audit trail retrieval (<code>getComponentChangelog</code>).</li>
+                        <li><span class="doc-changed"><strong>Full compliance audit trail</strong> (<code>bom_component_history</code>, migration 0009): two Postgres triggers (AFTER INSERT + AFTER UPDATE with WHEN clause) write an immutable snapshot to the history table on every state change. History rows carry no FK to <code>bom_components</code> so records survive component deletion — critical for regulatory evidence. The component detail panel renders field-level diffs (before → after) for every change event.</span></li>
                         <li><strong>PostgreSQL function</strong> <code>compute_bom_cogs(p_root_id, p_org_id, p_scenario_id)</code> — recursive CTE with scenario overrides and landed-cost multipliers applied server-side.</li>
                         <li><strong>COST_ACTIONS guard</strong>: cost/pricing actions return 403 for supplier sessions; suppliers can view only <code>is_supplier_visible</code> documents.</li>
                         <li><strong>Simulation layer</strong>: named scenario workspaces with per-component price/quantity overrides; client-side instant preview + server-side authoritative rollup.</li>

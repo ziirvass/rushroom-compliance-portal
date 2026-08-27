@@ -195,7 +195,7 @@ const TENANT_TABLES = new Set([
   "product_passports", "passport_interpretation_links", "product_directive_applicability",
   "classification_log", "requirement_links", "document_statements",
   // PROP-013: Product Information System
-  "bom_components", "bom_component_versions", "bom_edges",
+  "bom_components", "bom_component_versions", "bom_edges", "bom_component_history",
   "component_materials", "component_documents", "component_costs",
   "landed_cost_factors", "cogs_snapshots", "cost_scenarios", "scenario_overrides",
 ]);
@@ -3486,13 +3486,19 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // --- BOM: update component metadata (never part_number or type) -----------
   if (action === "updateComponent") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
-    const { component_id, name, description, notes, oem_number } = body;
+    const { component_id, name, description, notes, oem_number, part_number, type: newType } = body;
     if (!component_id) return json({ error: "component_id required" }, 400);
-    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (name !== undefined) patch.name = String(name);
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString(), updated_by: session.uid || null };
+    if (name        !== undefined) patch.name        = String(name);
     if (description !== undefined) patch.description = description;
-    if (notes !== undefined) patch.notes = notes;
-    if (oem_number !== undefined) patch.oem_number = oem_number ? String(oem_number).trim() : null;
+    if (notes       !== undefined) patch.notes       = notes;
+    if (oem_number  !== undefined) patch.oem_number  = oem_number ? String(oem_number).trim() : null;
+    if (part_number !== undefined && String(part_number).trim()) patch.part_number = String(part_number).trim();
+    if (newType     !== undefined) {
+      const validTypes = ["Product", "Component", "SparePart", "Refurb"];
+      if (!validTypes.includes(newType)) return json({ error: "Invalid type" }, 400);
+      patch.type = newType;
+    }
     const { error } = await tdb("bom_components").update(patch).eq("id", component_id);
     if (error) return json({ error: error.message }, 400);
     return json({ ok: true });
@@ -3505,7 +3511,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     const { component_id, lifecycle_status } = body;
     if (!component_id || !lifecycle_status) return json({ error: "component_id and lifecycle_status required" }, 400);
     if (!validStatuses.includes(lifecycle_status)) return json({ error: "Invalid lifecycle_status" }, 400);
-    const { error } = await tdb("bom_components").update({ lifecycle_status, updated_at: new Date().toISOString() }).eq("id", component_id);
+    const { error } = await tdb("bom_components").update({ lifecycle_status, updated_at: new Date().toISOString(), updated_by: session.uid || null }).eq("id", component_id);
     if (error) return json({ error: error.message }, 400);
     return json({ ok: true });
   }
@@ -3532,6 +3538,19 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       .eq("component_id", component_id).order("created_at", { ascending: false });
     if (error) return json({ error: error.message }, 400);
     return json({ history: data });
+  }
+
+  // --- BOM: full field-level change log (trigger-sourced, immutable) ---------
+  if (action === "getComponentChangelog") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    const { data, error } = await tdb("bom_component_history")
+      .select("id, changed_at, changed_by, change_type, part_number, oem_number, name, description, type, lifecycle_status, notes")
+      .eq("component_id", component_id)
+      .order("changed_at", { ascending: false });
+    if (error) return json({ error: error.message }, 400);
+    return json({ changelog: data });
   }
 
   // --- BOM: get tree (BFS, max_depth levels deep) ---------------------------
