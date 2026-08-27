@@ -3768,24 +3768,40 @@
              "→ ",
              el("span", { style: "color:var(--accent,#2fa564)" }, b || "—")]);
         }
-        const diffs = [
+        const isFieldEvent = entry.change_type === "created" || entry.change_type === "updated";
+        const diffs = isFieldEvent ? [
           diff("part_number",      "Part #"),
           diff("oem_number",       "OEM #"),
           diff("name",             "Name"),
           diff("type",             "Type"),
           diff("description",      "Description"),
           diff("lifecycle_status", "Status"),
-          diff("notes",            "Notes"),
-        ].filter(Boolean);
+        ].filter(Boolean) : [];
+
+        const BADGE_COLORS = {
+          created:         ["#2fa56420", "#2fa564"],
+          updated:         ["#4a9eed20", "#4a9eed"],
+          version_bumped:  ["#a855f720", "#a855f7"],
+          document_linked: ["#f59e0b20", "#f59e0b"],
+        };
+        const [bg, fg] = BADGE_COLORS[entry.change_type] || ["#8b93a120", "#8b93a1"];
+        const badgeLabel = { created: "created", updated: "updated", version_bumped: "revision", document_linked: "document" }[entry.change_type] || entry.change_type;
+
+        let changeCell;
+        if (diffs.length) {
+          changeCell = el("div", {}, diffs);
+        } else if (!isFieldEvent && entry.notes) {
+          changeCell = el("span", { style: "font-size:0.75rem;color:var(--text,#1a1f2e)" }, entry.notes);
+        } else {
+          changeCell = el("span", { style: "font-size:0.75rem;color:var(--muted,#8b93a1)" }, entry.change_type === "created" ? "Initial record" : "No field changes");
+        }
 
         return el("tr", {}, [
           el("td", { style: "white-space:nowrap;font-size:0.8rem" },
             new Date(entry.changed_at).toLocaleString("sv", { dateStyle: "short", timeStyle: "short" })),
           el("td", { style: "font-size:0.8rem" },
-            el("span", {
-              style: `display:inline-block;padding:1px 6px;border-radius:99px;font-size:0.72rem;font-weight:600;background:${entry.change_type === "created" ? "#2fa56420" : "#4a9eed20"};color:${entry.change_type === "created" ? "#2fa564" : "#4a9eed"}`,
-            }, entry.change_type)),
-          el("td", {}, diffs.length ? el("div", {}, diffs) : el("span", { style: "font-size:0.75rem;color:var(--muted,#8b93a1)" }, entry.change_type === "created" ? "Initial record" : "No tracked fields changed")),
+            el("span", { style: `display:inline-block;padding:1px 6px;border-radius:99px;font-size:0.72rem;font-weight:600;background:${bg};color:${fg}` }, badgeLabel)),
+          el("td", {}, changeCell),
         ]);
       });
 

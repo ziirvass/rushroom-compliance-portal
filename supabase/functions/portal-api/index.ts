@@ -3526,6 +3526,26 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       is_current: true, created_by: session.uid || null,
     }).select("id").maybeSingle();
     if (error) return json({ error: error.message }, 400);
+    // Write audit trail — trigger doesn't fire because bom_components isn't touched
+    const { data: comp } = await tdb("bom_components")
+      .select("organization_id, part_number, oem_number, name, description, type, lifecycle_status")
+      .eq("id", component_id).maybeSingle();
+    if (comp) {
+      await tdb("bom_component_history").insert({
+        organization_id: comp.organization_id,
+        component_id,
+        changed_at: new Date().toISOString(),
+        changed_by: session.uid || null,
+        change_type: "version_bumped",
+        part_number: comp.part_number,
+        oem_number: comp.oem_number,
+        name: comp.name,
+        description: comp.description,
+        type: comp.type,
+        lifecycle_status: comp.lifecycle_status,
+        notes: `Revision ${String(revision)}${spec_summary ? ": " + spec_summary : ""}`,
+      });
+    }
     return json({ version_id: ver.id });
   }
 
@@ -3743,6 +3763,27 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       uploaded_by: session.uid || null,
     }).select("id").maybeSingle();
     if (error) return json({ error: error.message }, 400);
+    // Write audit trail — trigger doesn't fire because bom_components isn't touched
+    const { data: comp } = await tdb("bom_components")
+      .select("organization_id, part_number, oem_number, name, description, type, lifecycle_status")
+      .eq("id", component_id).maybeSingle();
+    if (comp) {
+      const displayLabel = label || category;
+      await tdb("bom_component_history").insert({
+        organization_id: comp.organization_id,
+        component_id,
+        changed_at: new Date().toISOString(),
+        changed_by: session.uid || null,
+        change_type: "document_linked",
+        part_number: comp.part_number,
+        oem_number: comp.oem_number,
+        name: comp.name,
+        description: comp.description,
+        type: comp.type,
+        lifecycle_status: comp.lifecycle_status,
+        notes: `Document linked: ${displayLabel} (${category})`,
+      });
+    }
     return json({ id: data.id });
   }
 
