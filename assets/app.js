@@ -3870,29 +3870,36 @@
       }
     } });
 
+    // Shared field style — applied to every input/select/textarea in this modal
+    const F = "width:100%;font-size:0.875rem;padding:0.42rem 0.6rem;border:1px solid var(--border,#e2e8f0);border-radius:6px;background:var(--bg,#fff);color:var(--text,#1a1f2e);font-family:inherit;box-sizing:border-box";
+    [pn, oem, nm].forEach((el_) => el_.style.cssText = F);
+    typ.style.cssText  = F + ";appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:2rem;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a94a6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right 0.6rem center;background-size:12px";
+    desc.style.cssText = F + ";resize:vertical;min-height:64px";
+
+    const LBL = "display:block;font-size:0.8rem;font-weight:600;color:var(--muted,#8b93a1);margin-bottom:0.25rem";
+    const ROW = "margin-bottom:0.7rem";
+    function frow(label, input, hint) {
+      return el("div", { style: ROW }, [
+        el("label", { style: LBL }, label),
+        input,
+        hint ? el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);display:block;margin-top:3px" }, hint) : null,
+      ].filter(Boolean));
+    }
+
     form.append(
       el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:1.1rem" }, [
-        el("h3", { style: "margin:0" }, "New Product / Component"),
+        el("h3", { style: "margin:0;font-size:1rem" }, "New Product / Component"),
         el("button", { class: "btn btn-sm", type: "button", style: "padding:2px 8px", onclick: () => overlay.remove() }, "✕"),
       ]),
       modeBar,
-      el("p", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);margin:0 0 0.85rem" },
-        "Upload a datasheet and the AI will suggest fields. Or skip the upload and fill in manually."),
-      el("label", { class: "form-row", style: "display:block;margin-bottom:0.75rem" }, [
-        el("span", { class: "form-label" }, "Document (optional)"), zone.el, statusEl]),
-      ...[
-        ["Part number", pn,   "Auto-generated if left as-is — you can edit it."],
-        ["OEM number",  oem,  null],
-        ["Name *",      nm,   null],
-        ["Type",        typ,  null],
-        ["Description", desc, "What does this part do? Why is it in the product?"],
-      ].map(([lbl, inp, hint]) =>
-        el("label", { class: "form-row", style: "display:block;margin-bottom:0.5rem" }, [
-          el("span", { class: "form-label" }, lbl),
-          inp,
-          hint ? el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);display:block;margin-top:2px" }, hint) : null,
-        ].filter(Boolean)),
-      ),
+      el("p", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);margin:0 0 0.9rem" },
+        "Upload a datasheet and the AI will suggest fields. Or fill in manually."),
+      el("div", { style: ROW }, [el("label", { style: LBL }, "Document (optional)"), zone.el, statusEl]),
+      frow("Part number", pn,   "Auto-generated if left as-is — you can edit it."),
+      frow("OEM number",  oem,  null),
+      frow("Name",        nm,   null),
+      frow("Type",        typ,  null),
+      frow("Description", desc, "Purpose — what does this part do?"),
       errEl,
       el("div", { style: "display:flex;gap:0.5rem;margin-top:1.1rem;justify-content:flex-end" }, [
         el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
