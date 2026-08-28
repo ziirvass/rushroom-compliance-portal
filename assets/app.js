@@ -3954,6 +3954,45 @@
     const btnChild  = modeBtn("child",  "Child — Component / Part",   "Bought part or sub-component. Attached to a parent.");
     modeBar.append(btnParent, btnChild);
 
+    // --- Parent picker (shown only in child mode, lazy-loaded) ---------------
+    let parentComponents = null;
+    let selectedParentId = null;
+    const parentPickerSection = el("div", { style: "display:none;margin-bottom:0.8rem" });
+    const parentSearchInput = el("input", { class: "up-text", type: "text", placeholder: "Search parent by part # or name…", style: "width:100%;margin-bottom:0.4rem;font-size:0.875rem;padding:0.42rem 0.6rem;border:1px solid var(--border,#e2e8f0);border-radius:6px;background:var(--bg,#fff);color:var(--text,#1a1f2e);font-family:inherit;box-sizing:border-box" });
+    const parentListEl = el("div", { style: "max-height:170px;overflow-y:auto;border:1px solid var(--border,#2d3748);border-radius:4px;margin-bottom:0.4rem" });
+    const parentSelectedLabel = el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);min-height:1.2rem;margin-bottom:0.25rem" }, "");
+
+    function renderParentList(filter) {
+      if (!parentComponents) return;
+      const filtered = filter ? parentComponents.filter((c) => (c.part_number + " " + c.name).toLowerCase().includes(filter.toLowerCase())) : parentComponents;
+      parentListEl.replaceChildren(...filtered.map((c) => el("div", {
+        style: `padding:0.35rem 0.6rem;cursor:pointer;border-bottom:1px solid var(--border,#2d3748);display:flex;gap:0.5rem;align-items:center;${selectedParentId === c.id ? "background:var(--accent,#2fa564)22;" : ""}`,
+        onclick: () => { selectedParentId = c.id; parentSelectedLabel.textContent = `Parent: ${c.part_number} — ${c.name}`; renderParentList(parentSearchInput.value); },
+      }, [
+        el("span", { style: "font-family:monospace;font-size:0.76rem;color:var(--muted,#8b93a1);flex-shrink:0" }, c.part_number),
+        el("span", { style: "flex:1" }, c.name),
+        lifecycleBadge(c.lifecycle_status),
+      ])));
+      if (!filtered.length) parentListEl.replaceChildren(el("div", { style: "padding:0.5rem;color:var(--muted,#8b93a1);font-size:0.85rem" }, "No components found."));
+    }
+    parentSearchInput.oninput = () => renderParentList(parentSearchInput.value);
+
+    async function loadParentPicker() {
+      if (parentComponents !== null) return;
+      parentPickerSection.replaceChildren(el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);padding:0.35rem" }, "Loading components…"));
+      try {
+        const { components } = await API.post(token, "listComponents", {});
+        parentComponents = components || [];
+        parentPickerSection.replaceChildren(
+          el("label", { style: "display:block;font-size:0.8rem;font-weight:600;color:var(--muted,#8b93a1);margin-bottom:0.25rem" }, "Attach to parent (required)"),
+          parentSearchInput, parentListEl, parentSelectedLabel,
+        );
+        renderParentList("");
+      } catch (ex) {
+        parentPickerSection.replaceChildren(el("div", { style: "font-size:0.82rem;color:#e05454" }, `Couldn't load components: ${ex.message}`));
+      }
+    }
+
     // --- Part-number generator (client-side pre-fill) ------------------------
     function genPN() {
       const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -3980,6 +4019,8 @@
       btnChild.style.background  = mode === "child"  ? "var(--accent,#2fa564)" : "";
       btnChild.style.color       = mode === "child"  ? "#fff" : "";
       typ.value = mode === "parent" ? "Product" : "Component";
+      parentPickerSection.style.display = mode === "child" ? "" : "none";
+      if (mode === "child") loadParentPicker();
     }
     syncMode();
 
@@ -4021,6 +4062,7 @@
     const form = el("form", { onsubmit: async (e) => {
       e.preventDefault();
       if (!nm.value.trim()) { errEl.textContent = "Name is required."; return; }
+      if (mode === "child" && !selectedParentId) { errEl.textContent = "Select a parent component first."; return; }
       errEl.textContent = "";
       submitBtn.disabled = true; submitBtn.textContent = "Creating…";
       try {
@@ -4031,6 +4073,9 @@
           type:        typ.value,
           description: desc.value.trim() || null,
         });
+        if (mode === "child" && selectedParentId) {
+          await API.post(token, "addBomEdge", { parent_id: selectedParentId, child_id: r.id, quantity: 1 });
+        }
         overlay.remove();
         if (onCreated) onCreated(r.id);
       } catch (ex) {
@@ -4061,6 +4106,7 @@
         el("button", { class: "btn btn-sm", type: "button", style: "padding:2px 8px", onclick: () => overlay.remove() }, "✕"),
       ]),
       modeBar,
+      parentPickerSection,
       el("p", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);margin:0 0 0.9rem" },
         "Upload a datasheet and the AI will suggest fields. Or fill in manually."),
       el("div", { style: ROW }, [el("label", { style: LBL }, "Document (optional)"), zone.el, statusEl]),
