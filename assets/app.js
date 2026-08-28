@@ -3444,7 +3444,7 @@
 
     wrap.replaceChildren(
       el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap" }, [
-        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => refreshTree()) }, "+ New Product/Component"),
+        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => refreshTree()) }, "+ New Product"),
         el("button", { class: "btn btn-sm", type: "button", onclick: () => refreshTree() }, "↺ Refresh"),
       ]),
       treeArea,
@@ -3939,61 +3939,7 @@
     const overlay = el("div", { class: "modal-overlay", style: "position:fixed;inset:0;background:#0008;z-index:1000;display:flex;align-items:center;justify-content:center;padding:1rem" });
     const dialog = el("div", { class: "modal-dialog", style: "background:var(--bg,#fff);border-radius:8px;padding:1.5rem;width:min(540px,95vw);max-height:90vh;overflow-y:auto" });
 
-    // --- Mode toggle ---------------------------------------------------------
-    let mode = "parent";
-    const modeBar = el("div", { style: "display:flex;gap:0;margin-bottom:1.25rem;border:1px solid var(--border,#e2e8f0);border-radius:6px;overflow:hidden" });
-    function modeBtn(id, label, desc) {
-      return el("button", {
-        class: "btn", type: "button",
-        style: "flex:1;border-radius:0;border:none;padding:0.55rem 0.75rem;text-align:left;transition:background 0.1s",
-        onclick: () => { mode = id; syncMode(); },
-      }, [el("div", { style: "font-weight:700;font-size:0.84rem" }, label),
-          el("div", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);margin-top:1px" }, desc)]);
-    }
-    const btnParent = modeBtn("parent", "Parent — Product / Assembly", "Top-level item. Becomes a root in the BOM tree.");
-    const btnChild  = modeBtn("child",  "Child — Component / Part",   "Bought part or sub-component. Attached to a parent.");
-    modeBar.append(btnParent, btnChild);
-
-    // --- Parent picker (shown only in child mode, lazy-loaded) ---------------
-    let parentComponents = null;
-    let selectedParentId = null;
-    const parentPickerSection = el("div", { style: "display:none;margin-bottom:0.8rem" });
-    const parentSearchInput = el("input", { class: "up-text", type: "text", placeholder: "Search parent by part # or name…", style: "width:100%;margin-bottom:0.4rem;font-size:0.875rem;padding:0.42rem 0.6rem;border:1px solid var(--border,#e2e8f0);border-radius:6px;background:var(--bg,#fff);color:var(--text,#1a1f2e);font-family:inherit;box-sizing:border-box" });
-    const parentListEl = el("div", { style: "max-height:170px;overflow-y:auto;border:1px solid var(--border,#2d3748);border-radius:4px;margin-bottom:0.4rem" });
-    const parentSelectedLabel = el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);min-height:1.2rem;margin-bottom:0.25rem" }, "");
-
-    function renderParentList(filter) {
-      if (!parentComponents) return;
-      const filtered = filter ? parentComponents.filter((c) => (c.part_number + " " + c.name).toLowerCase().includes(filter.toLowerCase())) : parentComponents;
-      parentListEl.replaceChildren(...filtered.map((c) => el("div", {
-        style: `padding:0.35rem 0.6rem;cursor:pointer;border-bottom:1px solid var(--border,#2d3748);display:flex;gap:0.5rem;align-items:center;${selectedParentId === c.id ? "background:var(--accent,#2fa564)22;" : ""}`,
-        onclick: () => { selectedParentId = c.id; parentSelectedLabel.textContent = `Parent: ${c.part_number} — ${c.name}`; renderParentList(parentSearchInput.value); },
-      }, [
-        el("span", { style: "font-family:monospace;font-size:0.76rem;color:var(--muted,#8b93a1);flex-shrink:0" }, c.part_number),
-        el("span", { style: "flex:1" }, c.name),
-        lifecycleBadge(c.lifecycle_status),
-      ])));
-      if (!filtered.length) parentListEl.replaceChildren(el("div", { style: "padding:0.5rem;color:var(--muted,#8b93a1);font-size:0.85rem" }, "No components found."));
-    }
-    parentSearchInput.oninput = () => renderParentList(parentSearchInput.value);
-
-    async function loadParentPicker() {
-      if (parentComponents !== null) return;
-      parentPickerSection.replaceChildren(el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);padding:0.35rem" }, "Loading components…"));
-      try {
-        const { components } = await API.post(token, "listComponents", {});
-        parentComponents = components || [];
-        parentPickerSection.replaceChildren(
-          el("label", { style: "display:block;font-size:0.8rem;font-weight:600;color:var(--muted,#8b93a1);margin-bottom:0.25rem" }, "Attach to parent (required)"),
-          parentSearchInput, parentListEl, parentSelectedLabel,
-        );
-        renderParentList("");
-      } catch (ex) {
-        parentPickerSection.replaceChildren(el("div", { style: "font-size:0.82rem;color:#e05454" }, `Couldn't load components: ${ex.message}`));
-      }
-    }
-
-    // --- Part-number generator (client-side pre-fill) ------------------------
+    // --- Part-number generator ------------------------------------------------
     function genPN() {
       const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
       let s = "";
@@ -4012,17 +3958,6 @@
 
     // Pre-fill part number so user can see what will be saved (still editable)
     pn.value = genPN();
-
-    function syncMode() {
-      btnParent.style.background = mode === "parent" ? "var(--accent,#2fa564)" : "";
-      btnParent.style.color      = mode === "parent" ? "#fff" : "";
-      btnChild.style.background  = mode === "child"  ? "var(--accent,#2fa564)" : "";
-      btnChild.style.color       = mode === "child"  ? "#fff" : "";
-      typ.value = mode === "parent" ? "Product" : "Component";
-      parentPickerSection.style.display = mode === "child" ? "" : "none";
-      if (mode === "child") loadParentPicker();
-    }
-    syncMode();
 
     // --- Upload zone + AI autofill -------------------------------------------
     const statusEl = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
@@ -4054,7 +3989,7 @@
       processing: true,
       onReady: (up) => autofill(up),
     });
-    const submitBtn = el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Create");
+    const submitBtn = el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Create product");
     zone.register(submitBtn, false);
 
     // --- Form submit ---------------------------------------------------------
@@ -4062,7 +3997,6 @@
     const form = el("form", { onsubmit: async (e) => {
       e.preventDefault();
       if (!nm.value.trim()) { errEl.textContent = "Name is required."; return; }
-      if (mode === "child" && !selectedParentId) { errEl.textContent = "Select a parent component first."; return; }
       errEl.textContent = "";
       submitBtn.disabled = true; submitBtn.textContent = "Creating…";
       try {
@@ -4073,14 +4007,11 @@
           type:        typ.value,
           description: desc.value.trim() || null,
         });
-        if (mode === "child" && selectedParentId) {
-          await API.post(token, "addBomEdge", { parent_id: selectedParentId, child_id: r.id, quantity: 1 });
-        }
         overlay.remove();
         if (onCreated) onCreated(r.id);
       } catch (ex) {
         errEl.textContent = ex.message;
-        submitBtn.disabled = false; submitBtn.textContent = "Create";
+        submitBtn.disabled = false; submitBtn.textContent = "Create product";
       }
     } });
 
@@ -4101,12 +4032,12 @@
     }
 
     form.append(
-      el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:1.1rem" }, [
-        el("h3", { style: "margin:0;font-size:1rem" }, "New Product / Component"),
+      el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem" }, [
+        el("h3", { style: "margin:0;font-size:1rem" }, "New Product / Assembly"),
         el("button", { class: "btn btn-sm", type: "button", style: "padding:2px 8px", onclick: () => overlay.remove() }, "✕"),
       ]),
-      modeBar,
-      parentPickerSection,
+      el("p", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);margin:0 0 0.5rem" },
+        "Creates a top-level product or assembly. To add components under it, use the + child button on any tree row."),
       el("p", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);margin:0 0 0.9rem" },
         "Upload a datasheet and the AI will suggest fields. Or fill in manually."),
       el("div", { style: ROW }, [el("label", { style: LBL }, "Document (optional)"), zone.el, statusEl]),
@@ -4114,7 +4045,7 @@
       frow("OEM number",  oem,  null),
       frow("Name",        nm,   null),
       frow("Type",        typ,  null),
-      frow("Description", desc, "Purpose — what does this part do?"),
+      frow("Description", desc, "Purpose — what does this product/assembly do?"),
       errEl,
       el("div", { style: "display:flex;gap:0.5rem;margin-top:1.1rem;justify-content:flex-end" }, [
         el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),

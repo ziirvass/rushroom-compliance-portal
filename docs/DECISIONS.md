@@ -112,3 +112,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** `openAddChildModal` (the `+ child` per-row button in the BOM tree) was rewritten with two tabs: "Link existing" (prior behavior — pick from the org's component list) and "Create new" (name + type + auto-generated part number; on submit, calls `addComponent` then `addBomEdge` in sequence). No new API actions; the existing `addComponent` + `addBomEdge` calls are composed client-side.
 **Why:** The original modal only let you link already-existing components. To create a grandchild (1.1.1), users had to (1) create the component via the toolbar — which lands as a root — and then (2) locate it in a separate `+ child` modal. This two-step flow was non-obvious and felt like a depth limitation even though the backend supported unlimited depth. The inline "Create new" tab removes the intermediate step: click `+ child` on any node at any depth, pick "Create new", enter a name, and the component is created and linked in one round-trip pair.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-28
+**Feature:** PROP-013 amendment — parent picker in "New Component" modal for Child mode
+**Decision:** When "Child — Component / Part" is selected in the "+ New Product/Component" toolbar modal, a searchable parent picker appears and is required before submission. The picker lazy-loads the component list via `listComponents` on first tab switch; on submit, `addComponent` is called first, then `addBomEdge(selectedParentId, newId, qty=1)`. No new API actions.
+**Why:** Previously, "Child" mode only changed the default type field — the new component still landed as an orphan root, requiring the user to separately find it in a `+ child` modal and link it. This was confusing: selecting "Child" strongly implies the component will be attached to something. Making parent selection mandatory in this flow closes the gap and matches user expectation.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
