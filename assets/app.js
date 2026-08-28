@@ -3456,13 +3456,17 @@
       try {
         const { components, root_ids } = await API.post(token, "listComponents", {});
         if (!components.length) {
+          detailPanel.style.display = "none";
+          detailPanel.replaceChildren();
           treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, [
-            "No components yet. Use ", el("strong", {}, "+ New component"), " to create the first one.",
+            "No components yet. Use ", el("strong", {}, "+ New Product"), " to create the first one.",
           ]));
           return;
         }
         if (!root_ids.length) {
-          treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, "All components have a parent — no root found. Create a Finished good."));
+          detailPanel.style.display = "none";
+          detailPanel.replaceChildren();
+          treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, "All components have a parent — no root found. Create a top-level product first."));
           return;
         }
         // Render each root as its own tree (parallel BOM fetches)
