@@ -3604,16 +3604,27 @@
     render();
   }
 
-  // --- Add-child modal: pick an existing component and link it ---------------
+  // --- Add-child modal: link existing OR create new and link ---------------
   function openAddChildModal(parentNode, allComponents, token, onRefresh) {
     const overlay = el("div", { style: "position:fixed;inset:0;background:#0009;z-index:1001;display:flex;align-items:center;justify-content:center" });
-    const dialog = el("div", { style: "background:var(--bg,#1a1f2e);border:1px solid var(--border,#2d3748);border-radius:8px;padding:1.5rem;width:min(500px,95vw);max-height:90vh;overflow-y:auto" });
+    const dialog = el("div", { style: "background:var(--bg,#1a1f2e);border:1px solid var(--border,#2d3748);border-radius:8px;padding:1.5rem;width:min(520px,95vw);max-height:90vh;overflow-y:auto" });
 
-    // Searchable component list (exclude the parent itself)
+    let mode = "existing"; // "existing" | "new"
+
+    // Shared qty / ref designator fields
+    const qtyInput = el("input", { class: "up-text", type: "number", min: "0.001", step: "any", value: "1", style: "width:100px" });
+    const refInput = el("input", { class: "up-text", type: "text", placeholder: "e.g. J1, J2 (optional)", style: "flex:1" });
+    const errEl = el("span", { style: "color:#e05454;font-size:0.82rem;display:block;min-height:1.2rem;margin-top:0.25rem" }, "");
+
+    // Tab bar
+    const tabExisting = el("button", { type: "button", style: "flex:1;border-radius:0;border:none;padding:0.4rem 0.75rem;font-size:0.82rem;font-weight:600;cursor:pointer;transition:background 0.1s" }, "Link existing");
+    const tabNew      = el("button", { type: "button", style: "flex:1;border-radius:0;border:none;padding:0.4rem 0.75rem;font-size:0.82rem;font-weight:600;cursor:pointer;transition:background 0.1s" }, "Create new");
+    const tabBar = el("div", { style: "display:flex;border:1px solid var(--border,#2d3748);border-radius:4px;overflow:hidden;margin-bottom:0.9rem" }, [tabExisting, tabNew]);
+
+    // Existing component section
     const candidates = (allComponents || []).filter((c) => c.id !== parentNode.id).sort((a, b) => a.part_number.localeCompare(b.part_number));
-
     const searchInput = el("input", { class: "up-text", type: "text", placeholder: "Search by part # or name…", style: "width:100%;margin-bottom:0.5rem" });
-    const listEl = el("div", { style: "max-height:220px;overflow-y:auto;border:1px solid var(--border,#2d3748);border-radius:4px;margin-bottom:0.75rem" });
+    const listEl = el("div", { style: "max-height:200px;overflow-y:auto;border:1px solid var(--border,#2d3748);border-radius:4px;margin-bottom:0.5rem" });
     let selectedId = null;
     const selectedLabel = el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);margin-bottom:0.5rem;min-height:1.2rem" }, "");
 
@@ -3638,39 +3649,106 @@
     }
     buildList("");
     searchInput.oninput = () => buildList(searchInput.value);
+    const existingSection = el("div", {}, [
+      el("label", { style: "display:block;margin-bottom:0.25rem;font-size:0.82rem;font-weight:600" }, "Select child"),
+      searchInput, listEl, selectedLabel,
+    ]);
 
-    const qtyInput = el("input", { class: "up-text", type: "number", min: "0.001", step: "any", value: "1", style: "width:100px" });
-    const refInput = el("input", { class: "up-text", type: "text", placeholder: "e.g. J1, J2 (optional)", style: "flex:1" });
-    const errEl = el("span", { style: "color:#e05454;font-size:0.82rem;display:block;min-height:1.2rem;margin-top:0.25rem" }, "");
+    // Create-new section
+    function genPN() {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let s = "";
+      for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+      const now = new Date();
+      return `RR-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${s}`;
+    }
+    const TYPE_OPTS = [["Component", "Component"], ["Product", "Product"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"]];
+    const newPN   = el("input",  { class: "up-text", type: "text" });
+    const newName = el("input",  { class: "up-text", type: "text", placeholder: "Name (required)" });
+    const newType = el("select", { class: "up-text" }, ...TYPE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
+    newPN.value = genPN();
+    const F = "width:100%;font-size:0.875rem;padding:0.42rem 0.6rem;border:1px solid var(--border,#e2e8f0);border-radius:6px;background:var(--bg,#fff);color:var(--text,#1a1f2e);font-family:inherit;box-sizing:border-box";
+    [newPN, newName].forEach((el_) => el_.style.cssText = F);
+    newType.style.cssText = F + ";appearance:none;-webkit-appearance:none;cursor:pointer";
+    const LBL = "display:block;font-size:0.8rem;font-weight:600;color:var(--muted,#8b93a1);margin-bottom:0.25rem";
+    const ROW = "margin-bottom:0.6rem";
+    const newSection = el("div", {}, [
+      el("div", { style: ROW }, [el("label", { style: LBL }, "Part number"), newPN]),
+      el("div", { style: ROW }, [el("label", { style: LBL }, "Name"), newName]),
+      el("div", { style: ROW }, [el("label", { style: LBL }, "Type"), newType]),
+    ]);
+
+    const qtyRefRow = el("div", { style: "display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem" }, [
+      el("label", { style: "display:flex;flex-direction:column;gap:0.2rem;font-size:0.82rem;font-weight:600" }, ["Quantity", qtyInput]),
+      el("label", { style: "display:flex;flex-direction:column;gap:0.2rem;font-size:0.82rem;font-weight:600;flex:1" }, ["Reference designator", refInput]),
+    ]);
 
     const submitBtn = el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Add to BOM");
+
+    function syncTabs() {
+      const isExisting = mode === "existing";
+      tabExisting.style.background = isExisting ? "var(--accent,#2fa564)" : "";
+      tabExisting.style.color      = isExisting ? "#fff" : "";
+      tabNew.style.background      = !isExisting ? "var(--accent,#2fa564)" : "";
+      tabNew.style.color           = !isExisting ? "#fff" : "";
+      existingSection.style.display = isExisting ? "" : "none";
+      newSection.style.display      = !isExisting ? "" : "none";
+      submitBtn.textContent = isExisting ? "Add to BOM" : "Create & add";
+    }
+    tabExisting.onclick = () => { mode = "existing"; syncTabs(); searchInput.focus(); };
+    tabNew.onclick      = () => { mode = "new";      syncTabs(); newName.focus(); };
+    syncTabs();
+
     const form = el("form", {
       onsubmit: async (e) => {
         e.preventDefault();
-        if (!selectedId) { errEl.textContent = "Select a component first."; return; }
         const qty = parseFloat(qtyInput.value);
         if (!qty || qty <= 0) { errEl.textContent = "Quantity must be greater than 0."; return; }
-        submitBtn.disabled = true; submitBtn.textContent = "Adding…";
+        errEl.textContent = "";
+        submitBtn.disabled = true;
+        submitBtn.textContent = mode === "new" ? "Creating…" : "Adding…";
         try {
-          await API.post(token, "addBomEdge", { parent_id: parentNode.id, child_id: selectedId, quantity: qty, reference_designator: refInput.value.trim() || null });
+          let childId = selectedId;
+          if (mode === "new") {
+            if (!newName.value.trim()) {
+              errEl.textContent = "Name is required.";
+              submitBtn.disabled = false; submitBtn.textContent = "Create & add";
+              return;
+            }
+            const r = await API.post(token, "addComponent", {
+              part_number: newPN.value.trim() || null,
+              name:        newName.value.trim(),
+              type:        newType.value,
+            });
+            childId = r.id;
+          } else {
+            if (!childId) {
+              errEl.textContent = "Select a component first.";
+              submitBtn.disabled = false; submitBtn.textContent = "Add to BOM";
+              return;
+            }
+          }
+          await API.post(token, "addBomEdge", { parent_id: parentNode.id, child_id: childId, quantity: qty, reference_designator: refInput.value.trim() || null });
           overlay.remove();
           if (onRefresh) onRefresh();
         } catch (ex) {
           errEl.textContent = ex.message;
-          submitBtn.disabled = false; submitBtn.textContent = "Add to BOM";
+          submitBtn.disabled = false;
+          submitBtn.textContent = mode === "new" ? "Create & add" : "Add to BOM";
         }
       },
     });
 
     form.append(
-      el("h3", { style: "margin:0 0 0.25rem" }, "Add child component"),
-      el("p", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);margin:0 0 0.75rem" }, `Parent: ${parentNode.part_number} — ${parentNode.name}`),
-      el("label", { style: "display:block;margin-bottom:0.25rem;font-size:0.82rem;font-weight:600" }, "Select child"),
-      searchInput, listEl, selectedLabel,
-      el("div", { style: "display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem" }, [
-        el("label", { style: "display:flex;flex-direction:column;gap:0.2rem;font-size:0.82rem;font-weight:600" }, ["Quantity", qtyInput]),
-        el("label", { style: "display:flex;flex-direction:column;gap:0.2rem;font-size:0.82rem;font-weight:600;flex:1" }, ["Reference designator", refInput]),
+      el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem" }, [
+        el("h3", { style: "margin:0;font-size:1rem" }, "Add child component"),
+        el("button", { class: "btn btn-sm", type: "button", style: "padding:2px 8px", onclick: () => overlay.remove() }, "✕"),
       ]),
+      el("p", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);margin:0 0 0.75rem" }, `Parent: ${parentNode.part_number} — ${parentNode.name}`),
+      tabBar,
+      existingSection,
+      newSection,
+      qtyRefRow,
       errEl,
       el("div", { style: "display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.75rem" }, [
         el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
@@ -3697,23 +3775,50 @@
       const history = hist.history || [];
       const current = history.find((v) => v.is_current) || history[0];
 
+      // Compute next revision client-side for the preview badge (server is authoritative)
+      function revRank(r) {
+        let n = 0;
+        for (const ch of (r || "").toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+        return n;
+      }
+      function nextRevision(revs) {
+        const max = revs.length ? revs.reduce((m, r) => revRank(r) > revRank(m) ? r : m) : "";
+        let num = 0;
+        for (const ch of (max || "").toUpperCase()) num = num * 26 + (ch.charCodeAt(0) - 64);
+        num++;
+        let result = "";
+        while (num > 0) { num--; result = String.fromCharCode(65 + num % 26) + result; num = Math.floor(num / 26); }
+        return result;
+      }
+      const previewRev = nextRevision(history.map((v) => v.revision));
+
       // Version section
       const versionRows = history.map((v) => el("tr", {}, [
         el("td", {}, v.revision), el("td", {}, v.spec_summary || "—"),
         el("td", {}, v.is_current ? el("strong", {}, "current") : ""),
         el("td", {}, v.created_at ? new Date(v.created_at).toLocaleDateString("sv") : ""),
       ]));
-      const bumpForm = el("form", { style: "display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap", onsubmit: async (e) => {
-        e.preventDefault();
-        const rev = bumpRevInput.value.trim(); const summary = bumpSumInput.value.trim();
-        if (!rev) return;
-        try { await API.post(token, "bumpComponentVersion", { component_id: componentId, revision: rev, spec_summary: summary || null }); openComponentDetail(componentId, token, panel); }
-        catch (ex) { bumpErr.textContent = ex.message; }
-      } });
-      const bumpRevInput = el("input", { class: "up-text", type: "text", placeholder: "New revision (e.g. B)", style: "width:8rem" });
-      const bumpSumInput = el("input", { class: "up-text", type: "text", placeholder: "What changed", style: "flex:1;min-width:10rem" });
+      const bumpSumInput = el("input", { class: "up-text", type: "text", placeholder: "What changed in this revision", style: "flex:1;min-width:12rem" });
       const bumpErr = el("span", { class: "form-error" }, "");
-      bumpForm.append(bumpRevInput, bumpSumInput, el("button", { class: "btn btn-sm btn-primary", type: "submit" }, "Bump version"), bumpErr);
+      const bumpForm = el("form", { style: "display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;align-items:center", onsubmit: async (e) => {
+        e.preventDefault();
+        const summary = bumpSumInput.value.trim();
+        const btn = bumpForm.querySelector("button");
+        btn.disabled = true; btn.textContent = "…";
+        try {
+          await API.post(token, "bumpComponentVersion", { component_id: componentId, spec_summary: summary || null });
+          openComponentDetail(componentId, token, panel);
+        } catch (ex) {
+          bumpErr.textContent = ex.message;
+          btn.disabled = false; btn.textContent = "Bump version";
+        }
+      } });
+      bumpForm.append(
+        el("span", { style: "font-size:0.8rem;font-weight:600;white-space:nowrap;background:var(--subtle,#f1f5f9);padding:0.38rem 0.7rem;border-radius:6px;border:1px solid var(--border,#e2e8f0);color:var(--muted,#64748b)" }, `Next: ${previewRev}`),
+        bumpSumInput,
+        el("button", { class: "btn btn-sm btn-primary", type: "submit" }, "Bump version"),
+        bumpErr,
+      );
 
       const versionsSection = el("div", {}, [
         el("h4", {}, "Versions"),

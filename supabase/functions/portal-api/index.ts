@@ -3480,6 +3480,22 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       is_current: true, created_by: session.uid || null,
     }).select("id").maybeSingle();
     if (ve) return json({ error: ve.message }, 400);
+    // The INSERT trigger on bom_components writes the 'created' field snapshot.
+    // Also write an explicit version_bumped row so Revision A always appears in
+    // the Change Log timeline alongside later bumps (B, C, …).
+    await tdb("bom_component_history").insert({
+      component_id: comp.id,
+      changed_at: new Date().toISOString(),
+      changed_by: session.uid || null,
+      change_type: "version_bumped",
+      part_number: String(part_number).trim(),
+      oem_number: oem_number ? String(oem_number).trim() : null,
+      name: String(name),
+      description: description || null,
+      type,
+      lifecycle_status: null,
+      notes: "Revision A: Initial revision",
+    }).catch(() => { /* non-fatal — main insert already succeeded */ });
     return json({ id: comp.id, part_number, version_id: ver.id });
   }
 
@@ -3516,16 +3532,37 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     return json({ ok: true });
   }
 
-  // --- BOM: create a new component version (immutable; triggers fn_set_current_version) --
+  // --- BOM: create a new component version (revision auto-computed A→B→…→Z→AA→AB…) --
   if (action === "bumpComponentVersion") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
-    const { component_id, revision, spec_summary } = body;
-    if (!component_id || !revision) return json({ error: "component_id and revision required" }, 400);
+    const { component_id, spec_summary } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+
+    // Auto-compute next revision from existing versions (server is authoritative)
+    function revRank(r: string): number {
+      let n = 0;
+      for (const ch of r.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+      return n;
+    }
+    function nextRev(revisions: string[]): string {
+      const max = revisions.length ? revisions.reduce((m, r) => revRank(r) > revRank(m) ? r : m) : "";
+      let num = 0;
+      for (const ch of max.toUpperCase()) num = num * 26 + (ch.charCodeAt(0) - 64);
+      num++;
+      let result = "";
+      while (num > 0) { num--; result = String.fromCharCode(65 + num % 26) + result; num = Math.floor(num / 26); }
+      return result;
+    }
+    const { data: existing } = await tdb("bom_component_versions")
+      .select("revision").eq("component_id", component_id);
+    const revision = nextRev((existing || []).map((r: any) => r.revision));
+
     const { data: ver, error } = await tdb("bom_component_versions").insert({
-      component_id, revision: String(revision), spec_summary: spec_summary || null,
+      component_id, revision, spec_summary: spec_summary || null,
       is_current: true, created_by: session.uid || null,
     }).select("id").maybeSingle();
     if (error) return json({ error: error.message }, 400);
+
     // Write audit trail — trigger doesn't fire because bom_components isn't touched
     const { data: comp } = await tdb("bom_components")
       .select("organization_id, part_number, oem_number, name, description, type, lifecycle_status")
@@ -3543,10 +3580,10 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
         description: comp.description,
         type: comp.type,
         lifecycle_status: comp.lifecycle_status,
-        notes: `Revision ${String(revision)}${spec_summary ? ": " + spec_summary : ""}`,
+        notes: `Revision ${revision}${spec_summary ? ": " + spec_summary : ""}`,
       });
     }
-    return json({ version_id: ver.id });
+    return json({ version_id: ver.id, revision });
   }
 
   // --- BOM: version history for a component ---------------------------------
@@ -3565,12 +3602,46 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
     const { component_id } = body;
     if (!component_id) return json({ error: "component_id required" }, 400);
-    const { data, error } = await tdb("bom_component_history")
-      .select("id, changed_at, changed_by, change_type, part_number, oem_number, name, description, type, lifecycle_status, notes")
-      .eq("component_id", component_id)
-      .order("changed_at", { ascending: false });
-    if (error) return json({ error: error.message }, 400);
-    return json({ changelog: data });
+
+    // Three canonical sources merged into one unified timeline:
+    // (1) bom_component_history — field-level snapshots (created + updated only;
+    //     version_bumped/document_linked rows exist but are superseded by canonical sources)
+    // (2) bom_component_versions — all revisions ever, including pre-audit-trail ones
+    // (3) component_documents — all linked docs ever, including pre-audit-trail ones
+    const [histRes, verRes, docRes] = await Promise.all([
+      tdb("bom_component_history")
+        .select("id, changed_at, changed_by, change_type, part_number, oem_number, name, description, type, lifecycle_status, notes")
+        .eq("component_id", component_id)
+        .in("change_type", ["created", "updated"]),
+      tdb("bom_component_versions")
+        .select("id, revision, spec_summary, created_at, created_by")
+        .eq("component_id", component_id),
+      tdb("component_documents")
+        .select("id, category, label, created_at, uploaded_by")
+        .eq("component_id", component_id),
+    ]);
+    if (histRes.error) return json({ error: histRes.error.message }, 400);
+
+    const versionEntries = (verRes.data || []).map((v: any) => ({
+      id: v.id,
+      changed_at: v.created_at,
+      changed_by: v.created_by,
+      change_type: "version_bumped",
+      notes: `Revision ${v.revision}${v.spec_summary ? ": " + v.spec_summary : ""}`,
+    }));
+
+    const docEntries = (docRes.data || []).map((d: any) => ({
+      id: d.id,
+      changed_at: d.created_at,
+      changed_by: d.uploaded_by,
+      change_type: "document_linked",
+      notes: `Document linked: ${d.label || d.category} (${d.category})`,
+    }));
+
+    const changelog = [...(histRes.data || []), ...versionEntries, ...docEntries]
+      .sort((a: any, b: any) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
+
+    return json({ changelog });
   }
 
   // --- BOM: get tree (BFS, max_depth levels deep) ---------------------------
