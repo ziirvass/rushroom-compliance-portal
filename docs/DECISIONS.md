@@ -147,3 +147,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** `el(tag, attrs, kids)` takes a single third parameter; spreading an array with `...` into it silently discards all elements after the first. Both `openAddComponent` and `openAddChildModal` called `el("select", …, ...TYPE_OPTS.map(…))`, so the type dropdown only ever rendered "Product". Fixed by passing the mapped array directly (without spread).
 **Why:** The `el()` helper uses `[].concat(kids)` internally to flatten arrays, so an array argument is correct — the spread was unnecessary and destructive.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
+**Feature:** Edge function — CORS-safe error handling + null-guard inserts
+**Decision:** Wrapped the entire `Deno.serve` handler body in a top-level try-catch that returns `json({ error: err.message }, 500)` — a CORS-compliant response — instead of letting Deno catch it and emit a raw 500 without CORS headers. Also null-guarded the two `maybeSingle()` inserts in `addComponent` (comp and ver): if either returns null with no error, the function now returns a 400 with a diagnostic message rather than throwing a `TypeError` on `.id`.
+**Why:** Any unhandled exception in an action handler was producing a Deno-level 500 without `Access-Control-Allow-Origin`. Safari reports this as "Load failed"; Chrome as "Failed to fetch". The modal stayed open even though the DB write had already succeeded — the user saw an error but the component was silently created in the background. The outer try-catch ensures ALL future errors surface as readable JSON in the modal.
+**Files changed:** supabase/functions/portal-api/index.ts, docs/DECISIONS.md
