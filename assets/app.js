@@ -3439,23 +3439,68 @@
   // --- BOM tree view ---------------------------------------------------------
   async function bomTreeView(token) {
     const wrap = el("div", { class: "pis-tree-wrap" });
-    const treeArea = el("div", { class: "pis-tree-area", style: "margin-top:0.75rem" });
     const detailPanel = el("div", { class: "pis-detail-panel", style: "display:none;margin-top:1rem;padding:1rem;background:var(--bg-2,#f5f5f5);border-radius:6px" });
+
+    const COMPONENT_TYPES = new Set(["Component", "SparePart", "Refurb"]);
+    const TAB_DEFS = [
+      { id: "components", label: "Components", match: (t) => COMPONENT_TYPES.has(t) },
+      { id: "assemblies", label: "Assemblies",  match: (t) => t === "Product" },
+      { id: "dynamic",    label: "Dynamic BOMs", match: (t) => t === "product_family" },
+    ];
+
+    let activeTab = "components";
+    let allState = null;
+
+    const tabBar  = el("div", { style: "display:flex;gap:0;margin-top:0.75rem;border-bottom:2px solid var(--border,#e2e8f0)" });
+    const treeArea = el("div", { class: "pis-tree-area", style: "margin-top:0.75rem" });
 
     wrap.replaceChildren(
       el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap" }, [
-        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => refreshTree()) }, "+ New BOM Node"),
+        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => { activeTab = "components"; refreshTree(); }) }, "+ New BOM Node"),
         el("button", { class: "btn btn-sm", type: "button", onclick: () => refreshTree() }, "↺ Refresh"),
       ]),
+      tabBar,
       treeArea,
       detailPanel,
     );
+
+    function renderTabBar(grouped) {
+      tabBar.replaceChildren(...TAB_DEFS.map((td) => {
+        const count = (grouped[td.id] || []).length;
+        const active = activeTab === td.id;
+        return el("button", {
+          type: "button",
+          style: `padding:0.35rem 1rem;font-size:0.8125rem;font-weight:600;border:none;background:transparent;cursor:pointer;color:${active ? "var(--accent,#2fa564)" : "var(--muted,#888)"};border-bottom:${active ? "2px solid var(--accent,#2fa564)" : "2px solid transparent"};margin-bottom:-2px`,
+          onclick: () => { activeTab = td.id; renderTabBar(grouped); renderTabContent(); },
+        }, `${td.label} (${count})`);
+      }));
+    }
+
+    function renderTabContent() {
+      if (!allState) return;
+      const { components, grouped, trees } = allState;
+      const rootIds = grouped[activeTab] || [];
+      treeArea.replaceChildren();
+      if (!rootIds.length) {
+        const labels = { components: "components", assemblies: "assemblies", dynamic: "dynamic BOMs" };
+        treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, `No ${labels[activeTab]} yet. Use + New BOM Node to create one.`));
+        return;
+      }
+      rootIds.forEach((rootId, i) => {
+        const bom = trees[rootId];
+        if (!bom) return;
+        const section = el("div", { style: i > 0 ? "margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border,#e2e8f0)" : "" });
+        renderBomTree(rootId, bom, section, detailPanel, token, components, refreshTree);
+        treeArea.append(section);
+      });
+    }
 
     async function refreshTree() {
       treeArea.replaceChildren(el("div", { class: "loading" }, "Loading BOM…"));
       try {
         const { components, root_ids } = await API.post(token, "listComponents", {});
         if (!components.length) {
+          tabBar.replaceChildren();
           detailPanel.style.display = "none";
           detailPanel.replaceChildren();
           treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, [
@@ -3463,16 +3508,21 @@
           ]));
           return;
         }
-        // Render each BOM Node as its own tree (parallel BOM fetches)
-        treeArea.replaceChildren(el("div", { class: "loading" }, `Loading ${root_ids.length} product tree${root_ids.length > 1 ? "s" : ""}…`));
-        const trees = await Promise.all(root_ids.map((id) => API.post(token, "getBom", { root_component_id: id, max_depth: 10 })));
-        treeArea.replaceChildren();
-        trees.forEach((bom, i) => {
-          const rootId = root_ids[i];
-          const section = el("div", { style: i > 0 ? "margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border,#e2e8f0)" : "" });
-          renderBomTree(rootId, bom, section, detailPanel, token, components, refreshTree);
-          treeArea.append(section);
+        const byId = Object.fromEntries(components.map((c) => [c.id, c]));
+        const grouped = { components: [], assemblies: [], dynamic: [] };
+        root_ids.forEach((id) => {
+          const type = byId[id]?.type;
+          for (const td of TAB_DEFS) { if (td.match(type)) { grouped[td.id].push(id); break; } }
         });
+
+        treeArea.replaceChildren(el("div", { class: "loading" }, `Loading ${root_ids.length} tree${root_ids.length !== 1 ? "s" : ""}…`));
+        const treeResults = await Promise.all(root_ids.map((id) => API.post(token, "getBom", { root_component_id: id, max_depth: 10 })));
+        const trees = {};
+        root_ids.forEach((id, i) => { trees[id] = treeResults[i]; });
+
+        allState = { components, grouped, trees };
+        renderTabBar(grouped);
+        renderTabContent();
       } catch (ex) {
         treeArea.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
       }
@@ -3633,7 +3683,7 @@
                       rows.push(el("p", { style: "font-size:0.82rem;font-weight:700;color:#e05454;margin:0 0 1.1rem" }, "This cannot be undone."));
                       rows.push(el("div", { style: "display:flex;justify-content:flex-end;gap:0.5rem" }, [
                         el("button", { class: "btn btn-sm", type: "button", onclick: () => close(false) }, "Cancel"),
-                        el("button", { type: "button", style: "background:#e05454;color:#fff;border:none;border-radius:6px;padding:0.45rem 1.1rem;font-size:0.875rem;font-weight:700;cursor:pointer;letter-spacing:0.01em", onclick: () => close(true) }, "Delete forever"),
+                        el("button", { type: "button", style: "background:#e05454;color:#fff;border:none;border-radius:6px;padding:0.45rem 1.1rem;font-size:0.875rem;font-weight:700;cursor:pointer;letter-spacing:0.01em", onclick: () => close(true) }, "Delete Permanently"),
                       ]));
                       mo.append(el("div", { style: "background:var(--bg,#fff);border:2px solid #e05454;border-radius:10px;padding:1.5rem;width:min(440px,95vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px #0003" }, rows));
                       document.body.append(mo);
