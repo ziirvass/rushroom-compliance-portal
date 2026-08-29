@@ -234,6 +234,13 @@ _Append-only. Claude Code appends one entry here after every /ship._
 
 ---
 **Date:** 2026-08-29
+**Feature:** BOM row UX — × delete button + double-click for detail
+**Decision:** Replaced the "Del" text button with a compact red "×" symbol. Removed the "Detail" button entirely; the component detail panel now opens on double-click of any BOM row. Cache bumped v144 → v145.
+**Why:** "Del" next to "Detail" created visual noise and risk of misclick. A × is universally understood as delete and takes less space. Double-click for detail is a standard desktop pattern — it keeps the action bar minimal (just +sib, +child, ×) while preserving full detail access without an extra button per row.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
 **Feature:** PROP-020 fix — BOM tab grouping by hasChildren, not type field
 **Decision:** Changed tab assignment from pure `type`-field matching to: `product_family` → Dynamic BOMs; `edges.length > 0` (has BOM children) OR `type === "Product"` → Assemblies; everything else → Components. Cache bumped v143 → v144.
 **Why:** Nodes created before the type conventions were established (e.g., assemblies with `type: Component`) were landing in the wrong tab. A node with BOM children IS an assembly by structure regardless of how it was typed. Checking `edges.length` from the already-fetched tree data costs nothing extra and is structurally correct.
