@@ -3488,19 +3488,21 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     // The INSERT trigger on bom_components writes the 'created' field snapshot.
     // Also write an explicit version_bumped row so Revision A always appears in
     // the Change Log timeline alongside later bumps (B, C, …).
-    await tdb("bom_component_history").insert({
-      component_id: comp.id,
-      changed_at: new Date().toISOString(),
-      changed_by: session.uid || null,
-      change_type: "version_bumped",
-      part_number: String(part_number).trim(),
-      oem_number: oem_number ? String(oem_number).trim() : null,
-      name: String(name),
-      description: description || null,
-      type,
-      lifecycle_status: null,
-      notes: "Revision A: Initial revision",
-    }).catch(() => { /* non-fatal — main insert already succeeded */ });
+    try {
+      await tdb("bom_component_history").insert({
+        component_id: comp.id,
+        changed_at: new Date().toISOString(),
+        changed_by: session.uid || null,
+        change_type: "version_bumped",
+        part_number: String(part_number).trim(),
+        oem_number: oem_number ? String(oem_number).trim() : null,
+        name: String(name),
+        description: description || null,
+        type,
+        lifecycle_status: null,
+        notes: "Revision A: Initial revision",
+      });
+    } catch { /* non-fatal — main insert already succeeded */ }
     return json({ id: comp.id, part_number, version_id: ver.id });
   }
 
