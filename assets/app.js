@@ -4011,45 +4011,134 @@
       function openAddDocModal() {
         const overlay = el("div", { style: "position:fixed;inset:0;background:#0009;z-index:2000;display:flex;align-items:center;justify-content:center" });
         overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-        const box = el("div", { style: "background:var(--bg,#fff);border-radius:8px;padding:1.5rem;width:min(480px,95vw);max-height:85vh;overflow-y:auto" }, el("div", { class: "loading" }, "Loading documents…"));
+        const box = el("div", { style: "background:var(--bg,#fff);border-radius:8px;padding:1.5rem;width:min(520px,95vw);max-height:90vh;overflow-y:auto" });
         overlay.append(box);
         document.body.append(overlay);
-        API.post(token, "data", {}).then(({ documents: allDocs }) => {
-          const versions = [];
-          (allDocs || []).forEach((doc) => (doc.versions || []).forEach((v) => versions.push({ id: v.id, display: `${doc.name} — v${v.version || v.created_at?.slice(0, 10)}` })));
-          if (!versions.length) { box.replaceChildren(el("p", { class: "notice" }, "No documents in library. Upload in the As Operated tab first.")); return; }
-          const CATS = ["datasheet", "drawing", "test_report", "declaration", "quality_cert", "other"];
-          const dvSel = el("select", { class: "up-text", style: "width:100%;margin-top:4px" }, versions.map((v) => el("option", { value: v.id }, v.display)));
-          const catSel = el("select", { class: "up-text", style: "margin-top:4px" }, CATS.map((c) => el("option", { value: c }, c)));
+
+        const CATS = ["datasheet", "drawing", "test_report", "declaration", "quality_cert", "other"];
+
+        function tabBar(active) {
+          return el("div", { style: "display:flex;gap:4px;margin-bottom:0.8rem" }, [
+            el("button", { class: `btn btn-sm${active === "link" ? " btn-primary" : ""}`, type: "button",
+              onclick: () => { if (active !== "link") renderLinkTab(); } }, "Link existing"),
+            el("button", { class: `btn btn-sm${active === "upload" ? " btn-primary" : ""}`, type: "button",
+              onclick: () => { if (active !== "upload") renderUploadTab(); } }, "Upload & link"),
+          ]);
+        }
+
+        function renderLinkTab() {
+          box.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+          API.post(token, "data", {}).then(({ documents: allDocs }) => {
+            const versions = [];
+            (allDocs || []).forEach((doc) => (doc.versions || []).forEach((v) => versions.push({ id: v.id, display: `${doc.name} — v${v.version || v.created_at?.slice(0, 10)}` })));
+            const statusEl = el("span", { role: "status", style: "font-size:0.8rem;color:#e05454;display:block;min-height:1.2em" }, "");
+            if (!versions.length) {
+              box.replaceChildren(
+                el("h3", { style: "margin:0 0 0.8rem;font-size:1rem" }, "Add document to component"),
+                tabBar("link"),
+                el("p", { class: "notice" }, "No documents in library yet. Use 'Upload & link' to add one now."),
+                el("div", { style: "display:flex;justify-content:flex-end;margin-top:0.8rem" }, [
+                  el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
+                ]),
+              );
+              return;
+            }
+            const dvSel = el("select", { class: "up-text", style: "width:100%;margin-top:4px" }, versions.map((v) => el("option", { value: v.id }, v.display)));
+            const catSel = el("select", { class: "up-text", style: "margin-top:4px" }, CATS.map((c) => el("option", { value: c }, c)));
+            const labelInp = el("input", { class: "up-text", type: "text", placeholder: "Optional label", style: "margin-top:4px" });
+            const supVis = el("input", { type: "checkbox" });
+            box.replaceChildren(
+              el("h3", { style: "margin:0 0 0.8rem;font-size:1rem" }, "Add document to component"),
+              tabBar("link"),
+              el("div", { style: "margin-bottom:0.6rem" }, [el("div", { class: "form-label" }, "Document version"), dvSel]),
+              el("div", { style: "margin-bottom:0.6rem" }, [el("div", { class: "form-label" }, "Category"), catSel]),
+              el("div", { style: "margin-bottom:0.6rem" }, [el("div", { class: "form-label" }, "Label (optional)"), labelInp]),
+              el("div", { style: "display:flex;align-items:center;gap:0.4rem;margin-bottom:0.9rem" }, [supVis, el("span", { style: "font-size:0.85rem" }, "Supplier visible")]),
+              statusEl,
+              el("div", { style: "display:flex;justify-content:flex-end;gap:0.5rem" }, [
+                el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
+                el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: async (ev) => {
+                  ev.target.disabled = true; statusEl.textContent = "";
+                  try {
+                    await API.post(token, "addComponentDocument", { component_id: componentId, document_version_id: dvSel.value, category: catSel.value, label: labelInp.value.trim() || null, is_supplier_visible: supVis.checked });
+                    overlay.remove();
+                    openComponentDetail(componentId, token, panel, nodeData);
+                  } catch (ex) { statusEl.textContent = ex.message; ev.target.disabled = false; }
+                } }, "Link"),
+              ]),
+            );
+          }).catch((ex) => { box.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`)); });
+        }
+
+        function renderUploadTab() {
+          let selectedFile = null;
+          const statusEl = el("span", { role: "status", style: "font-size:0.8rem;color:#e05454;display:block;min-height:1.2em" }, "");
+          const barFill = el("div", { style: "height:100%;background:var(--accent,#2fa564);width:0%;transition:width 0.15s" });
+          const progressEl = el("div", { style: "display:none;height:6px;background:var(--border,#e2e8f0);border-radius:3px;overflow:hidden;margin-bottom:0.5rem" }, barFill);
+          const nameInp = el("input", { class: "up-text", type: "text", placeholder: "Document name", style: "margin-top:4px" });
+          const docCatSel = el("select", { class: "up-text", style: "margin-top:4px" }, CATS.map((c) => el("option", { value: c }, c)));
+          const verInp = el("input", { class: "up-text", type: "text", placeholder: "Version label (auto-numbered if blank)", style: "margin-top:4px" });
+          const linkCatSel = el("select", { class: "up-text", style: "margin-top:4px" }, CATS.map((c) => el("option", { value: c }, c)));
           const labelInp = el("input", { class: "up-text", type: "text", placeholder: "Optional label", style: "margin-top:4px" });
           const supVis = el("input", { type: "checkbox" });
-          const statusEl = el("span", { role: "status", style: "font-size:0.8rem;color:#e05454;display:block;min-height:1.2em" }, "");
+          const fileLabel = el("span", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);display:block;margin-top:2px" }, "No file chosen");
+          const fileInp = el("input", { type: "file", style: "margin-top:4px" });
+          fileInp.onchange = () => {
+            const f = fileInp.files?.[0];
+            selectedFile = f || null;
+            fileLabel.textContent = f ? f.name : "No file chosen";
+            if (f && !nameInp.value.trim()) nameInp.value = f.name.replace(/\.[^.]+$/, "");
+          };
           box.replaceChildren(
-            el("h3", { style: "margin:0 0 1rem;font-size:1rem" }, "Link document to component"),
-            el("div", { style: "margin-bottom:0.7rem" }, [el("div", { class: "form-label" }, "Document version"), dvSel]),
-            el("div", { style: "margin-bottom:0.7rem" }, [el("div", { class: "form-label" }, "Category"), catSel]),
-            el("div", { style: "margin-bottom:0.7rem" }, [el("div", { class: "form-label" }, "Label (optional)"), labelInp]),
+            el("h3", { style: "margin:0 0 0.8rem;font-size:1rem" }, "Add document to component"),
+            tabBar("upload"),
+            el("div", { style: "margin-bottom:0.6rem" }, [el("div", { class: "form-label" }, "File"), fileInp, fileLabel]),
+            el("div", { style: "margin-bottom:0.6rem" }, [el("div", { class: "form-label" }, "Document name"), nameInp]),
+            el("div", { style: "margin-bottom:0.6rem" }, [el("div", { class: "form-label" }, "Document category"), docCatSel]),
+            el("div", { style: "margin-bottom:0.6rem" }, [el("div", { class: "form-label" }, "Version label"), verInp]),
+            el("div", { style: "margin-bottom:0.6rem" }, [el("div", { class: "form-label" }, "Link category (component context)"), linkCatSel]),
+            el("div", { style: "margin-bottom:0.6rem" }, [el("div", { class: "form-label" }, "Label (optional)"), labelInp]),
             el("div", { style: "display:flex;align-items:center;gap:0.4rem;margin-bottom:0.9rem" }, [supVis, el("span", { style: "font-size:0.85rem" }, "Supplier visible")]),
+            progressEl,
             statusEl,
             el("div", { style: "display:flex;justify-content:flex-end;gap:0.5rem" }, [
               el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
               el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: async (ev) => {
-                ev.target.disabled = true; statusEl.textContent = "";
+                if (!selectedFile) { statusEl.textContent = "Pick a file first."; return; }
+                if (!nameInp.value.trim()) { statusEl.textContent = "Document name is required."; return; }
+                ev.target.disabled = true; statusEl.textContent = "Uploading…";
+                progressEl.style.display = "";
                 try {
-                  await API.post(token, "addComponentDocument", { component_id: componentId, document_version_id: dvSel.value, category: catSel.value, label: labelInp.value.trim() || null, is_supplier_visible: supVis.checked });
+                  const { signedUrl, path } = await API.post(token, "docUploadUrl", { fileName: selectedFile.name });
+                  await xhrPut(signedUrl, selectedFile, (p) => { barFill.style.width = `${p}%`; });
+                  barFill.style.width = "100%";
+                  statusEl.textContent = "Linking…";
+                  await API.post(token, "uploadAndLinkComponentDocument", {
+                    component_id: componentId, storage_path: path, file_name: selectedFile.name,
+                    doc_name: nameInp.value.trim(), doc_category: docCatSel.value,
+                    version: verInp.value.trim() || null, comp_category: linkCatSel.value,
+                    label: labelInp.value.trim() || null, is_supplier_visible: supVis.checked,
+                  });
                   overlay.remove();
                   openComponentDetail(componentId, token, panel, nodeData);
-                } catch (ex) { statusEl.textContent = ex.message; ev.target.disabled = false; }
-              } }, "Link"),
+                } catch (ex) {
+                  statusEl.textContent = ex.message;
+                  ev.target.disabled = false;
+                  barFill.style.width = "0%";
+                  progressEl.style.display = "none";
+                }
+              } }, "Upload & link"),
             ]),
           );
-        }).catch((ex) => { box.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`)); });
+        }
+
+        renderLinkTab();
       }
 
       const docsSection = el("div", { style: "margin-top:1rem" }, [
         el("div", { style: "display:flex;align-items:center;gap:0.6rem;margin-bottom:0.4rem" }, [
           el("h4", { style: "margin:0" }, "Documents"),
-          el("button", { class: "btn btn-sm btn-primary", type: "button", style: "font-size:0.72rem;padding:1px 8px", onclick: () => openAddDocModal() }, "+ Link document"),
+          el("button", { class: "btn btn-sm btn-primary", type: "button", style: "font-size:0.72rem;padding:1px 8px", onclick: () => openAddDocModal() }, "+ Add document"),
         ]),
         docRows.length ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
           el("thead", {}, el("tr", {}, ["Category", "Name", "Supplier visible"].map((h) => el("th", {}, h)))),

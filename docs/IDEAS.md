@@ -353,3 +353,57 @@ Each tab sorts alphabetically by name. The tab with newly created items is auto-
 **Related PROPs:** PROP-013 (BOM tree foundation), PROP-015 (Dynamic BOM / product_family type — lands in its own tab), PROP-016 ("+sib" button — the trigger for this idea).
 
 **Status:** Raw idea
+
+---
+### Component Document Lifecycle — Upload, Versioned Linking, AI Diff, Data Extraction — 2026-08-29
+**One sentence:** Make component documents first-class objects with direct upload from the component panel, explicit revision tracking, AI-powered diff when a document is updated, and structured data extraction so test specs and substance declarations live in the database — not just as PDF attachments.
+
+**Problem it solves:**
+The current flow has four gaps:
+
+1. **Friction to upload:** You must go to the As Operated tab, upload the file there, then come back to the BOM Node and link it. When you have a test report for a specific component, the natural place to upload it is the component panel.
+
+2. **No revision signal:** `component_documents` links a document version to a component by `component_id` only — not to a specific component revision. When the component bumps from Rev B → Rev C, the old test reports stay linked with no flag that they may no longer apply to the new revision.
+
+3. **No AI diff on document update:** When a new version of a linked document is uploaded, there is no summary of what changed — the user must read both PDFs manually. The As Operated tab already does this via AI (deviation scan / interpretation diff) — the same pattern should apply here.
+
+4. **Data stays locked in PDFs:** In other parts of the portal, documents are "read in" — clauses into `standard_clauses`, interpretations into `as_operates_interpretations`, statements into `document_statements`. Component documents are not. A test report with a pass/fail result, lab accreditation, and test scope is just an opaque attachment.
+
+**MVP scope — four layers, each independently shippable:**
+
+**Layer 1 (2–3 h) — Direct upload from component panel:**
+Add a "+ Upload & link" tab to the "Link document" modal. Calls existing `uploadDocument` + `addDocumentVersion` actions, then immediately links via `addComponentDocument`. No new DB tables. Document also appears in As Operated — nothing siloed.
+
+**Layer 2 (3–4 h) — Revision-aware document validity:**
+Add `component_revision TEXT` (populated at link time) and `needs_review BOOLEAN DEFAULT FALSE` to `component_documents`. When `addBomVersion` creates a new component revision, the edge function sets `needs_review = TRUE` on all prior-revision documents. UI shows amber "⚠ Review for Rev C" badge. User dismisses per-document with a reason logged to `bom_component_history`.
+
+**Layer 3 (4–6 h) — AI diff when updating a document link:**
+When the selected document version is a newer version of a document already linked to the component, the modal shows an AI-generated "What changed?" bullet list — calls `diffComponentDocumentVersions` using Haiku comparing two PDF texts. Reuses the same two-PDF comparison pattern already in the deviation scan.
+
+**Layer 4 (8–12 h) — Structured data extraction:**
+Per category, AI extracts key fields from the PDF and populates structured tables:
+- `test_report` → test lab, accreditation number, test scope, test date, pass/fail → nullable columns on `component_documents` (aligns with PROP-014)
+- `declaration` (REACH/RoHS) → substance list → upserts into `component_materials` with `source = 'declaration'`
+- `datasheet` → key specs (voltage, current, power, temp range) → new `component_specs` table
+All extractions shown for user review before saving — never auto-commit.
+
+**Tables involved:**
+Existing (extended): `component_documents` (add `component_revision`, `needs_review`, test-report fields), `component_materials` (declaration extraction)
+New (Layer 4 only): `component_specs`: `{id, organization_id NOT NULL FK→organizations, component_id FK→bom_components, spec_name, spec_value, spec_unit, source_document_version_id FK→document_versions, created_at}`
+
+**Effort estimate:** 17–25 h total (Layer 1: 2–3 h, Layer 2: 3–4 h, Layer 3: 4–6 h, Layer 4: 8–12 h). Each layer ships independently.
+
+**Risks:**
+- PDF extraction quality: Layer 4 depends on text-readable PDFs — scanned images will fail. Surface extraction failures clearly; raw PDF stays authoritative.
+- needs_review noise: Frequent component revisions create constant amber warnings. Mitigate by only flagging `test_report` and `declaration` categories, not datasheets.
+- Two revision axes: `component_revision` (which component rev the doc covers) vs. document version number. Must be clearly labelled in the UI to avoid confusion.
+- Layer 4 accuracy: all AI-extracted data shown for user review before saving — never auto-commit.
+- PROP-012: all new tables carry `organization_id NOT NULL`; extractions run server-side only.
+
+**Related PROPs:**
+- PROP-014 (Compliance–BOM Integration — Layer 2's revision validity is a lighter version of the `component_clause_evidence` pending_retest pattern)
+- PROP-013 (PIS foundation — `component_documents` and `component_materials` defined here)
+- PROP-011 (Requirement Links — `document_statements` is the established "read into DB" pattern this extends to component docs)
+- PROP-012 (Multi-tenancy — `organization_id` required on `component_specs`)
+
+**Status:** Raw idea — Layer 1 ready to build; Layers 2–4 depend on PROP-014 decisions

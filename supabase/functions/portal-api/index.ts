@@ -3855,6 +3855,62 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     return json({ id: data.id });
   }
 
+  // PROP-021 Layer 1 — upload a new document and link it to a BOM component in one round-trip.
+  if (action === "uploadAndLinkComponentDocument") {
+    if (role !== "rushroom") return json({ error: "Rushroom only" }, 403);
+    const { component_id, storage_path, file_name, doc_name, doc_category, version, notes, comp_category, label, is_supplier_visible } = body;
+    if (!component_id || !storage_path || !file_name || !doc_name)
+      return json({ error: "component_id, storage_path, file_name, doc_name required" }, 400);
+    const VALID_COMP_CATS = ["datasheet","drawing","test_report","declaration","quality_cert","other"];
+    const compCat = VALID_COMP_CATS.includes(String(comp_category ?? "")) ? String(comp_category) : "other";
+    const docName = String(doc_name).trim().slice(0, 200);
+    const docCategory = (String(doc_category ?? "").trim() || "Uncategorised").slice(0, 80);
+    const storagePath = String(storage_path).slice(0, 400);
+    const fileName = String(file_name).slice(0, 200);
+    // 1. Create document row
+    const { data: doc, error: docErr } = await tdb("documents").insert({
+      name: docName, category: docCategory, storage_path: storagePath,
+      kind: "operational", audience: ["internal"],
+    }).select("id").maybeSingle();
+    if (docErr || !doc) return json({ error: docErr?.message ?? "Failed to create document" }, 500);
+    // 2. Auto-number version label when none supplied
+    let versionLabel = String(version ?? "").trim();
+    if (!versionLabel) {
+      const { count } = await tdb("document_versions").select("id", { count: "exact", head: true }).eq("document_id", doc.id);
+      versionLabel = `v${(count ?? 0) + 1}`;
+    }
+    // 3. Create document_versions row and get back its ID
+    const { data: ver, error: verErr } = await tdb("document_versions").insert({
+      document_id: doc.id, version: versionLabel.slice(0, 80),
+      file_name: fileName, storage_path: storagePath,
+      notes: String(notes ?? "").slice(0, 1000), uploaded_by: "rushroom",
+    }).select("id").maybeSingle();
+    if (verErr || !ver) return json({ error: verErr?.message ?? "Failed to create version" }, 500);
+    // 4. Link version to component
+    const { error: linkErr } = await tdb("component_documents").insert({
+      component_id, document_version_id: ver.id, category: compCat,
+      label: label ? String(label).slice(0, 200) : null,
+      is_supplier_visible: Boolean(is_supplier_visible),
+    });
+    if (linkErr) return json({ error: linkErr.message }, 400);
+    // 5. Audit trail
+    const { data: comp } = await tdb("bom_components")
+      .select("organization_id, part_number, oem_number, name, description, type, lifecycle_status")
+      .eq("id", component_id).maybeSingle();
+    if (comp) {
+      await tdb("bom_component_history").insert({
+        organization_id: comp.organization_id, component_id,
+        changed_at: new Date().toISOString(), changed_by: session.uid || null,
+        change_type: "document_linked",
+        part_number: comp.part_number, oem_number: comp.oem_number,
+        name: comp.name, description: comp.description,
+        type: comp.type, lifecycle_status: comp.lifecycle_status,
+        notes: `Document uploaded & linked: ${docName} (${compCat})`,
+      });
+    }
+    return json({ ok: true });
+  }
+
   // PROP-019: COGS/cost action blocks removed — financial analysis belongs in ERP, not compliance portal.
 
 
