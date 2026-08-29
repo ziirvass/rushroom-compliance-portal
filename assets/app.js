@@ -3499,6 +3499,8 @@
       childrenOf[e.parent_id].push(e);
     });
 
+    const isDynamicBom = !!(nodeMap[rootId] && nodeMap[rootId].type === "product_family");
+
     // Collapsed set: posNums whose children are hidden
     const collapsed = new Set();
 
@@ -3596,8 +3598,8 @@
           el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0;flex-wrap:nowrap" }, [
             // ⚙ variant-configure button hidden until import integration is built (PROP-018)
 
-            parentNode ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+sib") : null,
-            el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId) }, "+child"),
+            parentNode && (!isDynamicBom || parentNode.type === "product_family") ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId, { linkExistingOnly: isDynamicBom }) }, "+sib") : null,
+            isDynamicBom && depth > 0 ? null : el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId, { linkExistingOnly: isDynamicBom }) }, "+child"),
             el("button", { class: "btn btn-sm", type: "button", title: "Show details", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openComponentDetail(n.id, token, detailPanel, n) }, "Detail"),
             el("button", {
               class: "btn btn-sm", type: "button",
@@ -3638,7 +3640,8 @@
   }
 
   // --- Add-child modal: link existing OR create new and link ---------------
-  function openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) {
+  function openAddChildModal(parentNode, allComponents, token, onRefresh, rootId, opts) {
+    const linkExistingOnly = !!(opts && opts.linkExistingOnly);
     const overlay = el("div", { style: "position:fixed;inset:0;background:#0009;z-index:1001;display:flex;align-items:center;justify-content:center" });
     const dialog = el("div", { style: "background:var(--bg,#1a1f2e);border:1px solid var(--border,#2d3748);border-radius:8px;padding:1.5rem;width:min(520px,95vw);max-height:90vh;overflow-y:auto" });
 
@@ -3652,7 +3655,7 @@
     // Tab bar
     const tabExisting = el("button", { type: "button", style: "flex:1;border-radius:0;border:none;padding:0.4rem 0.75rem;font-size:0.82rem;font-weight:600;cursor:pointer;transition:background 0.1s" }, "Link existing");
     const tabNew      = el("button", { type: "button", style: "flex:1;border-radius:0;border:none;padding:0.4rem 0.75rem;font-size:0.82rem;font-weight:600;cursor:pointer;transition:background 0.1s" }, "Create new");
-    const tabBar = el("div", { style: "display:flex;border:1px solid var(--border,#2d3748);border-radius:4px;overflow:hidden;margin-bottom:0.9rem" }, [tabExisting, tabNew]);
+    const tabBar = el("div", { style: `display:${linkExistingOnly ? "none" : "flex"};border:1px solid var(--border,#2d3748);border-radius:4px;overflow:hidden;margin-bottom:0.9rem` }, [tabExisting, tabNew]);
 
     // Existing component section
     const candidates = (allComponents || []).filter((c) => c.id !== parentNode.id).sort((a, b) => a.part_number.localeCompare(b.part_number));
