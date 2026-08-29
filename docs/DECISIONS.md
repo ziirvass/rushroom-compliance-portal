@@ -157,6 +157,13 @@ _Append-only. Claude Code appends one entry here after every /ship._
 
 ---
 **Date:** 2026-08-29
+**Feature:** BOM toolbar — rename labels to "+ New BOM Node" / "Create BOM Node"
+**Decision:** Toolbar button renamed from "+ New Product" to "+ New BOM Node"; modal title to "New BOM Node"; submit button to "Create BOM Node"; empty-state hint updated to match. Cache bumped v125→v127.
+**Why:** The original labels implied only products could be created at the root level, but the toolbar now supports Product, Component, SparePart, Refurb, and Product Family types.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
 **Feature:** Edge function — fix .catch() on tdb insert
 **Decision:** The non-fatal `bom_component_history` write in `addComponent` used `.catch()` chained directly on `tdb().insert()`. Supabase query builders are thenable but not full Promises — they have no `.catch()` method, so this threw "is not a function" at runtime. Replaced with a `try { await ... } catch {}` block.
 **Why:** Only became visible once the outer try-catch (previous commit) started surfacing errors as readable JSON instead of raw Deno 500s.
