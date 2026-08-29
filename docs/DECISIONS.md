@@ -189,3 +189,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Four targeted changes to `renderBomTree`: (1) QTY cell now always renders `×N` (was hidden when N=1). (2) "Expand all" and "Collapse all" buttons added above the column header inside `render()`, sharing the `collapsed` Set and `buildRows()` closure directly. (3) Column header div gets `position:sticky;top:0;z-index:1` so it stays visible while scrolling a long tree. (4) Action button labels compacted to `⚙`, `+sib`, `+child`, `Detail`, `Del` with `title` tooltip attributes, saving horizontal space. Cache bumped v129→v130.
 **Why:** The previous UI was ambiguous (a missing QTY could mean "not set" or "= 1"), scroll-heavy (no way to expand/collapse the whole tree at once), and the action buttons were wide enough to push the tree off-screen on narrow viewports. No new data model, API, or DB changes — purely presentation.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
+**Feature:** BOM tree grid alignment fix + component cell redesign
+**Decision:** Root cause of column misalignment: the actions column was `auto`-width, so rows with 3 buttons (root) vs 5 buttons (family non-root) resolved `1fr` differently, shifting every other column. Fixed by setting actions column to `12rem` in both header and row grid templates. Also: component cell redesigned — bold name is now on the first line with badges; part number drops to a second line in tiny monospace (previously the part number pushed the name right, making it hard to scan). COGS cells now show `—` instead of blank when no cost data. Rows highlight subtly on `mouseenter`. Cache bumped v130→v131.
+**Why:** The `auto` column bug existed since the action button set was made conditional (sibling/configure buttons added in PROP-016/015). Each row is an independent CSS grid; `auto` resolves differently per row when content differs, so `1fr` is not the same width across rows — hence visual misalignment. Fixed-width column is the correct solution.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md

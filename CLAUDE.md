@@ -47,6 +47,6 @@ SaaS (PROP-012 IN PROGRESS): organizations, memberships,
 Links (PROP-011): requirement_links, document_statements
 
 ## Current state
-Frontend cache version: ?v=130
+Frontend cache version: ?v=131
 Last SYSTEM_OVERVIEW audit: 2026-08-29
 PROP-012 (multi-tenant SaaS): IN PROGRESS — do not break organization_id logic

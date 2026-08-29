@@ -3541,7 +3541,7 @@
     ]));
 
     wrap.append(el("div", {
-        style: "display:grid;grid-template-columns:6rem 1fr 4.5rem 7rem 3.5rem auto;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem;position:sticky;top:0;z-index:1;background:var(--bg,#fff)",
+        style: "display:grid;grid-template-columns:6rem 1fr 4rem 7rem 3.5rem 12rem;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem;position:sticky;top:0;z-index:1;background:var(--bg,#fff)",
       }, ["Pos.", "Component", "Qty", "Status", "COGS", ""].map((t) => el("span", {}, t))));
 
       rows.forEach(({ n, qty, posNum, depth, ancestorLastFlags, hasChildren, edgeCondition, parentNode }) => {
@@ -3569,24 +3569,31 @@
           ? el("span", { style: "font-size:0.68rem;font-weight:700;background:#2fa56420;color:#2fa564;border-radius:4px;padding:1px 5px;flex-shrink:0;white-space:nowrap;margin-left:4px" }, "FAMILY")
           : null;
 
-        // Component cell: monospace connector + toggle + part# + name + badges
-        const compCell = el("div", { style: "display:flex;align-items:center;min-width:0;overflow:hidden" }, [
+        // Component cell: connector + toggle | name + badges (line 1) / part# (line 2)
+        const nameBlock = el("div", { style: "min-width:0;flex:1;overflow:hidden" }, [
+          el("div", { style: "display:flex;align-items:center;gap:0.2rem;min-width:0" }, [
+            el("span", { style: "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, n.name),
+            familyBadge, condTag,
+          ].filter(Boolean)),
+          el("div", { style: "font-family:monospace;font-size:0.67rem;color:var(--muted,#8b93a1);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" }, n.part_number),
+        ]);
+        const compCell = el("div", { style: "display:flex;align-items:center;gap:0.1rem;min-width:0;overflow:hidden" }, [
           el("span", { style: "font-family:monospace;white-space:pre;color:var(--muted,#8b93a1);font-size:0.76rem;flex-shrink:0;opacity:0.6" }, connector(depth, ancestorLastFlags)),
           tog,
-          el("span", { style: "font-family:monospace;font-size:0.74rem;color:var(--muted,#8b93a1);flex-shrink:0;margin-right:0.35rem" }, n.part_number),
-          el("span", { style: "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, n.name),
-          familyBadge, condTag,
-        ].filter(Boolean));
+          nameBlock,
+        ]);
 
         const row = el("div", {
-          style: `display:grid;grid-template-columns:6rem 1fr 4.5rem 7rem 3.5rem auto;gap:0.5rem;align-items:center;padding:0.22rem 0.5rem;border-left:3px solid ${isFamily ? "#2fa564" : heatColor || "transparent"};border-radius:3px;margin-bottom:1px`,
+          style: `display:grid;grid-template-columns:6rem 1fr 4rem 7rem 3.5rem 12rem;gap:0.5rem;align-items:center;padding:0.3rem 0.5rem;border-left:3px solid ${isFamily ? "#2fa564" : heatColor || "transparent"};border-radius:3px;margin-bottom:1px;cursor:default`,
+          onmouseenter: (ev) => { ev.currentTarget.style.background = "var(--bg-2,rgba(0,0,0,0.03))"; },
+          onmouseleave: (ev) => { ev.currentTarget.style.background = ""; },
         }, [
           el("span", { style: "font-family:monospace;font-size:0.78rem;font-weight:600;color:var(--muted,#8b93a1)" }, posNum),
           compCell,
           el("span", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);text-align:right" }, `×${qty}`),
           lifecycleBadge(n.lifecycle_status),
-          heatColor ? el("span", { style: `font-size:0.72rem;font-weight:600;color:${heatColor}` }, `${cogsPct}%`) : el("span"),
-          el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0" }, [
+          heatColor ? el("span", { style: `font-size:0.72rem;font-weight:600;color:${heatColor}` }, `${cogsPct}%`) : el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1)" }, "—"),
+          el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0;flex-wrap:nowrap" }, [
             isFamily ? el("button", { class: "btn btn-sm", type: "button", title: "Configure", style: "padding:1px 5px;font-size:0.7rem;color:#2fa564;border-color:#2fa56440", onclick: () => openConfigureModal(n, token, onRefresh) }, "⚙") : null,
             parentNode ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+sib") : null,
             el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId) }, "+child"),
