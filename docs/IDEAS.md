@@ -228,3 +228,22 @@ All new tables: `organization_id NOT NULL FK → organizations`
 - PROP-012 (Multi-tenancy — all new tables carry `organization_id`; configuration data is per-tenant and should never be cross-org visible)
 
 **Status:** Raw idea
+
+---
+### BOM Tree — Add Sibling shortcut button — 2026-08-29
+
+**One sentence:** Add a "+ sibling" button next to each non-root BOM row so users can add a peer node without having to locate and click the parent's "+ child" button.
+
+**Problem it solves:** Multiple children per parent is already fully supported in the data model and API — but users don't discover it. The natural expectation is a button at the same visual level as the node you want to peer with. Currently the only way is to scroll back up, find the parent row, and click its "+ child" button.
+
+**MVP scope:** On every non-root row, render a small "+ sibling" button alongside the existing row actions. Clicking it calls `openAddChildModal` with the **parent** of the current node as the target. No new API actions, no schema changes — pure frontend, reusing the existing `addBomEdge` flow. The parent ID is already available in the edge data loaded by `getBom`.
+
+**Tables involved:** bom_edges, bom_components — existing, no changes needed.
+
+**Effort estimate:** 1–2 hours (frontend only).
+
+**Risks:** The row action area already has up to four buttons (+ child, ⚙ Configure, Details, Delete). A fifth button may crowd narrow viewports — may need icon-only style or an overflow menu for small screens.
+
+**Related PROPs:** PROP-013 (BOM tree foundation).
+
+**Status:** Raw idea
