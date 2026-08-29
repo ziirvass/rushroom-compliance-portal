@@ -3637,6 +3637,7 @@
           style: `display:grid;grid-template-columns:6rem 1fr 4rem 7rem 12rem;gap:0.5rem;align-items:center;padding:0.3rem 0.5rem;border-left:3px solid ${isFamily ? "#2fa564" : "transparent"};border-radius:3px;margin-bottom:1px;cursor:default`,
           onmouseenter: (ev) => { ev.currentTarget.style.background = "var(--bg-2,rgba(0,0,0,0.03))"; },
           onmouseleave: (ev) => { ev.currentTarget.style.background = ""; },
+          ondblclick: (ev) => { ev.stopPropagation(); openComponentDetail(n.id, token, detailPanel, n); },
         }, [
           el("span", { style: "font-family:monospace;font-size:0.78rem;font-weight:600;color:var(--muted,#8b93a1)" }, posNum),
           compCell,
@@ -3647,10 +3648,9 @@
 
             parentNode && !isDynamicBom ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+sib") : null,
             isDynamicBom && depth > 0 ? null : el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId, { linkExistingOnly: isDynamicBom }) }, "+child"),
-            el("button", { class: "btn btn-sm", type: "button", title: "Show details", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openComponentDetail(n.id, token, detailPanel, n) }, "Detail"),
             el("button", {
               class: "btn btn-sm", type: "button",
-              style: "padding:1px 5px;font-size:0.7rem;color:#e05454;border-color:#e0545440",
+              style: "padding:1px 6px;font-size:0.85rem;font-weight:700;color:#e05454;border-color:#e0545440;line-height:1",
               title: depth > 0 ? "Remove from this assembly" : "Delete from registry",
               onclick: async (ev) => {
                 ev.stopPropagation();
@@ -3659,7 +3659,7 @@
                   if (depth > 0) {
                     // Child row: unlink from this assembly only — component stays in registry
                     if (!confirm(`Remove "${n.name}" from this assembly?\n\nThe component stays in the registry and can be re-linked. This cannot be undone.`)) {
-                      ev.target.disabled = false; ev.target.textContent = "Del";
+                      ev.target.disabled = false; ev.target.textContent = "×";
                       return;
                     }
                     await API.post(token, "removeBomEdge", { parent_id: parentNode.id, child_id: n.id });
@@ -3694,16 +3694,16 @@
                       mo.append(el("div", { style: "background:var(--bg,#fff);border:2px solid #e05454;border-radius:10px;padding:1.5rem;width:min(440px,95vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px #0003" }, rows));
                       document.body.append(mo);
                     });
-                    if (!confirmed) { ev.target.disabled = false; ev.target.textContent = "Del"; return; }
+                    if (!confirmed) { ev.target.disabled = false; ev.target.textContent = "×"; return; }
                     await API.post(token, "deleteComponent", { component_id: n.id });
                   }
                   onRefresh();
                 } catch (ex) {
-                  ev.target.disabled = false; ev.target.textContent = "Del";
+                  ev.target.disabled = false; ev.target.textContent = "×";
                   alert(`Failed: ${ex.message}`);
                 }
               },
-            }, "Del"),
+            }, "×"),
           ].filter(Boolean)),
         ]);
         wrap.append(row);
