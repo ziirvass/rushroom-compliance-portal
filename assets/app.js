@@ -3598,20 +3598,36 @@
             el("button", {
               class: "btn btn-sm", type: "button",
               style: "padding:1px 5px;font-size:0.7rem;color:#e05454;border-color:#e0545440",
+              title: depth > 0 ? "Remove from this assembly" : "Delete from registry",
               onclick: async (ev) => {
                 ev.stopPropagation();
-                const childCount = (childrenOf[n.id] || []).length;
-                const msg = childCount
-                  ? `Delete "${n.name}"?\n\nThis component has ${childCount} direct child${childCount > 1 ? "ren" : ""}. They will become top-level roots — their own sub-trees are preserved.\n\nThis cannot be undone.`
-                  : `Delete "${n.name}"?\n\nThis cannot be undone.`;
-                if (!confirm(msg)) return;
                 ev.target.disabled = true; ev.target.textContent = "…";
                 try {
-                  await API.post(token, "deleteComponent", { component_id: n.id });
+                  if (depth > 0) {
+                    // Child row: unlink from this assembly only — component stays in registry
+                    if (!confirm(`Remove "${n.name}" from this assembly?\n\nThe component stays in the registry and can be re-linked. This cannot be undone.`)) {
+                      ev.target.disabled = false; ev.target.textContent = "Del";
+                      return;
+                    }
+                    await API.post(token, "removeBomEdge", { parent_id: parentNode.id, child_id: n.id });
+                  } else {
+                    // Root row: delete from registry — check where it's used first
+                    const { parents } = await API.post(token, "listParentsOf", { component_id: n.id });
+                    const childCount = (childrenOf[n.id] || []).length;
+                    let msg = `Delete "${n.name}" from the registry?\n\nThis removes the component and all its compliance data permanently.`;
+                    if (parents && parents.length) {
+                      const names = parents.map((p) => `  • ${p.parent ? p.parent.name : p.parent_id}`).join("\n");
+                      msg += `\n\n⚠️ This component is linked in ${parents.length} assembl${parents.length > 1 ? "ies" : "y"}:\n${names}\nIt will be removed from all of them.`;
+                    }
+                    if (childCount) msg += `\n\n${childCount} direct child${childCount > 1 ? "ren" : ""} will become standalone BOM Nodes.`;
+                    msg += "\n\nThis cannot be undone.";
+                    if (!confirm(msg)) { ev.target.disabled = false; ev.target.textContent = "Del"; return; }
+                    await API.post(token, "deleteComponent", { component_id: n.id });
+                  }
                   onRefresh();
                 } catch (ex) {
                   ev.target.disabled = false; ev.target.textContent = "Del";
-                  alert(`Delete failed: ${ex.message}`);
+                  alert(`Failed: ${ex.message}`);
                 }
               },
             }, "Del"),
