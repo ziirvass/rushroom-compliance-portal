@@ -275,3 +275,39 @@ All new tables: `organization_id NOT NULL FK → organizations`
 **Related PROPs:** PROP-013 (BOM tree), PROP-016 (sibling button — already built, its button is one of the ones to compact).
 
 **Status:** Raw idea
+
+---
+### Dynamic BOM — Order-Driven Configuration Import — 2026-08-29
+
+**One sentence:** Rename "product_family" to "Dynamic BOM", deprecate in-portal configuration pre-building, and instead import a specific customer order's resolved BOM from the external storefront configurator — so compliance is tracked per concrete, ordered configuration rather than per hypothetical variant.
+
+**Problem it solves:** PROP-015 assumes configurations are built and stored in the compliance portal ahead of time. In reality, Rushroom's 5m wardrobe system has 5,000+ possible configurations — the vast majority of which will never be ordered. Pre-building them in the portal wastes effort and creates phantom compliance records for products that don't exist. More importantly, compliance management must anchor to real orders: a specific customer received a specific configuration, and that configuration's components must be traceable to CE declarations, test reports, and regulatory requirements. The current model cannot do this — it tracks abstract families, not real shipped products.
+
+**Real workflow:**
+1. Customer configures a wardrobe on the storefront → order is created in the order system
+2. The order system resolves the Dynamic BOM for that order (same logic as the bulk render pipeline already in Rushroom's stack)
+3. The compliance portal imports that resolved BOM as a concrete configuration — linking to the component records already registered here
+4. Compliance evidence (DoC, test scope, REACH declarations) is tracked against that concrete configuration
+
+**MVP scope:**
+- Rename the `product_family` type concept to "Dynamic BOM" in the UI (label change only, keep `product_family` in the DB as the type key until the full rework)
+- Add a read-only "Imported Configurations" sub-view under a Dynamic BOM root that shows concretely ordered configurations (imported, not manually created)
+- Build a `POST /importConfiguration` API action that accepts a minimal payload: `{ family_id, external_order_id, selections: { attr: value, … }, resolved_component_ids: [uuid, …] }` and creates a `saved_configuration` record linked to those component IDs
+- Display the imported configuration as a flattened BOM with all component links resolved from the portal's own `bom_components` table
+
+**What must be learned first (blocker):**
+The exact shape of the external order system's Dynamic BOM payload is unknown. Before building the import endpoint, Rushroom must extract one real order from the order system and document: which fields identify a component, what the configuration selection looks like as a data structure, and whether the component IDs match the portal's part numbers or OEM numbers. This is the master data / ID alignment problem — the portal uses `part_number` and `oem_number`; the order system may use something entirely different.
+
+**Tables involved:** `bom_components` (existing — the component registry), `bom_edges` (existing — tree structure), `saved_configurations` (existing — stores named configs), potentially a new `configuration_imports` table to track the external order ID, import timestamp, and raw payload for audit purposes.
+
+**Effort estimate:** 2–4 hours for the import endpoint + UI, once the payload shape is known. Investigation/alignment of IDs with the external system: unknown — could be 0.5 hours or several days depending on data quality.
+
+**Risks:**
+- Component IDs / part numbers may not match between the order system and the compliance portal — requires a mapping layer or enforced shared master data
+- The external Dynamic BOM may include components not yet registered in the compliance portal — the import must either fail gracefully or auto-register stubs for unknown parts
+- The concept of "specific configuration" may not map cleanly to the portal's tree structure if the external BOM uses a flat list rather than a hierarchy
+- Deprecating in-portal configuration building means PROP-015's configure modal and attribute/value tables become secondary tools (useful for exploration only, not for compliance records)
+
+**Related PROPs:** PROP-015 (the in-portal variant BOM that this partially supersedes), PROP-013 (BOM tree foundation — components already registered here), PROP-014 (Compliance–BOM Integration — evidence must eventually be per concrete configuration, not per abstract family)
+
+**Status:** Raw idea — blocked on learning the external order system's Dynamic BOM payload format
