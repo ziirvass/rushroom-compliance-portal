@@ -234,6 +234,13 @@ _Append-only. Claude Code appends one entry here after every /ship._
 
 ---
 **Date:** 2026-08-29
+**Feature:** Link document to BOM Node from detail panel
+**Decision:** Added `openAddDocModal()` inside `openComponentDetail` — a "+ Link document" button in the Documents section heading opens a modal that fetches the document library via the existing `data` action, lets the user pick a version + category + label + supplier-visible flag, and calls `addComponentDocument`. On success, the detail panel refreshes in-place. No new API actions — `addComponentDocument` was already implemented on the backend but had no UI. Cache bumped v146 → v147.
+**Why:** Documents need to be added to components after initial creation (test reports arrive later, declarations are issued later). The `data` action already returns all document versions so no new endpoint was needed. Linking (not uploading) is the correct model — files are managed in the As Operated tab, components reference them.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
 **Feature:** Detail panel scroll-into-view on open
 **Decision:** Added `panel.scrollIntoView({ behavior: "smooth", block: "nearest" })` immediately after `panel.style.display = ""` in `openComponentDetail`. Cache bumped v145 → v146.
 **Why:** The detail panel sits below the BOM tree in DOM order. Opening it via double-click left it out of the viewport — users had to scroll manually to see it. `block: "nearest"` scrolls the minimum distance needed to make the panel fully visible without overshooting.

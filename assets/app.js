@@ -4007,8 +4007,50 @@
           el("td", {}, d.category), el("td", {}, d.label || d.document_name || "—"),
           el("td", {}, d.is_supplier_visible ? "Yes" : "No"),
         ]));
+
+      function openAddDocModal() {
+        const overlay = el("div", { style: "position:fixed;inset:0;background:#0009;z-index:2000;display:flex;align-items:center;justify-content:center" });
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        const box = el("div", { style: "background:var(--bg,#fff);border-radius:8px;padding:1.5rem;width:min(480px,95vw);max-height:85vh;overflow-y:auto" }, el("div", { class: "loading" }, "Loading documents…"));
+        overlay.append(box);
+        document.body.append(overlay);
+        API.post(token, "data", {}).then(({ documents: allDocs }) => {
+          const versions = [];
+          (allDocs || []).forEach((doc) => (doc.versions || []).forEach((v) => versions.push({ id: v.id, display: `${doc.name} — v${v.version || v.created_at?.slice(0, 10)}` })));
+          if (!versions.length) { box.replaceChildren(el("p", { class: "notice" }, "No documents in library. Upload in the As Operated tab first.")); return; }
+          const CATS = ["datasheet", "drawing", "test_report", "declaration", "quality_cert", "other"];
+          const dvSel = el("select", { class: "up-text", style: "width:100%;margin-top:4px" }, versions.map((v) => el("option", { value: v.id }, v.display)));
+          const catSel = el("select", { class: "up-text", style: "margin-top:4px" }, CATS.map((c) => el("option", { value: c }, c)));
+          const labelInp = el("input", { class: "up-text", type: "text", placeholder: "Optional label", style: "margin-top:4px" });
+          const supVis = el("input", { type: "checkbox" });
+          const statusEl = el("span", { role: "status", style: "font-size:0.8rem;color:#e05454;display:block;min-height:1.2em" }, "");
+          box.replaceChildren(
+            el("h3", { style: "margin:0 0 1rem;font-size:1rem" }, "Link document to component"),
+            el("div", { style: "margin-bottom:0.7rem" }, [el("div", { class: "form-label" }, "Document version"), dvSel]),
+            el("div", { style: "margin-bottom:0.7rem" }, [el("div", { class: "form-label" }, "Category"), catSel]),
+            el("div", { style: "margin-bottom:0.7rem" }, [el("div", { class: "form-label" }, "Label (optional)"), labelInp]),
+            el("div", { style: "display:flex;align-items:center;gap:0.4rem;margin-bottom:0.9rem" }, [supVis, el("span", { style: "font-size:0.85rem" }, "Supplier visible")]),
+            statusEl,
+            el("div", { style: "display:flex;justify-content:flex-end;gap:0.5rem" }, [
+              el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
+              el("button", { class: "btn btn-sm btn-primary", type: "button", onclick: async (ev) => {
+                ev.target.disabled = true; statusEl.textContent = "";
+                try {
+                  await API.post(token, "addComponentDocument", { component_id: componentId, document_version_id: dvSel.value, category: catSel.value, label: labelInp.value.trim() || null, is_supplier_visible: supVis.checked });
+                  overlay.remove();
+                  openComponentDetail(componentId, token, panel, nodeData);
+                } catch (ex) { statusEl.textContent = ex.message; ev.target.disabled = false; }
+              } }, "Link"),
+            ]),
+          );
+        }).catch((ex) => { box.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`)); });
+      }
+
       const docsSection = el("div", { style: "margin-top:1rem" }, [
-        el("h4", {}, "Documents"),
+        el("div", { style: "display:flex;align-items:center;gap:0.6rem;margin-bottom:0.4rem" }, [
+          el("h4", { style: "margin:0" }, "Documents"),
+          el("button", { class: "btn btn-sm btn-primary", type: "button", style: "font-size:0.72rem;padding:1px 8px", onclick: () => openAddDocModal() }, "+ Link document"),
+        ]),
         docRows.length ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
           el("thead", {}, el("tr", {}, ["Category", "Name", "Supplier visible"].map((h) => el("th", {}, h)))),
           el("tbody", {}, ...docRows),
