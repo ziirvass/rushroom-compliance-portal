@@ -328,3 +328,28 @@ The exact shape of the external order system's Dynamic BOM payload is unknown. B
 **Risks:** Removing COGS tables breaks the Cost Canvas UI and any data already entered — migration path needed. Keeping them creates ongoing maintenance cost and source-of-truth confusion. The component registry becoming the shared parts library requires that the order system and future operational systems agree to use compliance portal part_numbers/oem_numbers as the canonical ID — this is a master data governance decision that requires alignment across all teams.
 **Related PROPs:** PROP-013 (built the cost/financial layer now in question), PROP-018 (Dynamic BOM import from order system — assumes ID alignment). This idea is a prerequisite to PROP-018 going well.
 **Status:** Raw idea — needs cross-team discussion before any code decision
+
+---
+### Product List — Split by Type (Components / Assemblies / Dynamic BOMs) — 2026-08-29
+**One sentence:** Replace the flat product list with three client-side tabs — Components, Assemblies, Dynamic BOMs — so each type has its own sorted group and newly created items surface in the right place immediately.
+
+**Problem it solves:** The product list currently mixes isolated components (type: Component / SparePart / Refurb), product assemblies (type: Product, has BOM children), and Dynamic BOM families (type: product_family) in one unsorted flat list. When a user creates a new component via "+sib" in an embedded BOM, it lands at the bottom of this mixed list — invisible without scrolling. As the registry grows, finding any specific item becomes a scan. Splitting by type group removes the ambiguity, puts new items in a predictable place, and makes the intent of each entry immediately clear (part vs. product vs. family).
+
+**MVP scope:** Client-side tab filter on the product list — same `getBom` / list API call, rendered into three tabs:
+1. **Components** — `type IN (Component, SparePart, Refurb)` — the parts library; newly created nodes from "+sib" land here
+2. **Assemblies** — `type = Product` — products with BOM trees; the compliance-relevant structured products
+3. **Dynamic BOMs** — `type = product_family` — configure-to-order family templates
+Each tab sorts alphabetically by name. The tab with newly created items is auto-selected after creation so the user lands on it. No schema changes, no new API actions — pure frontend.
+
+**Tables involved:** `bom_components` — existing, no changes needed.
+
+**Effort estimate:** 2–3 hours (frontend only).
+
+**Risks:**
+- A `Component` type node CAN be the root of a sub-assembly (it has children in `bom_edges`). The split is by `type` field, not by whether it has children — this may surprise users who expect "Assemblies" to mean any node with children. Mitigation: keep the label as "Components" (not "Parts") and document that moving a node to "Product" type signals it is a top-level finished product.
+- Users accustomed to searching one flat list may miss the tab split on first use. Mitigation: show a badge count per tab, and default to the most-used tab (likely Components).
+- The create-new-node flow (both from the modal and from "+sib") must know which tab to switch to after creation, based on the type selected in the form.
+
+**Related PROPs:** PROP-013 (BOM tree foundation), PROP-015 (Dynamic BOM / product_family type — lands in its own tab), PROP-016 ("+sib" button — the trigger for this idea).
+
+**Status:** Raw idea

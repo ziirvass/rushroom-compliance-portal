@@ -13,6 +13,7 @@ _Last updated: 2026-08-29 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **PROP-020 BOM List Split by Type** (Components / Assemblies / Dynamic BOMs tabs in BOM Tree view; delete button label "Delete Permanently"; cache v143) — 2026-08-29
 - **PROP-019 COGS Layer Removal** (5 tables, 10 API actions, Cost Canvas subtab removed; BOM tree kept for compliance tracing; cache v141) — 2026-08-29
 - **PROP-017 BOM Tree UX Polish** (always-show QTY, Expand All / Collapse All, sticky header, compact action labels) — 2026-08-29
 - **PROP-016 BOM Tree — Add Sibling shortcut button** (`+sib` on every non-root row opens add-child modal with parent context) — 2026-08-29

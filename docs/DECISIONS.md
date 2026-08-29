@@ -234,6 +234,13 @@ _Append-only. Claude Code appends one entry here after every /ship._
 
 ---
 **Date:** 2026-08-29
+**Feature:** PROP-020 — BOM List Split by Type + Delete label
+**Decision:** Replaced the flat mixed product list in `bomTreeView` with three client-side tabs keyed on `bom_components.type`: Components (Component / SparePart / Refurb), Assemblies (Product), Dynamic BOMs (product_family). After `+ New BOM Node`, the UI switches to the Components tab (default type). Tab switching re-renders from cached tree data — no extra API calls. Delete confirmation button label changed from "Delete forever" → "Delete Permanently". Cache bumped v142 → v143.
+**Why:** The flat list mixed standalone parts, product assemblies, and family templates, making newly created components invisible at the bottom of a long mixed list. Splitting by the explicit `type` field (an already-present user intent signal) groups items predictably without any schema or API changes. Pure frontend — the simplest correct fix.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md, docs/ROADMAP.md, docs/IDEAS.md
+
+---
+**Date:** 2026-08-29
 **Feature:** PROP-019 — COGS Layer Removal
 **Decision:** Removed the entire financial/COGS layer from the compliance portal: 5 DB tables (`component_costs`, `landed_cost_factors`, `cogs_snapshots`, `cost_scenarios`, `scenario_overrides`), 10 API actions (`getComponentCosts`, `upsertLandedCostFactor`, `computeCogs`, `compareCogs`, `createScenario`, `listScenarios`, `applyScenarioOverride`, `getScenarioResult`, `archiveScenario`, COST_ACTIONS gate), the Cost Canvas subtab, and the COGS column from the BOM tree grid.
 **Why:** Financial analysis (COGS, cost scenarios, scenario simulation) belongs in ERP and financial tooling — not in a compliance portal. The BOM tree is the shared backbone that compliance, ERP, and the configurator all read from; adding financial logic to the compliance portal duplicated ERP responsibilities in the wrong layer. The BOM tree itself (bom_components, bom_edges, bom_component_versions, component_materials, component_documents, bom_component_history) is kept intact for compliance tracing, REACH/RoHS, and "where used" tracking. Cache bumped v140→v141.
