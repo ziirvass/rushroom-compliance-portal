@@ -4157,7 +4157,7 @@
       processing: true,
       onReady: (up) => autofill(up),
     });
-    const submitBtn = el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Create product");
+    const submitBtn = el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Create BOM Node");
     zone.register(submitBtn, false);
 
     // --- Form submit ---------------------------------------------------------
@@ -4179,7 +4179,7 @@
         if (onCreated) onCreated(r.id);
       } catch (ex) {
         errEl.textContent = ex.message;
-        submitBtn.disabled = false; submitBtn.textContent = "Create product";
+        submitBtn.disabled = false; submitBtn.textContent = "Create BOM Node";
       }
     } });
 
