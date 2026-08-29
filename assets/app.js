@@ -3506,17 +3506,17 @@
     // ancestor-last flags (used to draw ├─ / └─ / │ connectors correctly at any depth)
     function buildRows() {
       const rows = [];
-      function walk(nodeId, qty, posNum, depth, ancestorLastFlags) {
+      function walk(nodeId, qty, posNum, depth, ancestorLastFlags, edgeCondition) {
         const n = nodeMap[nodeId];
         if (!n) return;
         const children = childrenOf[nodeId] || [];
-        rows.push({ n, qty, posNum, depth, ancestorLastFlags: [...ancestorLastFlags], hasChildren: children.length > 0 });
+        rows.push({ n, qty, posNum, depth, ancestorLastFlags: [...ancestorLastFlags], hasChildren: children.length > 0, edgeCondition });
         if (collapsed.has(posNum)) return;
         children.forEach((e, i) => {
-          walk(e.child_id, e.quantity, `${posNum}.${i + 1}`, depth + 1, [...ancestorLastFlags, i === children.length - 1]);
+          walk(e.child_id, e.quantity, `${posNum}.${i + 1}`, depth + 1, [...ancestorLastFlags, i === children.length - 1], e.variant_condition);
         });
       }
-      walk(rootId, 1, "1", 0, []);
+      walk(rootId, 1, "1", 0, [], null);
       return rows;
     }
 
@@ -3538,10 +3538,11 @@
         style: "display:grid;grid-template-columns:6rem 1fr 4.5rem 7rem 3.5rem auto;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem",
       }, ["Pos.", "Component", "Qty", "Status", "COGS", ""].map((t) => el("span", {}, t))));
 
-      rows.forEach(({ n, qty, posNum, depth, ancestorLastFlags, hasChildren }) => {
+      rows.forEach(({ n, qty, posNum, depth, ancestorLastFlags, hasChildren, edgeCondition }) => {
         const cogsPct = (cogs_by_node || {})[n.id];
         const heatColor = cogsPct >= 50 ? "#e05454" : cogsPct >= 20 ? "#e5a326" : cogsPct >= 5 ? "#4a9eed" : null;
         const isCollapsed = collapsed.has(posNum);
+        const isFamily = n.type === "product_family";
 
         // Toggle button (only for nodes with children)
         const tog = hasChildren
@@ -3551,16 +3552,28 @@
             }, isCollapsed ? "▶" : "▼")
           : el("span", { style: "display:inline-block;width:0.7rem" });
 
-        // Component cell: monospace connector + toggle + part# + name
+        // Variant condition tag (shown on conditional edges)
+        const condTag = edgeCondition
+          ? el("span", { style: "font-size:0.68rem;font-weight:600;background:#a855f720;color:#a855f7;border-radius:4px;padding:1px 5px;flex-shrink:0;white-space:nowrap;margin-left:4px" },
+              "⚙ " + Object.entries(edgeCondition).map(([k, v]) => `${k}:${v}`).join(" "))
+          : null;
+
+        // Family badge for product_family roots
+        const familyBadge = isFamily
+          ? el("span", { style: "font-size:0.68rem;font-weight:700;background:#2fa56420;color:#2fa564;border-radius:4px;padding:1px 5px;flex-shrink:0;white-space:nowrap;margin-left:4px" }, "FAMILY")
+          : null;
+
+        // Component cell: monospace connector + toggle + part# + name + badges
         const compCell = el("div", { style: "display:flex;align-items:center;min-width:0;overflow:hidden" }, [
           el("span", { style: "font-family:monospace;white-space:pre;color:var(--muted,#8b93a1);font-size:0.76rem;flex-shrink:0;opacity:0.6" }, connector(depth, ancestorLastFlags)),
           tog,
           el("span", { style: "font-family:monospace;font-size:0.74rem;color:var(--muted,#8b93a1);flex-shrink:0;margin-right:0.35rem" }, n.part_number),
           el("span", { style: "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, n.name),
-        ]);
+          familyBadge, condTag,
+        ].filter(Boolean));
 
         const row = el("div", {
-          style: `display:grid;grid-template-columns:6rem 1fr 4.5rem 7rem 3.5rem auto;gap:0.5rem;align-items:center;padding:0.22rem 0.5rem;border-left:3px solid ${heatColor || "transparent"};border-radius:3px;margin-bottom:1px`,
+          style: `display:grid;grid-template-columns:6rem 1fr 4.5rem 7rem 3.5rem auto;gap:0.5rem;align-items:center;padding:0.22rem 0.5rem;border-left:3px solid ${isFamily ? "#2fa564" : heatColor || "transparent"};border-radius:3px;margin-bottom:1px`,
         }, [
           el("span", { style: "font-family:monospace;font-size:0.78rem;font-weight:600;color:var(--muted,#8b93a1)" }, posNum),
           compCell,
@@ -3568,8 +3581,9 @@
           lifecycleBadge(n.lifecycle_status),
           heatColor ? el("span", { style: `font-size:0.72rem;font-weight:600;color:${heatColor}` }, `${cogsPct}%`) : el("span"),
           el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0" }, [
-            el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh) }, "+ child"),
-            el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openComponentDetail(n.id, token, detailPanel) }, "Details"),
+            isFamily ? el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem;color:#2fa564;border-color:#2fa56440", onclick: () => openConfigureModal(n, token, onRefresh) }, "⚙ Configure") : null,
+            el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId) }, "+ child"),
+            el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openComponentDetail(n.id, token, detailPanel, n) }, "Details"),
             el("button", {
               class: "btn btn-sm", type: "button",
               style: "padding:1px 5px;font-size:0.7rem;color:#e05454;border-color:#e0545440",
@@ -3590,7 +3604,7 @@
                 }
               },
             }, "Delete"),
-          ]),
+          ].filter(Boolean)),
         ]);
         wrap.append(row);
       });
@@ -3609,7 +3623,7 @@
   }
 
   // --- Add-child modal: link existing OR create new and link ---------------
-  function openAddChildModal(parentNode, allComponents, token, onRefresh) {
+  function openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) {
     const overlay = el("div", { style: "position:fixed;inset:0;background:#0009;z-index:1001;display:flex;align-items:center;justify-content:center" });
     const dialog = el("div", { style: "background:var(--bg,#1a1f2e);border:1px solid var(--border,#2d3748);border-radius:8px;padding:1.5rem;width:min(520px,95vw);max-height:90vh;overflow-y:auto" });
 
@@ -3689,6 +3703,55 @@
 
     const submitBtn = el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Add to BOM");
 
+    // Condition picker — shown only when root is a product_family
+    let conditionMap = {};
+    const condSection = el("div", { style: "display:none;border:1px solid var(--border,#2d3748);border-radius:4px;padding:0.6rem;margin-bottom:0.5rem" });
+    const condToggle  = el("button", { class: "btn btn-sm", type: "button", style: "margin-bottom:0.5rem;font-size:0.75rem;display:none" }, "⚙ Set condition (optional)");
+
+    const rootComp = rootId ? (allComponents || []).find((c) => c.id === rootId) : null;
+    if (rootComp && rootComp.type === "product_family") {
+      condToggle.style.display = "";
+      condToggle.onclick = async () => {
+        if (condSection.style.display !== "none") {
+          condSection.style.display = "none";
+          condToggle.textContent = "⚙ Set condition (optional)";
+          conditionMap = {};
+          return;
+        }
+        condToggle.textContent = "Loading attributes…";
+        condToggle.disabled = true;
+        try {
+          const r = await API.post(token, "listFamilyAttributes", { family_id: rootId });
+          const attrs = r.attributes || [];
+          if (!attrs.length) {
+            condSection.replaceChildren(el("div", { style: "font-size:0.8rem;color:var(--muted,#8b93a1)" }, "No attributes defined on this family yet."));
+          } else {
+            const LBL = "display:block;font-size:0.75rem;font-weight:600;color:var(--muted,#8b93a1);margin-bottom:0.15rem";
+            condSection.replaceChildren(
+              el("p", { style: "font-size:0.78rem;color:var(--muted,#8b93a1);margin:0 0 0.4rem" },
+                "Include this child only when the following attributes are selected (leave blank = no condition):"),
+              ...attrs.map((attr) => {
+                const sel = el("select", { class: "up-text", style: "width:100%",
+                  onchange: () => { if (sel.value) conditionMap[attr.name] = sel.value; else delete conditionMap[attr.name]; },
+                }, [
+                  el("option", { value: "" }, "— no condition —"),
+                  ...(attr.values || []).map((v) => el("option", { value: v.value }, v.label)),
+                ]);
+                return el("div", { style: "margin-bottom:0.35rem" }, [el("label", { style: LBL }, attr.display_name), sel]);
+              }),
+            );
+          }
+          condSection.style.display = "";
+          condToggle.textContent = "⚙ Condition (active)";
+        } catch (ex) {
+          condToggle.textContent = "⚙ Set condition (optional)";
+          errEl.textContent = "Could not load family attributes: " + ex.message;
+        } finally {
+          condToggle.disabled = false;
+        }
+      };
+    }
+
     function syncTabs() {
       const isExisting = mode === "existing";
       tabExisting.style.background = isExisting ? "var(--accent,#2fa564)" : "";
@@ -3732,7 +3795,8 @@
               return;
             }
           }
-          await API.post(token, "addBomEdge", { parent_id: parentNode.id, child_id: childId, quantity: qty, reference_designator: refInput.value.trim() || null });
+          const cond = Object.keys(conditionMap).length > 0 ? { ...conditionMap } : null;
+          await API.post(token, "addBomEdge", { parent_id: parentNode.id, child_id: childId, quantity: qty, reference_designator: refInput.value.trim() || null, variant_condition: cond });
           overlay.remove();
           if (onRefresh) onRefresh();
         } catch (ex) {
@@ -3753,6 +3817,8 @@
       existingSection,
       newSection,
       qtyRefRow,
+      condToggle,
+      condSection,
       errEl,
       el("div", { style: "display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.75rem" }, [
         el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
@@ -3766,16 +3832,22 @@
   }
 
   // --- Component detail panel (slide-in below the tree) ----------------------
-  async function openComponentDetail(componentId, token, panel) {
+  async function openComponentDetail(componentId, token, panel, nodeData) {
     panel.style.display = "";
     panel.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+    const isFamily = nodeData?.type === "product_family";
     try {
-      const [hist, docs, mats, cl] = await Promise.all([
+      const basePromises = [
         API.post(token, "getComponentHistory",  { component_id: componentId }),
         API.post(token, "getComponentDocuments", { component_id: componentId }),
         API.post(token, "getComponentMaterials", { component_id: componentId }),
         API.post(token, "getComponentChangelog", { component_id: componentId }),
-      ]);
+      ];
+      const familyPromises = isFamily ? [
+        API.post(token, "listFamilyAttributes", { family_id: componentId }),
+        API.post(token, "listConfigurations",    { family_id: componentId }),
+      ] : [null, null];
+      const [hist, docs, mats, cl, familyAttrs, familyConfigs] = await Promise.all([...basePromises, ...familyPromises]);
       const history = hist.history || [];
       const current = history.find((v) => v.is_current) || history[0];
 
@@ -3926,11 +3998,103 @@
           : el("div", { class: "muted" }, "No history yet — changes will appear here automatically."),
       ]);
 
+      // Configuration section — only for product_family nodes
+      let configSection = null;
+      if (isFamily && familyAttrs) {
+        const attrs = familyAttrs.attributes || [];
+        const LBL = "display:block;font-size:0.8rem;font-weight:600;color:var(--muted,#8b93a1);margin-bottom:0.2rem";
+        const attrList = el("div", {});
+        function renderAttrs() {
+          attrList.replaceChildren(...attrs.map((attr) => {
+            const valTags = (attr.values || []).map((v) =>
+              el("span", { style: "display:inline-flex;align-items:center;gap:0.25rem;background:var(--subtle,#f1f5f9);border:1px solid var(--border,#e2e8f0);border-radius:4px;padding:1px 6px;font-size:0.76rem;margin-right:3px" }, [
+                v.label,
+                el("button", { type: "button", style: "background:none;border:none;cursor:pointer;color:#e05454;font-size:0.65rem;padding:0;line-height:1", onclick: async () => {
+                  if (!confirm(`Delete value "${v.label}"?`)) return;
+                  try {
+                    await API.post(token, "deleteFamilyAttributeValue", { value_id: v.id });
+                    attr.values = attr.values.filter((x) => x.id !== v.id);
+                    renderAttrs();
+                  } catch (ex) { alert(ex.message); }
+                } }, "✕"),
+              ]));
+            const addValInput = el("input", { class: "up-text", type: "text", placeholder: "Add value…", style: "width:140px;font-size:0.8rem;padding:0.2rem 0.4rem;margin-left:4px" });
+            const addValBtn = el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 6px;font-size:0.75rem;margin-left:2px", onclick: async () => {
+              const raw = addValInput.value.trim();
+              if (!raw) return;
+              try {
+                const r = await API.post(token, "addFamilyAttributeValue", { attribute_id: attr.id, value: raw, label: raw });
+                attr.values = [...(attr.values || []), { id: r.id, value: raw, label: raw }];
+                addValInput.value = "";
+                renderAttrs();
+              } catch (ex) { alert(ex.message); }
+            } }, "+ value");
+            const delAttrBtn = el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 6px;font-size:0.7rem;color:#e05454;border-color:#e0545440;margin-left:4px", onclick: async () => {
+              if (!confirm(`Delete attribute "${attr.display_name}" and all its values?`)) return;
+              try {
+                await API.post(token, "deleteFamilyAttribute", { attribute_id: attr.id });
+                attrs.splice(attrs.indexOf(attr), 1);
+                renderAttrs();
+              } catch (ex) { alert(ex.message); }
+            } }, "✕ attr");
+            return el("div", { style: "margin-bottom:0.55rem;padding:0.4rem 0.6rem;border:1px solid var(--border,#e2e8f0);border-radius:6px" }, [
+              el("div", { style: "display:flex;align-items:center;gap:0.4rem;margin-bottom:0.3rem" }, [
+                el("strong", { style: "font-size:0.83rem" }, attr.display_name),
+                el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1)" }, attr.is_required ? "(required)" : "(optional)"),
+                delAttrBtn,
+              ]),
+              el("div", { style: "display:flex;flex-wrap:wrap;align-items:center;gap:2px" }, [...valTags, addValInput, addValBtn]),
+            ]);
+          }));
+          if (!attrs.length) attrList.replaceChildren(el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1)" }, "No attributes yet."));
+        }
+        renderAttrs();
+
+        const newAttrName = el("input", { class: "up-text", type: "text", placeholder: "name (key)", style: "width:110px;font-size:0.8rem;padding:0.25rem 0.4rem" });
+        const newAttrLabel = el("input", { class: "up-text", type: "text", placeholder: "display label", style: "width:130px;font-size:0.8rem;padding:0.25rem 0.4rem" });
+        const newAttrReq = el("input", { type: "checkbox", checked: true, style: "margin-right:2px" });
+        const addAttrBtn = el("button", { class: "btn btn-sm btn-primary", type: "button", style: "padding:2px 8px;font-size:0.78rem", onclick: async () => {
+          const nm = newAttrName.value.trim(); const dl = newAttrLabel.value.trim();
+          if (!nm || !dl) { alert("Both name and label are required."); return; }
+          try {
+            const r = await API.post(token, "addFamilyAttribute", { family_id: componentId, name: nm, display_name: dl, is_required: newAttrReq.checked });
+            attrs.push({ id: r.id, name: nm, display_name: dl, is_required: newAttrReq.checked, values: [] });
+            newAttrName.value = ""; newAttrLabel.value = "";
+            renderAttrs();
+          } catch (ex) { alert(ex.message); }
+        } }, "+ Add attribute");
+
+        const cfgs = familyConfigs?.configurations || [];
+        const cfgList = cfgs.length
+          ? el("div", {}, cfgs.map((cfg) => el("div", { style: "display:flex;align-items:center;justify-content:space-between;padding:0.3rem 0.5rem;border:1px solid var(--border,#e2e8f0);border-radius:5px;margin-bottom:3px;font-size:0.82rem" }, [
+              el("span", {}, [el("strong", {}, cfg.name), cfg.part_number ? el("span", { style: "color:var(--muted,#8b93a1);margin-left:0.4rem;font-family:monospace;font-size:0.76rem" }, cfg.part_number) : null,
+                el("span", { style: "color:var(--muted,#8b93a1);margin-left:0.4rem;font-size:0.73rem" }, Object.entries(cfg.selections).map(([k, v]) => `${k}:${v}`).join(", ")),
+              ].filter(Boolean)),
+              el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem;color:#e05454;border-color:#e0545440", onclick: async () => {
+                if (!confirm(`Delete configuration "${cfg.name}"?`)) return;
+                try { await API.post(token, "deleteConfiguration", { configuration_id: cfg.id }); openComponentDetail(componentId, token, panel, nodeData); } catch (ex) { alert(ex.message); }
+              } }, "Delete"),
+            ])))
+          : el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1)" }, "No saved configurations yet. Use ⚙ Configure on the tree row to resolve and save one.");
+
+        configSection = el("div", { style: "margin-bottom:1rem;border:1px solid #2fa56440;border-radius:6px;padding:0.75rem" }, [
+          el("h4", { style: "margin:0 0 0.5rem;color:#2fa564" }, "⚙ Configuration (Product Family)"),
+          el("div", { style: "margin-bottom:0.6rem" }, [el("label", { style: LBL }, "Attributes"), attrList]),
+          el("div", { style: "display:flex;flex-wrap:wrap;align-items:center;gap:0.35rem;margin-bottom:0.75rem" }, [
+            newAttrName, newAttrLabel,
+            el("label", { style: "display:flex;align-items:center;gap:0.2rem;font-size:0.78rem;white-space:nowrap" }, [newAttrReq, "Required"]),
+            addAttrBtn,
+          ]),
+          el("div", {}, [el("label", { style: LBL }, "Saved Configurations"), cfgList]),
+        ]);
+      }
+
       panel.replaceChildren(
         el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem" }, [
           el("strong", {}, `Component: ${componentId.slice(0, 8)}…`),
           el("button", { class: "btn btn-sm", type: "button", onclick: () => { panel.style.display = "none"; } }, "Close"),
         ]),
+        ...(configSection ? [configSection] : []),
         versionsSection, docsSection, matsSection, changelogSection,
       );
     } catch (ex) {
@@ -3953,7 +4117,7 @@
     }
 
     // --- Fields --------------------------------------------------------------
-    const TYPE_OPTS = [["Product", "Product"], ["Component", "Component"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"]];
+    const TYPE_OPTS = [["Product", "Product"], ["Component", "Component"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"], ["product_family", "Product Family (CTO)"]];
     const pn   = el("input",    { class: "up-text", type: "text", placeholder: "Auto-generated if left empty" });
     const oem  = el("input",    { class: "up-text", type: "text", placeholder: "OEM / distributor reference (optional)" });
     const nm   = el("input",    { class: "up-text", type: "text", placeholder: "Name" });
@@ -4061,6 +4225,115 @@
     overlay.append(dialog);
     document.body.append(overlay);
     nm.focus();
+  }
+
+  // --- Configure modal: resolve a variant from a product family -------------
+  function openConfigureModal(familyNode, token, onRefresh) {
+    const overlay = el("div", { style: "position:fixed;inset:0;background:#0009;z-index:1001;display:flex;align-items:center;justify-content:center;padding:1rem" });
+    const dialog  = el("div", { style: "background:var(--bg,#fff);border:1px solid var(--border,#2d3748);border-radius:8px;padding:1.5rem;width:min(600px,95vw);max-height:90vh;overflow-y:auto" });
+
+    let attributes = [];
+    const selects = {};
+    let lastSelections = {};
+
+    const errEl      = el("span", { style: "color:#e05454;font-size:0.82rem;display:block;min-height:1.2rem;margin-top:0.4rem" }, "");
+    const attrForm   = el("div", {}, [el("div", { class: "loading" }, "Loading attributes…")]);
+    const resultsArea = el("div", {});
+
+    const saveName = el("input", { class: "up-text", type: "text", placeholder: "Configuration name (required)", style: "width:100%;margin-bottom:0.35rem" });
+    const savePN   = el("input", { class: "up-text", type: "text", placeholder: "Sales / part number (optional)", style: "width:100%" });
+    const saveErr  = el("span", { style: "color:#e05454;font-size:0.82rem;display:block;min-height:1.2rem;margin-top:0.2rem" }, "");
+    const saveBtn  = el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: async () => {
+      if (!saveName.value.trim()) { saveErr.textContent = "Name is required."; return; }
+      saveErr.textContent = "";
+      saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+      try {
+        await API.post(token, "saveConfiguration", { family_id: familyNode.id, name: saveName.value.trim(), selections: lastSelections, part_number: savePN.value.trim() || null });
+        saveBtn.textContent = "Saved ✓";
+      } catch (ex) {
+        saveErr.textContent = ex.message;
+        saveBtn.disabled = false; saveBtn.textContent = "Save configuration";
+      }
+    } }, "Save configuration");
+
+    const resolveBtn = el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: doResolve }, "Resolve BOM");
+
+    async function doResolve() {
+      errEl.textContent = "";
+      const selections = {};
+      for (const attr of attributes) {
+        const val = selects[attr.name]?.value;
+        if (!val && attr.is_required) { errEl.textContent = `"${attr.display_name}" is required.`; return; }
+        if (val) selections[attr.name] = val;
+      }
+      resolveBtn.disabled = true; resolveBtn.textContent = "Resolving…";
+      try {
+        const bom = await API.post(token, "resolveVariant", { family_id: familyNode.id, selections });
+        lastSelections = { ...selections };
+        const nodeCount = (bom.nodes || []).length;
+        const S = "font-size:0.8rem;font-weight:600";
+        resultsArea.replaceChildren(
+          el("div", { style: "margin-top:0.75rem;padding:0.6rem;border:1px solid var(--border,#e2e8f0);border-radius:6px" }, [
+            el("p", { style: S + ";margin:0 0 0.4rem" }, `Resolved: ${nodeCount} component${nodeCount !== 1 ? "s" : ""}`),
+            el("div", { style: "max-height:180px;overflow-y:auto;border:1px solid var(--border,#e2e8f0);border-radius:4px;font-size:0.8rem;margin-bottom:0.75rem" },
+              (bom.nodes || []).map((n) => el("div", { style: "padding:0.25rem 0.5rem;border-bottom:1px solid var(--border,#e2e8f0)" }, [
+                el("span", { style: "font-family:monospace;font-size:0.73rem;color:var(--muted,#8b93a1);margin-right:0.4rem" }, n.part_number),
+                el("span", {}, n.name),
+              ]))),
+            el("div", { style: "border-top:1px solid var(--border,#e2e8f0);padding-top:0.6rem" }, [
+              el("p", { style: S + ";margin:0 0 0.35rem" }, "Save this configuration"),
+              saveName, savePN, saveErr,
+              el("div", { style: "margin-top:0.4rem;display:flex;justify-content:flex-end" }, [saveBtn]),
+            ]),
+          ]),
+        );
+        saveName.value = ""; savePN.value = "";
+        saveBtn.disabled = false; saveBtn.textContent = "Save configuration";
+      } catch (ex) {
+        errEl.textContent = ex.message;
+      } finally {
+        resolveBtn.disabled = false; resolveBtn.textContent = "Resolve BOM";
+      }
+    }
+
+    async function loadAttributes() {
+      try {
+        const r = await API.post(token, "listFamilyAttributes", { family_id: familyNode.id });
+        attributes = r.attributes || [];
+        if (!attributes.length) {
+          attrForm.replaceChildren(el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);padding:0.5rem" }, "No attributes defined on this family. Open Details to add them first."));
+          resolveBtn.disabled = true;
+          return;
+        }
+        const LBL = "display:block;font-size:0.8rem;font-weight:600;color:var(--muted,#8b93a1);margin-bottom:0.2rem";
+        const F = "width:100%;font-size:0.875rem;padding:0.38rem 0.55rem;border:1px solid var(--border,#e2e8f0);border-radius:6px;background:var(--bg,#fff);color:var(--text,#1a1f2e);font-family:inherit";
+        attrForm.replaceChildren(...attributes.map((attr) => {
+          const sel = el("select", { style: F + ";margin-bottom:0.55rem", onchange: () => { selects[attr.name] = sel; } },
+            [el("option", { value: "" }, attr.is_required ? "— select —" : "— any —"),
+             ...(attr.values || []).map((v) => el("option", { value: v.value }, v.label))]);
+          selects[attr.name] = sel;
+          return el("div", {}, [el("label", { style: LBL }, attr.display_name + (attr.is_required ? " *" : " (optional)")), sel]);
+        }));
+      } catch (ex) {
+        attrForm.replaceChildren(el("div", { class: "error" }, ex.message));
+      }
+    }
+
+    dialog.append(
+      el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem" }, [
+        el("h3", { style: "margin:0;font-size:1rem" }, `Configure: ${familyNode.name}`),
+        el("button", { class: "btn btn-sm", type: "button", style: "padding:2px 8px", onclick: () => overlay.remove() }, "✕"),
+      ]),
+      el("p", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);margin:0 0 0.75rem" }, "Select attribute values to resolve the BOM for a specific configuration."),
+      attrForm,
+      el("div", { style: "display:flex;justify-content:flex-end;margin-top:0.5rem" }, [resolveBtn]),
+      errEl,
+      resultsArea,
+    );
+    overlay.append(dialog);
+    document.body.append(overlay);
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    loadAttributes();
   }
 
   // --- Cost canvas (scenario simulation) ------------------------------------

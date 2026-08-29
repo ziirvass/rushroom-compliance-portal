@@ -166,3 +166,65 @@ All new tables: `organization_id NOT NULL FK → organizations` (PROP-012 contra
 - PROP-012 (Multi-tenancy — `organization_id` on all new tables; test reports are highly confidential per-tenant data)
 
 **Status:** Raw idea
+
+---
+### Configure-to-Order Variant BOM (Product Families) — 2026-08-28
+**One sentence:** Replaces the single-product BOM root with a Product Family node that defines configuration attributes (Size, Power, Color…), then uses conditional edges in the BOM tree to express which components are included for which combination — so one tree serves thousands of configurations without duplication.
+
+**Problem it solves:**  
+Rushroom sells configurable LED furniture: the same family ships in multiple sizes, power ratings, colors, and mounting options. With the current BOM model, every distinct configuration would need its own complete tree — hundreds or thousands of trees, all nearly identical. A single component change (e.g., new LED strip for 50 W variants) would require updating each affected tree separately, with no mechanism to check that all variants were covered. There is also no machine-readable record of which configurations share a given component, making REACH/RoHS impact analysis impossible.
+
+The configure-to-order model solves this by storing ONE tree per product family and marking edges as either unconditional (present in all configurations) or conditional (only included when a specific attribute value is selected). The resolved BOM for any specific configuration is computed on demand — no duplication.
+
+**Architecture: Super BOM with conditional edges**  
+An edge in `bom_edges` with `variant_condition = NULL` is always included. An edge with `variant_condition = '{"Power": "50W", "Size": "L"}'` is included only when the selected configuration matches all listed conditions. `resolveVariant(family_id, selections)` runs the normal BFS but filters edges by condition match.
+
+This means: N attributes × M values each = potentially M^N configurations, but only ONE BOM tree to maintain. Engineers author and version the family BOM; sales or compliance teams "configure" it to get a specific product BOM for a specific order or DoC.
+
+**MVP scope:**  
+1. **`bom_components.type` extension** — add `product_family` to the type enum (migration). A family node is always a root (no parent edge). UI treats it differently from `Product` (shows attribute panel instead of cost canvas).  
+2. **`family_attributes`** — one row per configurable dimension per family: `{id, organization_id, family_id FK→bom_components, name, display_name, is_required BOOLEAN, sort_order}`. Example: `{name: "Power", display_name: "Power rating", is_required: true}`.  
+3. **`family_attribute_values`** — valid options per attribute: `{id, organization_id, attribute_id FK→family_attributes, value, label, sort_order}`. Example: `{value: "30W", label: "30 W"}`, `{value: "50W", label: "50 W"}`.  
+4. **`bom_edges.variant_condition JSONB` column** (nullable, migration, backward-compatible) — `NULL` = always included; `{"Power": "50W"}` = only when Power=50W is selected; multiple keys = all conditions must match (AND logic).  
+5. **`saved_configurations`** — named resolved configurations: `{id, organization_id, family_id FK→bom_components, name, selections JSONB, description, created_by, created_at}`. Example: `{name: "Standard EU 50W White L", selections: {"Power": "50W", "Color": "White", "Size": "L"}}`. These are the units that get their own part number, DoC, and compliance record.  
+6. **API actions:**  
+   - `addFamilyAttribute(family_id, name, display_name, is_required)` / `listFamilyAttributes(family_id)`  
+   - `addFamilyAttributeValue(attribute_id, value, label)` / `listFamilyAttributeValues(attribute_id)`  
+   - `resolveVariant(family_id, selections JSONB)` — runs BFS on the family BOM, filters edges where `variant_condition IS NULL OR variant_condition <@ selections`, returns the effective component tree for that configuration  
+   - `saveConfiguration(family_id, name, selections)` / `listConfigurations(family_id)` / `deleteConfiguration(id)`  
+   - `addBomEdge` — extended to accept optional `variant_condition JSONB`  
+7. **UI changes (Product tab):**  
+   - A `product_family` root shows a "Configuration" sub-tab (attributes + valid values, editable).  
+   - The `+ child` modal gets an optional "Only for configurations…" section (attribute value picker, multi-select, generates `variant_condition`).  
+   - A "Configure" button on the family row opens an attribute selector; on submit, calls `resolveVariant` and renders the resulting filtered BOM tree in a read-only preview pane. An option to save this as a named configuration.  
+   - The BOM tree visually distinguishes conditional edges (dashed line / grey badge showing the condition) from unconditional edges.
+
+**Tables involved:**  
+New: `family_attributes`, `family_attribute_values`, `saved_configurations`  
+Extended: `bom_components.type` enum (add `product_family`), `bom_edges` (add `variant_condition JSONB` column)  
+All new tables: `organization_id NOT NULL FK → organizations`
+
+**Effort estimate:** 28–36 hours  
+- Migration (enum + column + 3 new tables): 4 h  
+- API actions (6 new + extend addBomEdge): 8 h  
+- `resolveVariant` BFS filter logic: 4 h  
+- UI — attribute definition panel on family node: 5 h  
+- UI — conditional edge picker in `+ child` modal: 4 h  
+- UI — Configure button + resolved BOM preview: 7 h  
+- UI — saved configurations list + part-number generation per config: 4 h  
+- Tests: 4 h
+
+**Risks:**  
+- **Condition logic complexity:** AND-only conditions (all keys must match) cover most real cases. OR logic (this edge is active for 30W OR 50W) requires a different schema (array of condition objects or a conditions_any_of array). Design the schema to allow this extension: `variant_condition = [{"Power": "30W"}, {"Power": "50W"}]` as an array means OR; a plain object means AND. MVP: only implement plain object (AND); leave array (OR) for later.  
+- **Compliance implication per configuration:** Each `saved_configuration` is a distinct CE product (distinct DoC, distinct Technical File, distinct test scope). The system must eventually generate a per-configuration DoC and propagate compliance evidence from the family's shared components. This connects directly to PROP-014 (Component Evidence Bridge) — `component_clause_evidence` must be resolvable per configuration, not just per component.  
+- **COGS per configuration:** `computeCogs` currently takes a `root_component_id`. It must be extended to accept optional `selections` so it rolls up cost only for components in the resolved variant BOM. Without this, cost simulation is meaningless for families.  
+- **Part numbers on configurations:** A saved configuration needs its own part number or sales code (e.g., `RR-2026-L50W-WH`). This is separate from the family's part number and from the component part numbers inside the BOM. Design: `saved_configurations` gets an optional `part_number` column (unique per org), auto-suggested by the UI, overridable.  
+- **Migration of existing BOM roots to Product vs. product_family:** Existing `Product` type roots stay as-is — they are single fixed configurations. Only explicitly created `product_family` nodes get the attribute/variant behavior. The distinction is opt-in.  
+- **Variant condition validation:** When a user adds a `variant_condition` to an edge, the system should validate that all keys in the condition correspond to known `family_attributes.name` values for the ancestor family. The MVP can do this client-side; a DB constraint can be added later.
+
+**Related PROPs:**  
+- PROP-013 (Product Information System — provides the BOM foundation; this extends it without breaking existing single-product BOM trees)  
+- PROP-014 (Compliance–BOM Integration — each resolved configuration is the unit that needs component clause evidence and a DoC; the evidence bridge must be variant-aware)  
+- PROP-012 (Multi-tenancy — all new tables carry `organization_id`; configuration data is per-tenant and should never be cross-org visible)
+
+**Status:** Raw idea

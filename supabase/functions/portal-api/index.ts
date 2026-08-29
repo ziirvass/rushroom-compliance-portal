@@ -198,6 +198,8 @@ const TENANT_TABLES = new Set([
   "bom_components", "bom_component_versions", "bom_edges", "bom_component_history",
   "component_materials", "component_documents", "component_costs",
   "landed_cost_factors", "cogs_snapshots", "cost_scenarios", "scenario_overrides",
+  // PROP-015: Configure-to-Order Variant BOM
+  "family_attributes", "family_attribute_values", "saved_configurations",
 ]);
 function makeTdb(orgId: string) {
   const stamp = (rows: any) => Array.isArray(rows)
@@ -3456,7 +3458,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     const { name, type, oem_number, description, notes } = body;
     let { part_number } = body;
     if (!name || !type) return json({ error: "name and type are required" }, 400);
-    const validTypes = ["Product", "Component", "SparePart", "Refurb"];
+    const validTypes = ["Product", "Component", "SparePart", "Refurb", "product_family"];
     if (!validTypes.includes(type)) return json({ error: "Invalid type" }, 400);
     // Auto-generate part number if not supplied
     if (!part_number || !String(part_number).trim()) {
@@ -3511,7 +3513,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     if (oem_number  !== undefined) patch.oem_number  = oem_number ? String(oem_number).trim() : null;
     if (part_number !== undefined && String(part_number).trim()) patch.part_number = String(part_number).trim();
     if (newType     !== undefined) {
-      const validTypes = ["Product", "Component", "SparePart", "Refurb"];
+      const validTypes = ["Product", "Component", "SparePart", "Refurb", "product_family"];
       if (!validTypes.includes(newType)) return json({ error: "Invalid type" }, 400);
       patch.type = newType;
     }
@@ -3663,7 +3665,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       (comps || []).forEach((c: any) => { nodeMap[c.id] = c; });
       const currentDepth = batch[0].depth;
       if (currentDepth >= depthLimit) continue;
-      const { data: childEdges } = await db.from("bom_edges").select("parent_id, child_id, quantity, reference_designator")
+      const { data: childEdges } = await db.from("bom_edges").select("id, parent_id, child_id, quantity, reference_designator, variant_condition")
         .in("parent_id", ids).is("effective_to", null).eq("organization_id", organizationId);
       (childEdges || []).forEach((e: any) => {
         edges.push(e);
@@ -3692,13 +3694,14 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // --- BOM: add an edge (child under parent) --------------------------------
   if (action === "addBomEdge") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
-    const { parent_id, child_id, quantity, reference_designator, effective_from } = body;
+    const { parent_id, child_id, quantity, reference_designator, effective_from, variant_condition } = body;
     if (!parent_id || !child_id || !quantity) return json({ error: "parent_id, child_id and quantity required" }, 400);
     try {
       const { data, error } = await tdb("bom_edges").insert({
         parent_id, child_id, quantity: Number(quantity),
         reference_designator: reference_designator || null,
         effective_from: effective_from || new Date().toISOString().slice(0, 10),
+        variant_condition: variant_condition ?? null,
       }).select("id").maybeSingle();
       if (error) return json({ error: error.message }, 400);
       return json({ id: data.id });
@@ -3733,6 +3736,15 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
 
     // Null out any product_passport root references (nullable FK)
     await tdb("product_passports").update({ root_component_id: null }).eq("root_component_id", component_id);
+
+    // PROP-015: if this is a product_family, delete its attribute values, attributes, and saved configurations
+    const { data: famAttrs } = await tdb("family_attributes").select("id").eq("family_id", component_id);
+    if (famAttrs?.length) {
+      const attrIds = famAttrs.map((a: any) => a.id);
+      await tdb("family_attribute_values").delete().in("attribute_id", attrIds);
+    }
+    await tdb("family_attributes").delete().eq("family_id", component_id);
+    await tdb("saved_configurations").delete().eq("family_id", component_id);
 
     // Delete scenario overrides that reference this component
     await tdb("scenario_overrides").delete().eq("component_id", component_id);
@@ -4013,6 +4025,174 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     const { scenario_id } = body;
     if (!scenario_id) return json({ error: "scenario_id required" }, 400);
     const { error } = await tdb("cost_scenarios").update({ status: "archived", updated_at: new Date().toISOString() }).eq("id", scenario_id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // ==========================================================================
+  // PROP-015: Configure-to-Order Variant BOM actions
+  // ==========================================================================
+
+  // --- Family: add a configuration attribute to a product_family component ---
+  if (action === "addFamilyAttribute") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id, name, display_name, is_required, sort_order } = body;
+    if (!family_id || !name || !display_name) return json({ error: "family_id, name and display_name required" }, 400);
+    const { data: fam } = await tdb("bom_components").select("type").eq("id", family_id).maybeSingle();
+    if (!fam || fam.type !== "product_family") return json({ error: "Component is not a product_family" }, 400);
+    const { data, error } = await tdb("family_attributes").insert({
+      family_id, name: String(name).trim(), display_name: String(display_name).trim(),
+      is_required: is_required !== false,
+      sort_order: Number(sort_order) || 0,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return json({ id: data.id });
+  }
+
+  // --- Family: list attributes (with values nested) for a family ------------
+  if (action === "listFamilyAttributes") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id } = body;
+    if (!family_id) return json({ error: "family_id required" }, 400);
+    const { data: attrs, error: ae } = await tdb("family_attributes")
+      .select("id, name, display_name, is_required, sort_order")
+      .eq("family_id", family_id).order("sort_order").order("created_at");
+    if (ae) return json({ error: ae.message }, 400);
+    if (!attrs?.length) return json({ attributes: [] });
+    const attrIds = attrs.map((a: any) => a.id);
+    const { data: vals } = await tdb("family_attribute_values")
+      .select("id, attribute_id, value, label, sort_order")
+      .in("attribute_id", attrIds).order("sort_order").order("created_at");
+    const valsByAttr: Record<string, any[]> = {};
+    (vals || []).forEach((v: any) => {
+      if (!valsByAttr[v.attribute_id]) valsByAttr[v.attribute_id] = [];
+      valsByAttr[v.attribute_id].push(v);
+    });
+    const attributes = attrs.map((a: any) => ({ ...a, values: valsByAttr[a.id] || [] }));
+    return json({ attributes });
+  }
+
+  // --- Family: add a value to an attribute ----------------------------------
+  if (action === "addFamilyAttributeValue") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { attribute_id, value, label, sort_order } = body;
+    if (!attribute_id || !value || !label) return json({ error: "attribute_id, value and label required" }, 400);
+    const { data, error } = await tdb("family_attribute_values").insert({
+      attribute_id, value: String(value).trim(), label: String(label).trim(),
+      sort_order: Number(sort_order) || 0,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return json({ id: data.id });
+  }
+
+  // --- Family: delete an attribute value ------------------------------------
+  if (action === "deleteFamilyAttributeValue") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { value_id } = body;
+    if (!value_id) return json({ error: "value_id required" }, 400);
+    const { error } = await tdb("family_attribute_values").delete().eq("id", value_id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- Family: delete an attribute (and all its values) --------------------
+  if (action === "deleteFamilyAttribute") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { attribute_id } = body;
+    if (!attribute_id) return json({ error: "attribute_id required" }, 400);
+    await tdb("family_attribute_values").delete().eq("attribute_id", attribute_id);
+    const { error } = await tdb("family_attributes").delete().eq("id", attribute_id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- Family: set or clear variant_condition on an existing edge -----------
+  if (action === "setEdgeCondition") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { edge_id, variant_condition } = body;
+    if (!edge_id) return json({ error: "edge_id required" }, 400);
+    const { error } = await db.from("bom_edges")
+      .update({ variant_condition: variant_condition ?? null })
+      .eq("id", edge_id).eq("organization_id", organizationId);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- Family: resolve a variant — BFS filtered by variant_condition --------
+  // Only edges where variant_condition IS NULL or ALL condition keys match selections
+  // are traversed. Returns {nodes, edges} in the same shape as getBom.
+  if (action === "resolveVariant") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id, selections } = body;
+    if (!family_id || !selections) return json({ error: "family_id and selections required" }, 400);
+    const nodeMap: Record<string, any> = {};
+    const resultEdges: any[] = [];
+    const queue: Array<{ id: string; depth: number }> = [{ id: family_id, depth: 0 }];
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const batch = queue.splice(0, queue.length);
+      const ids = batch.map((n: any) => n.id).filter((id: string) => !visited.has(id));
+      if (!ids.length) break;
+      ids.forEach((id: string) => visited.add(id));
+      const { data: comps } = await tdb("bom_components")
+        .select("id, part_number, name, type, lifecycle_status").in("id", ids);
+      (comps || []).forEach((c: any) => { nodeMap[c.id] = c; });
+      const currentDepth = batch[0].depth;
+      if (currentDepth >= 10) continue;
+      const { data: childEdges } = await db.from("bom_edges")
+        .select("id, parent_id, child_id, quantity, reference_designator, variant_condition")
+        .in("parent_id", ids).is("effective_to", null).eq("organization_id", organizationId);
+      (childEdges || []).forEach((e: any) => {
+        const cond = e.variant_condition;
+        const included = !cond || Object.entries(cond as Record<string, string>).every(([k, v]) => selections[k] === v);
+        if (included) {
+          resultEdges.push(e);
+          if (!visited.has(e.child_id)) queue.push({ id: e.child_id, depth: currentDepth + 1 });
+        }
+      });
+    }
+    return json({ nodes: Object.values(nodeMap), edges: resultEdges });
+  }
+
+  // --- Configurations: save a named configuration for a family --------------
+  if (action === "saveConfiguration") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id, name, selections, description, part_number } = body;
+    if (!family_id || !name || !selections) return json({ error: "family_id, name and selections required" }, 400);
+    // Validate required attributes are present
+    const { data: requiredAttrs } = await tdb("family_attributes")
+      .select("name, display_name").eq("family_id", family_id).eq("is_required", true);
+    for (const attr of (requiredAttrs || [])) {
+      if (!selections[attr.name]) return json({ error: `${attr.display_name} is required` }, 400);
+    }
+    const { data, error } = await tdb("saved_configurations").insert({
+      family_id, name: String(name).trim(), selections,
+      description: description || null,
+      part_number: part_number ? String(part_number).trim() : null,
+      created_by: session.uid || null,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return json({ id: data.id });
+  }
+
+  // --- Configurations: list saved configurations for a family ---------------
+  if (action === "listConfigurations") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id } = body;
+    if (!family_id) return json({ error: "family_id required" }, 400);
+    const { data, error } = await tdb("saved_configurations")
+      .select("id, name, part_number, description, selections, created_at")
+      .eq("family_id", family_id).order("created_at");
+    if (error) return json({ error: error.message }, 400);
+    return json({ configurations: data || [] });
+  }
+
+  // --- Configurations: delete a saved configuration -------------------------
+  if (action === "deleteConfiguration") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { configuration_id } = body;
+    if (!configuration_id) return json({ error: "configuration_id required" }, 400);
+    const { error } = await tdb("saved_configurations").delete().eq("id", configuration_id);
     if (error) return json({ error: error.message }, 400);
     return json({ ok: true });
   }

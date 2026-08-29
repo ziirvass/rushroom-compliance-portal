@@ -119,3 +119,24 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** When "Child — Component / Part" is selected in the "+ New Product/Component" toolbar modal, a searchable parent picker appears and is required before submission. The picker lazy-loads the component list via `listComponents` on first tab switch; on submit, `addComponent` is called first, then `addBomEdge(selectedParentId, newId, qty=1)`. No new API actions.
 **Why:** Previously, "Child" mode only changed the default type field — the new component still landed as an orphan root, requiring the user to separately find it in a `+ child` modal and link it. This was confusing: selecting "Child" strongly implies the component will be attached to something. Making parent selection mandatory in this flow closes the gap and matches user expectation.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-28
+**Feature:** PROP-013 amendment — enforce BOM creation rules in UI
+**Decision:** Removed the mode toggle ("Parent" / "Child") and parent picker from the `openAddComponent` toolbar modal. The toolbar button is now "+ New Product", the modal title is "New Product / Assembly", and a hint makes the rule explicit: top-level products/assemblies only. Child creation is exclusively via the `+ child` row button on any BOM tree node. No API changes; this is a frontend UX constraint only.
+**Why:** Having two entry points for child creation (toolbar Child mode + per-row `+ child` button) caused confusion about where orphan components came from. The per-row `+ child` button already supports unlimited depth via the "Create new" tab added in the prior commit; making the toolbar button parents-only removes ambiguity and matches the mental model (toolbar = new top-level thing, row button = attach a subordinate).
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html
+
+---
+**Date:** 2026-08-28
+**Feature:** PROP-013 amendment — close detail panel on empty BOM tree
+**Decision:** `refreshTree` now hides and empties the component detail panel before returning early in both empty-state branches (no components at all, and no root_ids). The empty-state notice text was also corrected to reference "+ New Product" (matching the renamed toolbar button).
+**Why:** After deleting the last component, the tree area showed "No components yet" but the previously-selected component's detail panel — history log, fields, actions — remained visible alongside it. This was visually inconsistent and could mislead a user into thinking data still existed.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html
+
+---
+**Date:** 2026-08-28
+**Feature:** PROP-015 — Configure-to-Order Variant BOM (Product Families)
+**Decision:** Introduced a "Super BOM" model: one BOM tree per product family rather than thousands of duplicate trees per SKU. The key mechanism is a `variant_condition JSONB` column on `bom_edges` — `NULL` means always included; `{"Power":"50W"}` means the edge is active only when Power=50W is selected. A `resolveVariant` BFS walks the tree filtering edges by condition match against a `selections` object. Configuration space is defined via `family_attributes` + `family_attribute_values` tables; named resolved configurations (SKUs) are stored in `saved_configurations`. A new `product_family` node type was added to the existing CHECK constraint on `bom_components.type`.
+**Why:** Alternatives considered: (1) separate BOM tree per SKU — O(N×depth) storage, every shared-component change requires updating all trees; (2) module composition (sub-assemblies per variant) — still requires separate trees and loses the "one view of the full family" benefit. The Super BOM approach stores each component once; a change to a shared node propagates to every configuration automatically. Backward compatibility is fully preserved: existing `Product`-type roots have `variant_condition = NULL` on all their edges and are unaffected by the resolver logic.
+**Files changed:** supabase/migrations/0011_variant_bom.sql (new), supabase/functions/portal-api/index.ts (TENANT_TABLES, addComponent/updateComponent type lists, getBom edge select, addBomEdge, deleteComponent cleanup, 9 new action handlers), assets/app.js (product_family TYPE_OPTS, renderBomTree edge condition tag + FAMILY badge, openAddChildModal condition picker, openComponentDetail family config section, new openConfigureModal), index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/ROADMAP.md, docs/DECISIONS.md

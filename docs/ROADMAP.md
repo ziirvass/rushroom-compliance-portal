@@ -1,5 +1,5 @@
 # Rushroom Compliance Portal — Roadmap
-_Last updated: 2026-08-28 (2) · Auto-maintained by /ship_
+_Last updated: 2026-08-28 (3) · Auto-maintained by /ship_
 
 ## Now — In Progress
 - PROP-012 Multi-tenant SaaS (organizations, memberships, invitations, platform_audit, ai_usage_events) — Stages 5b+6 remaining
@@ -13,6 +13,7 @@ _Last updated: 2026-08-28 (2) · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **PROP-015 Configure-to-Order Variant BOM** (product_family node type, variant_condition on bom_edges, family_attributes/values, saved_configurations, resolveVariant BFS filter, ⚙ Configure modal, condition picker in + child modal) — 2026-08-28
 - **PROP-013 Product Information System — Vertical Integration Engine** (BOM tree, REACH/RoHS at component level, COGS simulation, Cost Canvas, Status Overview, full field-level audit trail with `bom_component_history`) — 2026-08-25 → 2026-08-27
 - **Level 1 — Versioning & provenance** (immutable document/standard versions, audit trail, AI-assisted drafting, deviation scan) — live 2026-07-07
 - **Level 2 — Clauses / Interpretations / Matrix / Passports** (PROP-001) — 2026-07-05
