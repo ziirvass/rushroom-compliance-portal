@@ -3683,7 +3683,7 @@
     const TYPE_OPTS = [["Component", "Component"], ["Product", "Product"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"]];
     const newPN   = el("input",  { class: "up-text", type: "text" });
     const newName = el("input",  { class: "up-text", type: "text", placeholder: "Name (required)" });
-    const newType = el("select", { class: "up-text" }, ...TYPE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
+    const newType = el("select", { class: "up-text" }, TYPE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
     newPN.value = genPN();
     const F = "width:100%;font-size:0.875rem;padding:0.42rem 0.6rem;border:1px solid var(--border,#e2e8f0);border-radius:6px;background:var(--bg,#fff);color:var(--text,#1a1f2e);font-family:inherit;box-sizing:border-box";
     [newPN, newName].forEach((el_) => el_.style.cssText = F);
@@ -4121,7 +4121,7 @@
     const pn   = el("input",    { class: "up-text", type: "text", placeholder: "Auto-generated if left empty" });
     const oem  = el("input",    { class: "up-text", type: "text", placeholder: "OEM / distributor reference (optional)" });
     const nm   = el("input",    { class: "up-text", type: "text", placeholder: "Name" });
-    const typ  = el("select",   { class: "up-text" }, ...TYPE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
+    const typ  = el("select",   { class: "up-text" }, TYPE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
     const desc = el("textarea", { class: "up-text", rows: "2", placeholder: "Purpose — what does this part do?" });
 
     // Pre-fill part number so user can see what will be saved (still editable)
