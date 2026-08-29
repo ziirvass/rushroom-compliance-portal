@@ -3444,7 +3444,7 @@
 
     wrap.replaceChildren(
       el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap" }, [
-        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => refreshTree()) }, "+ New Product"),
+        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => refreshTree()) }, "+ New BOM Node"),
         el("button", { class: "btn btn-sm", type: "button", onclick: () => refreshTree() }, "↺ Refresh"),
       ]),
       treeArea,
@@ -3459,7 +3459,7 @@
           detailPanel.style.display = "none";
           detailPanel.replaceChildren();
           treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, [
-            "No components yet. Use ", el("strong", {}, "+ New Product"), " to create the first one.",
+            "No components yet. Use ", el("strong", {}, "+ New BOM Node"), " to create the first one.",
           ]));
           return;
         }
@@ -4201,7 +4201,7 @@
 
     form.append(
       el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem" }, [
-        el("h3", { style: "margin:0;font-size:1rem" }, "New Product / Assembly"),
+        el("h3", { style: "margin:0;font-size:1rem" }, "New BOM Node"),
         el("button", { class: "btn btn-sm", type: "button", style: "padding:2px 8px", onclick: () => overlay.remove() }, "✕"),
       ]),
       el("p", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);margin:0 0 0.5rem" },
