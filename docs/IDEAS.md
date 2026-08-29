@@ -247,3 +247,31 @@ All new tables: `organization_id NOT NULL FK → organizations`
 **Related PROPs:** PROP-013 (BOM tree foundation).
 
 **Status:** Raw idea
+
+---
+### BOM Tree UX Polish — column alignment, expand/collapse, action cleanup — 2026-08-29
+
+**One sentence:** Fix column misalignment, add Expand All / Collapse All toolbar buttons, always show QTY, and compact the per-row action buttons so the tree is immediately readable.
+
+**Problem it solves:** Looking at the current tree (see screenshot 2026-08-29):
+- QTY shows nothing when qty=1, so the column looks broken — users don't know if quantity data is missing or just defaulted.
+- STATUS badges drift slightly out of alignment because the grid column widths don't account for the tree connector varying in width at depth.
+- There is no single-click way to collapse or expand the whole tree — users have to click each ▼ toggle individually on large BOMs.
+- Four action buttons per row (+ sibling, + child, Details, Delete) make rows wide and visually noisy. On a 10-level BOM with 50 nodes this is overwhelming.
+- The column headers (POS. / COMPONENT / QTY / STATUS / COGS) are not sticky, so they scroll off on long trees.
+
+**MVP scope (4 specific changes):**
+1. **Always show QTY** — display "1" instead of empty when qty = 1.
+2. **Expand All / Collapse All** — two small buttons in the BOM Tree toolbar, next to Refresh. "Expand All" clears the collapsed Set; "Collapse All" adds every posNum with children to it.
+3. **Sticky column header row** — make the POS / COMPONENT / QTY / STATUS / COGS header row `position: sticky; top: 0` so it stays visible while scrolling.
+4. **Compact action buttons** — replace text labels with short symbols or a tighter layout: "⊕" (sibling), "↳" (child), "≡" (details), "✕" (delete) with tooltip titles. Or keep labels but reduce font size and padding further.
+
+**Tables involved:** None — frontend only.
+
+**Effort estimate:** 2–3 hours.
+
+**Risks:** Compact icon-only buttons must still be accessible (aria-label). Sticky header requires knowing the offset from the subtab bar — use the existing `--header-h` CSS variable pattern already in the codebase.
+
+**Related PROPs:** PROP-013 (BOM tree), PROP-016 (sibling button — already built, its button is one of the ones to compact).
+
+**Status:** Raw idea
