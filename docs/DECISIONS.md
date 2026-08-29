@@ -154,3 +154,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Wrapped the entire `Deno.serve` handler body in a top-level try-catch that returns `json({ error: err.message }, 500)` — a CORS-compliant response — instead of letting Deno catch it and emit a raw 500 without CORS headers. Also null-guarded the two `maybeSingle()` inserts in `addComponent` (comp and ver): if either returns null with no error, the function now returns a 400 with a diagnostic message rather than throwing a `TypeError` on `.id`.
 **Why:** Any unhandled exception in an action handler was producing a Deno-level 500 without `Access-Control-Allow-Origin`. Safari reports this as "Load failed"; Chrome as "Failed to fetch". The modal stayed open even though the DB write had already succeeded — the user saw an error but the component was silently created in the background. The outer try-catch ensures ALL future errors surface as readable JSON in the modal.
 **Files changed:** supabase/functions/portal-api/index.ts, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
+**Feature:** Edge function — fix .catch() on tdb insert
+**Decision:** The non-fatal `bom_component_history` write in `addComponent` used `.catch()` chained directly on `tdb().insert()`. Supabase query builders are thenable but not full Promises — they have no `.catch()` method, so this threw "is not a function" at runtime. Replaced with a `try { await ... } catch {}` block.
+**Why:** Only became visible once the outer try-catch (previous commit) started surfacing errors as readable JSON instead of raw Deno 500s.
+**Files changed:** supabase/functions/portal-api/index.ts, docs/DECISIONS.md
