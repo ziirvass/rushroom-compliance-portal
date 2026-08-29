@@ -234,6 +234,13 @@ _Append-only. Claude Code appends one entry here after every /ship._
 
 ---
 **Date:** 2026-08-29
+**Feature:** PROP-020 fix — BOM tab grouping by hasChildren, not type field
+**Decision:** Changed tab assignment from pure `type`-field matching to: `product_family` → Dynamic BOMs; `edges.length > 0` (has BOM children) OR `type === "Product"` → Assemblies; everything else → Components. Cache bumped v143 → v144.
+**Why:** Nodes created before the type conventions were established (e.g., assemblies with `type: Component`) were landing in the wrong tab. A node with BOM children IS an assembly by structure regardless of how it was typed. Checking `edges.length` from the already-fetched tree data costs nothing extra and is structurally correct.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
 **Feature:** PROP-020 — BOM List Split by Type + Delete label
 **Decision:** Replaced the flat mixed product list in `bomTreeView` with three client-side tabs keyed on `bom_components.type`: Components (Component / SparePart / Refurb), Assemblies (Product), Dynamic BOMs (product_family). After `+ New BOM Node`, the UI switches to the Components tab (default type). Tab switching re-renders from cached tree data — no extra API calls. Delete confirmation button label changed from "Delete forever" → "Delete Permanently". Cache bumped v142 → v143.
 **Why:** The flat list mixed standalone parts, product assemblies, and family templates, making newly created components invisible at the bottom of a long mixed list. Splitting by the explicit `type` field (an already-present user intent signal) groups items predictably without any schema or API changes. Pure frontend — the simplest correct fix.
