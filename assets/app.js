@@ -3409,7 +3409,7 @@
 
   // ============================================================================
   // PROP-013 · Product Information System — Vertical Integration Engine
-  // Three sub-tabs: BOM Tree · Cost Canvas · Status Overview
+  // Two sub-tabs: BOM Tree · Status Overview (Cost Canvas removed PROP-019)
   // ============================================================================
 
   // --- colour tokens that mirror the compliance portal step statuses ----------
@@ -3483,7 +3483,7 @@
   }
 
   function renderBomTree(rootId, bom, container, detailPanel, token, allComponents, onRefresh) {
-    const { nodes = [], edges = [], cogs_by_node = {} } = bom;
+    const { nodes = [], edges = [] } = bom;
     if (!nodes.length) { container.replaceChildren(el("div", { class: "notice" }, "Empty BOM.")); return; }
 
     const nodeMap = Object.fromEntries(nodes.map((n) => [n.id, n]));
@@ -3537,12 +3537,10 @@
     ]));
 
     wrap.append(el("div", {
-        style: "display:grid;grid-template-columns:6rem 1fr 4rem 7rem 3.5rem 12rem;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem;position:sticky;top:0;z-index:1;background:var(--bg,#fff)",
-      }, ["Pos.", isDynamicBom ? "Configuration" : "Component", "Qty", "Status", "COGS", ""].map((t, i) => el("span", { style: i >= 2 && i <= 4 ? "text-align:center" : "" }, t))));
+        style: "display:grid;grid-template-columns:6rem 1fr 4rem 7rem 12rem;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem;position:sticky;top:0;z-index:1;background:var(--bg,#fff)",
+      }, ["Pos.", isDynamicBom ? "Configuration" : "Component", "Qty", "Status", ""].map((t, i) => el("span", { style: i >= 2 && i <= 3 ? "text-align:center" : "" }, t))));
 
       rows.forEach(({ n, qty, posNum, depth, ancestorLastFlags, hasChildren, edgeCondition, parentNode }) => {
-        const cogsPct = (cogs_by_node || {})[n.id];
-        const heatColor = cogsPct >= 50 ? "#e05454" : cogsPct >= 20 ? "#e5a326" : cogsPct >= 5 ? "#4a9eed" : null;
         const isCollapsed = collapsed.has(posNum);
         const isFamily = n.type === "product_family";
 
@@ -3580,7 +3578,7 @@
         ]);
 
         const row = el("div", {
-          style: `display:grid;grid-template-columns:6rem 1fr 4rem 7rem 3.5rem 12rem;gap:0.5rem;align-items:center;padding:0.3rem 0.5rem;border-left:3px solid ${isFamily ? "#2fa564" : heatColor || "transparent"};border-radius:3px;margin-bottom:1px;cursor:default`,
+          style: `display:grid;grid-template-columns:6rem 1fr 4rem 7rem 12rem;gap:0.5rem;align-items:center;padding:0.3rem 0.5rem;border-left:3px solid ${isFamily ? "#2fa564" : "transparent"};border-radius:3px;margin-bottom:1px;cursor:default`,
           onmouseenter: (ev) => { ev.currentTarget.style.background = "var(--bg-2,rgba(0,0,0,0.03))"; },
           onmouseleave: (ev) => { ev.currentTarget.style.background = ""; },
         }, [
@@ -3588,7 +3586,6 @@
           compCell,
           el("span", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);text-align:center;display:block" }, `×${qty}`),
           el("div", { style: "display:flex;justify-content:center" }, lifecycleBadge(n.lifecycle_status)),
-          el("div", { style: "display:flex;justify-content:center" }, heatColor ? el("span", { style: `font-size:0.72rem;font-weight:600;color:${heatColor}` }, `${cogsPct}%`) : el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1)" }, "—")),
           el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0;flex-wrap:nowrap" }, [
             // ⚙ variant-configure button hidden until import integration is built (PROP-018)
 
@@ -3656,14 +3653,7 @@
         wrap.append(row);
       });
 
-      const legend = el("div", { style: "display:flex;gap:0.6rem;flex-wrap:wrap;margin-top:0.75rem;font-size:0.7rem;color:var(--muted,#8b93a1);align-items:center" }, [
-        el("span", {}, "COGS:"),
-        el("span", { style: "border-left:3px solid #e05454;padding-left:4px" }, "≥50%"),
-        el("span", { style: "border-left:3px solid #e5a326;padding-left:4px" }, "≥20%"),
-        el("span", { style: "border-left:3px solid #4a9eed;padding-left:4px" }, "≥5%"),
-      ]);
-
-      container.replaceChildren(wrap, legend);
+      container.replaceChildren(wrap);
     }
 
     render();
@@ -4182,7 +4172,7 @@
     }
 
     // --- Fields --------------------------------------------------------------
-    const TYPE_OPTS = [["Product", "Product"], ["Component", "Component"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"], ["product_family", "Dynamic BOM"]];
+    const TYPE_OPTS = [["Component", "Component"], ["Product", "Product"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"], ["product_family", "Dynamic BOM"]];
     const pn   = el("input",    { class: "up-text", type: "text", placeholder: "Auto-generated if left empty" });
     const oem  = el("input",    { class: "up-text", type: "text", placeholder: "OEM / distributor reference (optional)" });
     const nm   = el("input",    { class: "up-text", type: "text", placeholder: "Name" });
@@ -4401,175 +4391,6 @@
     loadAttributes();
   }
 
-  // --- Cost canvas (scenario simulation) ------------------------------------
-  async function costCanvasView(token) {
-    const wrap = el("div", { class: "pis-canvas-wrap" });
-    const rootIdInput = el("input", { class: "up-text", type: "text", placeholder: "Root component ID", style: "width:min(320px,100%)" });
-    const scenarioSel = el("select", { class: "up-text", style: "width:min(240px,100%)" });
-    const loadBtn = el("button", { class: "btn btn-sm btn-primary", type: "button" }, "Load");
-    const newScenarioBtn = el("button", { class: "btn btn-sm", type: "button" }, "New scenario");
-    const chartsArea = el("div", { class: "pis-charts", style: "margin-top:1rem" });
-    const overridesArea = el("div", { class: "pis-overrides", style: "margin-top:1rem" });
-    const summaryArea = el("div", { class: "pis-summary", style: "margin-top:1rem;padding:0.75rem;background:var(--bg-2,#f5f5f5);border-radius:6px" });
-
-    let currentNodes = [], currentTotal = 0, currentOverrides = {};
-
-    function clientComputeCogs(nodes, overrides) {
-      // Client-side re-computation for live simulation (no API call per keystroke)
-      return nodes.reduce((sum, n) => {
-        const override = overrides[n.component_id];
-        const price = override != null ? Number(override) : Number(n.unit_price || 0);
-        return sum + price * Number(n.cum_quantity || 1);
-      }, 0);
-    }
-
-    function renderCharts(nodes, total, confidenceLabel) {
-      if (!nodes.length) { chartsArea.replaceChildren(el("div", { class: "muted" }, "No cost data yet.")); return; }
-      const leaves = nodes.filter((n) => n.depth > 0).sort((a, b) => Number(b.node_cogs) - Number(a.node_cogs)).slice(0, 20);
-
-      // Sorted cost bar (inline SVG)
-      const BAR_H = 24, GAP = 4, LEFT = 180, RIGHT = 60, W = 540;
-      const maxCogs = Math.max(...leaves.map((n) => Number(n.node_cogs) || 0), 1);
-      const svgH = leaves.length * (BAR_H + GAP) + 40;
-      const svgEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svgEl.setAttribute("viewBox", `0 0 ${W + LEFT + RIGHT} ${svgH}`);
-      svgEl.setAttribute("width", "100%");
-      svgEl.style.display = "block";
-      leaves.forEach((n, i) => {
-        const y = i * (BAR_H + GAP) + 30;
-        const barW = Math.max(2, (Number(n.node_cogs) / maxCogs) * W);
-        const color = MATURITY_COLORS[n.cost_maturity] || "#4a9eed";
-        const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        lbl.setAttribute("x", LEFT - 6); lbl.setAttribute("y", y + BAR_H / 2 + 4);
-        lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "11");
-        lbl.setAttribute("fill", "currentColor");
-        lbl.textContent = (n.part_number || n.name || "").slice(0, 22);
-        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-        rect.setAttribute("x", LEFT); rect.setAttribute("y", y);
-        rect.setAttribute("width", barW); rect.setAttribute("height", BAR_H);
-        rect.setAttribute("fill", color); rect.setAttribute("rx", "3");
-        rect.setAttribute("opacity", "0.85");
-        const val = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        val.setAttribute("x", LEFT + barW + 5); val.setAttribute("y", y + BAR_H / 2 + 4);
-        val.setAttribute("font-size", "10"); val.setAttribute("fill", "currentColor");
-        val.textContent = Number(n.node_cogs).toFixed(2);
-        svgEl.append(lbl, rect, val);
-      });
-      const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      title.setAttribute("x", LEFT + W / 2); title.setAttribute("y", 16);
-      title.setAttribute("text-anchor", "middle"); title.setAttribute("font-size", "12");
-      title.setAttribute("font-weight", "bold"); title.setAttribute("fill", "currentColor");
-      title.textContent = "Component cost contribution (top 20)";
-      svgEl.prepend(title);
-
-      const confidenceColor = MATURITY_COLORS[confidenceLabel] || "#e5a326";
-      const confidenceNote = confidenceLabel === "estimate"
-        ? el("p", { class: "muted", style: `color:${confidenceColor};font-size:0.82rem;margin-top:0.4rem` }, "⚠ COGS contains estimates — actual cost may vary ±15%")
-        : null;
-
-      chartsArea.replaceChildren(
-        el("div", { class: "table-wrap", style: "overflow-x:auto" }, svgEl),
-        confidenceNote,
-      ).filter ? null : null;
-      chartsArea.replaceChildren(el("div", { class: "table-wrap" }, svgEl), ...(confidenceNote ? [confidenceNote] : []));
-    }
-
-    function renderOverrides(nodes, overrides, onSave) {
-      const rows = nodes.filter((n) => n.depth > 0).sort((a, b) => Number(b.node_cogs) - Number(a.node_cogs)).slice(0, 15);
-      const inputs = {};
-      const tbody = rows.map((n) => {
-        const inp = el("input", { type: "number", step: "0.01", min: "0", class: "up-text", style: "width:90px", value: overrides[n.component_id] ?? (n.unit_price || "") });
-        inputs[n.component_id] = inp;
-        inp.oninput = () => {
-          overrides[n.component_id] = inp.value ? Number(inp.value) : null;
-          const newTotal = clientComputeCogs(currentNodes, overrides);
-          summaryArea.querySelector(".pis-total").textContent = `Total COGS: ${newTotal.toFixed(2)} ${n.currency || "SEK"} (preview)`;
-          renderCharts(currentNodes.map((nd) => nd.component_id === n.component_id ? { ...nd, node_cogs: Number(inp.value || 0) * Number(nd.cum_quantity) } : nd), newTotal, "estimate");
-        };
-        return el("tr", {}, [
-          el("td", {}, n.part_number || ""), el("td", {}, n.name || ""),
-          el("td", {}, maturityBadge(n.cost_maturity)), el("td", {}, inp),
-        ]);
-      });
-      overridesArea.replaceChildren(
-        el("h4", { style: "margin-bottom:0.5rem" }, "Override unit prices (simulation)"),
-        el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
-          el("thead", {}, el("tr", {}, ["Part #", "Name", "Cost maturity", "Unit price override"].map((h) => el("th", {}, h)))),
-          el("tbody", {}, ...tbody),
-        ])),
-        el("button", { class: "btn btn-sm btn-primary", type: "button", style: "margin-top:0.5rem", onclick: onSave }, "Save to scenario"),
-      );
-    }
-
-    async function loadCanvas() {
-      const rootId = rootIdInput.value.trim();
-      const scenarioId = scenarioSel.value || null;
-      if (!rootId) return;
-      chartsArea.replaceChildren(el("div", { class: "loading" }, "Computing…"));
-      overridesArea.replaceChildren();
-      summaryArea.replaceChildren();
-      try {
-        let nodes, total, confidenceLabel, overridesMap = {};
-        if (scenarioId) {
-          const r = await API.post(token, "getScenarioResult", { scenario_id: scenarioId });
-          nodes = r.nodes_with_cost || []; total = r.total_cogs || 0; confidenceLabel = r.confidence_label || "estimate";
-          (r.overrides || []).filter((o) => o.override_type === "unit_price").forEach((o) => { overridesMap[o.component_id] = o.value?.unit_price; });
-        } else {
-          const r = await API.post(token, "computeCogs", { root_component_id: rootId, scenario_id: null });
-          nodes = r.detail || []; total = r.total_cogs || 0; confidenceLabel = r.confidence_label || "estimate";
-        }
-        currentNodes = nodes; currentTotal = total; currentOverrides = { ...overridesMap };
-        summaryArea.replaceChildren(
-          el("p", { class: "pis-total", style: "font-weight:600;font-size:1.05rem" }, `Total COGS: ${Number(total).toFixed(2)} ${nodes[0]?.currency || "SEK"}`),
-          el("p", { class: "muted", style: "font-size:0.82rem" }, `Confidence: `).appendChild(maturityBadge(confidenceLabel)) && null,
-        );
-        const confBadge = maturityBadge(confidenceLabel);
-        summaryArea.replaceChildren(
-          el("p", { class: "pis-total", style: "font-weight:600;font-size:1.05rem" }, `Total COGS: ${Number(total).toFixed(2)} ${nodes[0]?.currency || "SEK"}`),
-          el("p", { class: "muted", style: "font-size:0.82rem;display:flex;gap:0.4rem;align-items:center" }, ["Confidence: ", confBadge]),
-        );
-        renderCharts(nodes, total, confidenceLabel);
-        renderOverrides(nodes, currentOverrides, async () => {
-          if (!scenarioId) { alert("Select or create a scenario first to save overrides."); return; }
-          const entries = Object.entries(currentOverrides).filter(([, v]) => v != null);
-          for (const [cid, price] of entries) {
-            await API.post(token, "applyScenarioOverride", { scenario_id: scenarioId, component_id: cid, override_type: "unit_price", value: { unit_price: Number(price) } });
-          }
-          await loadCanvas();
-        });
-      } catch (ex) {
-        chartsArea.replaceChildren(el("div", { class: "error" }, `Couldn't compute COGS: ${ex.message}`));
-      }
-    }
-
-    async function refreshScenarios(rootId) {
-      if (!rootId) return;
-      try {
-        const { scenarios } = await API.post(token, "listScenarios", { base_component_id: rootId });
-        scenarioSel.replaceChildren(el("option", { value: "" }, "— Production BOM —"), ...(scenarios || []).map((s) => el("option", { value: s.id }, s.name)));
-      } catch { /* non-fatal */ }
-    }
-
-    newScenarioBtn.onclick = async () => {
-      const rootId = rootIdInput.value.trim(); if (!rootId) { alert("Enter a root component ID first."); return; }
-      const name = prompt("Scenario name:");
-      if (!name) return;
-      const { id } = await API.post(token, "createScenario", { name, base_component_id: rootId });
-      await refreshScenarios(rootId);
-      scenarioSel.value = id;
-    };
-
-    loadBtn.onclick = async () => { await refreshScenarios(rootIdInput.value.trim()); await loadCanvas(); };
-
-    wrap.replaceChildren(
-      el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem" }, [
-        rootIdInput, scenarioSel, loadBtn, newScenarioBtn,
-      ]),
-      summaryArea, chartsArea, overridesArea,
-    );
-    return wrap;
-  }
-
   // --- Status overview dashboard ---------------------------------------------
   async function statusOverviewView(token) {
     const wrap = el("div", { class: "pis-overview-wrap" });
@@ -4615,7 +4436,6 @@
     const token = API.getToken();
     mount.replaceChildren(subTabs("product", [
       { id: "bom", label: "BOM Tree", icon: "layers", build: () => { const m = el("div", {}); bomTreeView(token).then((v) => m.replaceChildren(v)); return m; } },
-      { id: "canvas", label: "Cost Canvas", icon: "expand", build: () => { const m = el("div", {}); costCanvasView(token).then((v) => m.replaceChildren(v)); return m; } },
       { id: "overview", label: "Status Overview", icon: "eye", build: () => { const m = el("div", {}); statusOverviewView(token).then((v) => m.replaceChildren(v)); return m; } },
     ]));
   }

@@ -1,5 +1,5 @@
 # Rushroom Compliance Portal — Roadmap
-_Last updated: 2026-08-28 (3) · Auto-maintained by /ship_
+_Last updated: 2026-08-29 · Auto-maintained by /ship_
 
 ## Now — In Progress
 - PROP-012 Multi-tenant SaaS (organizations, memberships, invitations, platform_audit, ai_usage_events) — Stages 5b+6 remaining
@@ -13,6 +13,7 @@ _Last updated: 2026-08-28 (3) · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **PROP-019 COGS Layer Removal** (5 tables, 10 API actions, Cost Canvas subtab removed; BOM tree kept for compliance tracing; cache v141) — 2026-08-29
 - **PROP-017 BOM Tree UX Polish** (always-show QTY, Expand All / Collapse All, sticky header, compact action labels) — 2026-08-29
 - **PROP-016 BOM Tree — Add Sibling shortcut button** (`+sib` on every non-root row opens add-child modal with parent context) — 2026-08-29
 - **PROP-015 Configure-to-Order Variant BOM** (product_family node type, variant_condition on bom_edges, family_attributes/values, saved_configurations, resolveVariant BFS filter, ⚙ Configure modal, condition picker in + child modal) — 2026-08-28
