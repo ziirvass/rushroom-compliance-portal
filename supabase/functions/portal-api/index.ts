@@ -761,6 +761,9 @@ Deno.serve(async (req) => {
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
   const action = String(body.action || "");
+  // Outer safety net: catch any uncaught exception inside an action handler and
+  // return it as a CORS-compliant JSON error so the browser never sees a raw 500.
+  try {
 
   // --- login: password -> token -------------------------------------------
   if (action === "login") {
@@ -3476,12 +3479,12 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       description: description || null, notes: notes || null,
       created_by: session.uid || null,
     }).select("id").maybeSingle();
-    if (ce) return json({ error: ce.message }, 400);
+    if (ce || !comp) return json({ error: ce?.message ?? "Component insert returned no data" }, 400);
     const { data: ver, error: ve } = await tdb("bom_component_versions").insert({
       component_id: comp.id, revision: "A", spec_summary: "Initial revision",
       is_current: true, created_by: session.uid || null,
     }).select("id").maybeSingle();
-    if (ve) return json({ error: ve.message }, 400);
+    if (ve || !ver) return json({ error: ve?.message ?? "Version insert returned no data" }, 400);
     // The INSERT trigger on bom_components writes the 'created' field snapshot.
     // Also write an explicit version_bumped row so Revision A always appears in
     // the Change Log timeline alongside later bumps (B, C, …).
@@ -4200,4 +4203,8 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // ==========================================================================
 
   return json({ error: `Unknown action: ${action}` }, 400);
+  } catch (err: any) {
+    console.error(`[portal-api] unhandled error in action=${action}:`, err);
+    return json({ error: err?.message ?? "Internal server error" }, 500);
+  }
 });
