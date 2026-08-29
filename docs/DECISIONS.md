@@ -203,3 +203,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Header labels for QTY, Status, COGS columns now use `text-align:center` (applied by index in the map, indices 2–4). Data cells: QTY span uses `display:block;text-align:center`; Status badge wrapped in `display:flex;justify-content:center` div; COGS value wrapped in `display:flex;justify-content:center` div. Cache bumped v131→v132.
 **Why:** The values were left-aligned within their narrow fixed-width columns, making them hard to read at a glance — centering aligns them under their headers and reduces visual noise.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
+**Feature:** BOM tree — propagate effective quantity down child paths
+**Decision:** `walk()` now passes `qty * e.quantity` to children instead of `e.quantity`. This makes every displayed QTY the effective quantity from root to that node (e.g. if 1.1 is ×2 and 1.1.1 is ×3 per unit of 1.1, then 1.1.1 shows ×6). Cache bumped v132→v133.
+**Why:** The previous behaviour showed only the edge quantity — the quantity on the single parent→child edge — which is meaningless to anyone reading the tree top-down. Effective quantity (accumulated product of all ancestor edge quantities) is what a BOM reader actually needs: it tells you how many of that part go into one unit of the root product.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md

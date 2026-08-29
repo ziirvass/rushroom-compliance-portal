@@ -3513,7 +3513,7 @@
         rows.push({ n, qty, posNum, depth, ancestorLastFlags: [...ancestorLastFlags], hasChildren: children.length > 0, edgeCondition, parentNode: parentNode || null });
         if (collapsed.has(posNum)) return;
         children.forEach((e, i) => {
-          walk(e.child_id, e.quantity, `${posNum}.${i + 1}`, depth + 1, [...ancestorLastFlags, i === children.length - 1], e.variant_condition, n);
+          walk(e.child_id, qty * e.quantity, `${posNum}.${i + 1}`, depth + 1, [...ancestorLastFlags, i === children.length - 1], e.variant_condition, n);
         });
       }
       walk(rootId, 1, "1", 0, [], null, null);
