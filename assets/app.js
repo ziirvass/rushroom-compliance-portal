@@ -3928,6 +3928,7 @@
   // --- Component detail panel (slide-in below the tree) ----------------------
   async function openComponentDetail(componentId, token, panel, nodeData) {
     panel.style.display = "";
+    panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
     panel.replaceChildren(el("div", { class: "loading" }, "Loading…"));
     const isFamily = nodeData?.type === "product_family";
     try {

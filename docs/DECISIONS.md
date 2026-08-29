@@ -234,6 +234,13 @@ _Append-only. Claude Code appends one entry here after every /ship._
 
 ---
 **Date:** 2026-08-29
+**Feature:** Detail panel scroll-into-view on open
+**Decision:** Added `panel.scrollIntoView({ behavior: "smooth", block: "nearest" })` immediately after `panel.style.display = ""` in `openComponentDetail`. Cache bumped v145 → v146.
+**Why:** The detail panel sits below the BOM tree in DOM order. Opening it via double-click left it out of the viewport — users had to scroll manually to see it. `block: "nearest"` scrolls the minimum distance needed to make the panel fully visible without overshooting.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
 **Feature:** BOM row UX — × delete button + double-click for detail
 **Decision:** Replaced the "Del" text button with a compact red "×" symbol. Removed the "Detail" button entirely; the component detail panel now opens on double-click of any BOM row. Cache bumped v144 → v145.
 **Why:** "Del" next to "Detail" created visual noise and risk of misclick. A × is universally understood as delete and takes less space. Double-click for detail is a standard desktop pattern — it keeps the action bar minimal (just +sib, +child, ×) while preserving full detail access without an extra button per row.
