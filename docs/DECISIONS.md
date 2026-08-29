@@ -196,3 +196,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Root cause of column misalignment: the actions column was `auto`-width, so rows with 3 buttons (root) vs 5 buttons (family non-root) resolved `1fr` differently, shifting every other column. Fixed by setting actions column to `12rem` in both header and row grid templates. Also: component cell redesigned — bold name is now on the first line with badges; part number drops to a second line in tiny monospace (previously the part number pushed the name right, making it hard to scan). COGS cells now show `—` instead of blank when no cost data. Rows highlight subtly on `mouseenter`. Cache bumped v130→v131.
 **Why:** The `auto` column bug existed since the action button set was made conditional (sibling/configure buttons added in PROP-016/015). Each row is an independent CSS grid; `auto` resolves differently per row when content differs, so `1fr` is not the same width across rows — hence visual misalignment. Fixed-width column is the correct solution.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
+**Feature:** BOM tree column centering — QTY, Status, COGS
+**Decision:** Header labels for QTY, Status, COGS columns now use `text-align:center` (applied by index in the map, indices 2–4). Data cells: QTY span uses `display:block;text-align:center`; Status badge wrapped in `display:flex;justify-content:center` div; COGS value wrapped in `display:flex;justify-content:center` div. Cache bumped v131→v132.
+**Why:** The values were left-aligned within their narrow fixed-width columns, making them hard to read at a glance — centering aligns them under their headers and reduces visual noise.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
