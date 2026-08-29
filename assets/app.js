@@ -3544,7 +3544,7 @@
 
     wrap.append(el("div", {
         style: "display:grid;grid-template-columns:6rem 1fr 4rem 7rem 3.5rem 12rem;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem;position:sticky;top:0;z-index:1;background:var(--bg,#fff)",
-      }, ["Pos.", "Component", "Qty", "Status", "COGS", ""].map((t, i) => el("span", { style: i >= 2 && i <= 4 ? "text-align:center" : "" }, t))));
+      }, ["Pos.", isDynamicBom ? "Configuration" : "Component", "Qty", "Status", "COGS", ""].map((t, i) => el("span", { style: i >= 2 && i <= 4 ? "text-align:center" : "" }, t))));
 
       rows.forEach(({ n, qty, posNum, depth, ancestorLastFlags, hasChildren, edgeCondition, parentNode }) => {
         const cogsPct = (cogs_by_node || {})[n.id];
