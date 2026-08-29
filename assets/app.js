@@ -5212,6 +5212,7 @@
         { id: "add", label: role === "supplier" ? "Upload a document" : "Add document", icon: "plus", build: addTab },
       ];
       if (role === "rushroom") docTabs.push({ id: "labels", label: "Labels and Instructions", icon: "tag", build: labelsTab });
+      if (role === "rushroom") docTabs.push({ id: "bom", label: "Product BOM", icon: "grid", build: () => { const m = el("div", {}); renderProduct(role, m); return m; } });
       if (role === "rushroom") docTabs.push({ id: "uploads", label: "Supplier uploads", icon: "external", build: uploadsTab });
       docsPanel.replaceChildren(subTabs("documents", docTabs));
     };
@@ -5230,8 +5231,6 @@
     if (acctPanel && API.isAdmin()) renderAccounts(role, acctPanel);
     const l2Panel = $("#level2-panel");
     if (l2Panel && role === "rushroom") renderLevel2(role, l2Panel);
-    const prodPanel = $("#product-panel");
-    if (prodPanel && role === "rushroom") renderProduct(role, prodPanel);
   }
 
   // Hide tabs/panels the signed-in user isn't entitled to.
@@ -5243,7 +5242,6 @@
     };
     gate("tab-deviations", "deviations-panel", role === "rushroom");
     gate("tab-level2", "level2-panel", role === "rushroom");
-    gate("tab-product", "product-panel", role === "rushroom");
     gate("tab-accounts", "accounts-panel", !!admin);
   }
 
