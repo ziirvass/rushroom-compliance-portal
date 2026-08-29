@@ -3611,17 +3611,37 @@
                     }
                     await API.post(token, "removeBomEdge", { parent_id: parentNode.id, child_id: n.id });
                   } else {
-                    // Root row: delete from registry — check where it's used first
+                    // Root row: delete from registry — show custom danger modal
                     const { parents } = await API.post(token, "listParentsOf", { component_id: n.id });
                     const childCount = (childrenOf[n.id] || []).length;
-                    let msg = `Delete "${n.name}" from the registry?\n\nThis removes the component and all its compliance data permanently.`;
-                    if (parents && parents.length) {
-                      const names = parents.map((p) => `  • ${p.parent ? p.parent.name : p.parent_id}`).join("\n");
-                      msg += `\n\n⚠️ This component is linked in ${parents.length} assembl${parents.length > 1 ? "ies" : "y"}:\n${names}\nIt will be removed from all of them.`;
-                    }
-                    if (childCount) msg += `\n\n${childCount} direct child${childCount > 1 ? "ren" : ""} will become standalone BOM Nodes.`;
-                    msg += "\n\nThis cannot be undone.";
-                    if (!confirm(msg)) { ev.target.disabled = false; ev.target.textContent = "Del"; return; }
+                    const confirmed = await new Promise((resolve) => {
+                      const mo = el("div", { style: "position:fixed;inset:0;background:#00000080;z-index:2000;display:flex;align-items:center;justify-content:center" });
+                      const close = (v) => { mo.remove(); resolve(v); };
+                      mo.onclick = (e) => { if (e.target === mo) close(false); };
+                      const rows = [
+                        el("div", { style: "display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem" }, [
+                          el("span", { style: "font-size:1.3rem;line-height:1" }, "🗑"),
+                          el("h3", { style: "margin:0;font-size:1rem;color:#e05454" }, `Delete "${n.name}" from registry?`),
+                        ]),
+                        el("p", { style: "margin:0 0 0.75rem;font-size:0.875rem" }, "This permanently removes the component and all its compliance data."),
+                      ];
+                      if (parents && parents.length) {
+                        rows.push(el("div", { style: "background:#e0545415;border:1px solid #e0545450;border-radius:6px;padding:0.6rem 0.75rem;margin-bottom:0.75rem" }, [
+                          el("div", { style: "font-size:0.82rem;font-weight:700;color:#e05454;margin-bottom:0.3rem" }, `⚠ Linked in ${parents.length} assembl${parents.length > 1 ? "ies" : "y"}:`),
+                          el("ul", { style: "margin:0.2rem 0 0.3rem;padding-left:1.2rem;font-size:0.82rem" }, parents.map((p) => el("li", {}, p.parent ? p.parent.name : p.parent_id))),
+                          el("div", { style: "font-size:0.78rem;color:var(--muted,#8b93a1)" }, "Deleting will unlink it from all of them."),
+                        ]));
+                      }
+                      if (childCount) rows.push(el("p", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);margin:0 0 0.5rem" }, `${childCount} direct child${childCount > 1 ? "ren" : ""} will become standalone BOM Nodes.`));
+                      rows.push(el("p", { style: "font-size:0.82rem;font-weight:700;color:#e05454;margin:0 0 1.1rem" }, "This cannot be undone."));
+                      rows.push(el("div", { style: "display:flex;justify-content:flex-end;gap:0.5rem" }, [
+                        el("button", { class: "btn btn-sm", type: "button", onclick: () => close(false) }, "Cancel"),
+                        el("button", { type: "button", style: "background:#e05454;color:#fff;border:none;border-radius:6px;padding:0.45rem 1.1rem;font-size:0.875rem;font-weight:700;cursor:pointer;letter-spacing:0.01em", onclick: () => close(true) }, "Delete forever"),
+                      ]));
+                      mo.append(el("div", { style: "background:var(--bg,#fff);border:2px solid #e05454;border-radius:10px;padding:1.5rem;width:min(440px,95vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px #0003" }, rows));
+                      document.body.append(mo);
+                    });
+                    if (!confirmed) { ev.target.disabled = false; ev.target.textContent = "Del"; return; }
                     await API.post(token, "deleteComponent", { component_id: n.id });
                   }
                   onRefresh();
