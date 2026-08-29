@@ -175,3 +175,17 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Removed the top-level Product tab and panel from `index.html`. Added a "Product BOM" subtab inside As Operated, rendered lazily via the existing `renderProduct()` function, positioned between "Labels and Instructions" and "Supplier uploads". Cache bumped v127→v128.
 **Why:** The BOM is part of the as-operated product record, not a standalone section. Placing it inside As Operated keeps the top-level nav lean and groups product-related information in one place.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
+**Feature:** PROP-016 — BOM Tree sibling shortcut button
+**Decision:** Added a `+sib` button to every non-root BOM row that opens `openAddChildModal` with the row's `parentNode` as the target, allowing the user to add a peer node without scrolling back to the parent. The `parentNode` reference is threaded through `walk()` via a new seventh parameter and stored on each row in `buildRows()`.
+**Why:** Without the shortcut users had to scroll up to the parent row and click `+child` there — a high-friction workflow when building out multi-level trees. The sibling button eliminates that friction by passing the parent context down to the child row.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-29
+**Feature:** PROP-017 — BOM Tree UX Polish (always-show QTY, Expand All / Collapse All, sticky header, compact action labels)
+**Decision:** Four targeted changes to `renderBomTree`: (1) QTY cell now always renders `×N` (was hidden when N=1). (2) "Expand all" and "Collapse all" buttons added above the column header inside `render()`, sharing the `collapsed` Set and `buildRows()` closure directly. (3) Column header div gets `position:sticky;top:0;z-index:1` so it stays visible while scrolling a long tree. (4) Action button labels compacted to `⚙`, `+sib`, `+child`, `Detail`, `Del` with `title` tooltip attributes, saving horizontal space. Cache bumped v129→v130.
+**Why:** The previous UI was ambiguous (a missing QTY could mean "not set" or "= 1"), scroll-heavy (no way to expand/collapse the whole tree at once), and the action buttons were wide enough to push the tree off-screen on narrow viewports. No new data model, API, or DB changes — purely presentation.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/DECISIONS.md

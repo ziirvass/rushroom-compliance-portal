@@ -13,6 +13,8 @@ _Last updated: 2026-08-28 (3) · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **PROP-017 BOM Tree UX Polish** (always-show QTY, Expand All / Collapse All, sticky header, compact action labels) — 2026-08-29
+- **PROP-016 BOM Tree — Add Sibling shortcut button** (`+sib` on every non-root row opens add-child modal with parent context) — 2026-08-29
 - **PROP-015 Configure-to-Order Variant BOM** (product_family node type, variant_condition on bom_edges, family_attributes/values, saved_configurations, resolveVariant BFS filter, ⚙ Configure modal, condition picker in + child modal) — 2026-08-28
 - **PROP-013 Product Information System — Vertical Integration Engine** (BOM tree, REACH/RoHS at component level, COGS simulation, Cost Canvas, Status Overview, full field-level audit trail with `bom_component_history`) — 2026-08-25 → 2026-08-27
 - **Level 1 — Versioning & provenance** (immutable document/standard versions, audit trail, AI-assisted drafting, deviation scan) — live 2026-07-07

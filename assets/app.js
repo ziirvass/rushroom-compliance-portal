@@ -3534,8 +3534,14 @@
       const wrap = el("div", { style: "font-size:0.84rem;overflow-x:auto" });
 
       // Column header
-      wrap.append(el("div", {
-        style: "display:grid;grid-template-columns:6rem 1fr 4.5rem 7rem 3.5rem auto;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem",
+      // Expand / Collapse all controls
+    wrap.append(el("div", { style: "display:flex;gap:0.4rem;margin-bottom:0.4rem" }, [
+      el("button", { class: "btn btn-sm", type: "button", onclick: () => { collapsed.clear(); render(); } }, "Expand all"),
+      el("button", { class: "btn btn-sm", type: "button", onclick: () => { collapsed.clear(); buildRows().filter((r) => r.hasChildren).forEach((r) => collapsed.add(r.posNum)); render(); } }, "Collapse all"),
+    ]));
+
+    wrap.append(el("div", {
+        style: "display:grid;grid-template-columns:6rem 1fr 4.5rem 7rem 3.5rem auto;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem;position:sticky;top:0;z-index:1;background:var(--bg,#fff)",
       }, ["Pos.", "Component", "Qty", "Status", "COGS", ""].map((t) => el("span", {}, t))));
 
       rows.forEach(({ n, qty, posNum, depth, ancestorLastFlags, hasChildren, edgeCondition, parentNode }) => {
@@ -3577,14 +3583,14 @@
         }, [
           el("span", { style: "font-family:monospace;font-size:0.78rem;font-weight:600;color:var(--muted,#8b93a1)" }, posNum),
           compCell,
-          el("span", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);text-align:right" }, qty !== 1 ? `×${qty}` : ""),
+          el("span", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);text-align:right" }, `×${qty}`),
           lifecycleBadge(n.lifecycle_status),
           heatColor ? el("span", { style: `font-size:0.72rem;font-weight:600;color:${heatColor}` }, `${cogsPct}%`) : el("span"),
           el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0" }, [
-            isFamily ? el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem;color:#2fa564;border-color:#2fa56440", onclick: () => openConfigureModal(n, token, onRefresh) }, "⚙ Configure") : null,
-            parentNode ? el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+ sibling") : null,
-            el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId) }, "+ child"),
-            el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openComponentDetail(n.id, token, detailPanel, n) }, "Details"),
+            isFamily ? el("button", { class: "btn btn-sm", type: "button", title: "Configure", style: "padding:1px 5px;font-size:0.7rem;color:#2fa564;border-color:#2fa56440", onclick: () => openConfigureModal(n, token, onRefresh) }, "⚙") : null,
+            parentNode ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+sib") : null,
+            el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId) }, "+child"),
+            el("button", { class: "btn btn-sm", type: "button", title: "Show details", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openComponentDetail(n.id, token, detailPanel, n) }, "Detail"),
             el("button", {
               class: "btn btn-sm", type: "button",
               style: "padding:1px 5px;font-size:0.7rem;color:#e05454;border-color:#e0545440",
@@ -3600,11 +3606,11 @@
                   await API.post(token, "deleteComponent", { component_id: n.id });
                   onRefresh();
                 } catch (ex) {
-                  ev.target.disabled = false; ev.target.textContent = "Delete";
+                  ev.target.disabled = false; ev.target.textContent = "Del";
                   alert(`Delete failed: ${ex.message}`);
                 }
               },
-            }, "Delete"),
+            }, "Del"),
           ].filter(Boolean)),
         ]);
         wrap.append(row);

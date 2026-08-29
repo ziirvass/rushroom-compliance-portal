@@ -365,7 +365,7 @@
         <!-- AS-BUILT STATUS SECTION -->
         <div class="section doc-section-new">
             <h2>0. As-Built Status <span class="doc-new-badge">Audited against production 2026-08-29</span></h2>
-            <p>This section reflects what is <strong>actually deployed and live</strong> as of <span class="doc-changed">2026-08-29</span>, superseding any "planned/pending" wording later in this document. Frontend is a no-framework static site on GitHub Pages (cache-busted assets, currently <span class="doc-changed"><code>?v=128</code></span>); backend is the single Supabase <code>portal-api</code> Edge Function (Deno, deployed <code>--no-verify-jwt</code>) plus Postgres + private Storage buckets. The whole document library, action plan, standards register, Level 2, CELLAR, and Product Information System data live in Postgres; the browser never touches the DB directly. PROP-013 adds a new <strong>Product</strong> tab (Rushroom-only) with BOM tree, Cost Canvas, and Status Overview; 11 new tables and 25 new API actions support unlimited-depth BOM trees, component versioning, REACH/RoHS at component level, internal cost/COGS intelligence, scenario simulation, and a <strong>complete unified audit trail</strong> — the Change Log merges three canonical sources (field snapshots via Postgres triggers, all revisions from <code>bom_component_versions</code>, all docs from <code>component_documents</code>) and <code>addComponent</code> now writes an explicit <code>version_bumped</code> history row for Revision A so the creation moment is always in the log. The <span class="doc-changed"><code>+ child</code> button on every BOM tree row</span> has a "Create new" tab so users can create and link a child in one step — enabling unlimited-depth hierarchies (1.1.1.1.1…). BOM creation rules are enforced in the UI: the <code>+ New Product</code> toolbar button creates top-level parents only; children are created exclusively via the <code>+ child</code> row button; the detail panel closes automatically on empty tree. <span class="doc-changed">PROP-015 adds <strong>Configure-to-Order Variant BOM</strong>: a <code>product_family</code> node type sits above all configurations; BOM edges gain a nullable <code>variant_condition JSONB</code> field (null = always included; <code>{"Power":"50W"}</code> = only when that attribute value is selected); <code>resolveVariant</code> BFS-filters the tree for any configuration; three new tables (<code>family_attributes</code>, <code>family_attribute_values</code>, <code>saved_configurations</code>); 9 new API actions; the tree renderer shows condition tags and a ⚙ Configure button on family roots.</span> Migrations 0007–0011 must be applied to production.</p>
+            <p>This section reflects what is <strong>actually deployed and live</strong> as of <span class="doc-changed">2026-08-29</span>, superseding any "planned/pending" wording later in this document. Frontend is a no-framework static site on GitHub Pages (cache-busted assets, currently <span class="doc-changed"><code>?v=130</code></span>); backend is the single Supabase <code>portal-api</code> Edge Function (Deno, deployed <code>--no-verify-jwt</code>) plus Postgres + private Storage buckets. The whole document library, action plan, standards register, Level 2, CELLAR, and Product Information System data live in Postgres; the browser never touches the DB directly. PROP-013 adds a new <strong>Product</strong> tab (Rushroom-only) with BOM tree, Cost Canvas, and Status Overview; 11 new tables and 25 new API actions support unlimited-depth BOM trees, component versioning, REACH/RoHS at component level, internal cost/COGS intelligence, scenario simulation, and a <strong>complete unified audit trail</strong> — the Change Log merges three canonical sources (field snapshots via Postgres triggers, all revisions from <code>bom_component_versions</code>, all docs from <code>component_documents</code>) and <code>addComponent</code> now writes an explicit <code>version_bumped</code> history row for Revision A so the creation moment is always in the log. The <span class="doc-changed"><code>+ child</code> button on every BOM tree row</span> has a "Create new" tab so users can create and link a child in one step — enabling unlimited-depth hierarchies (1.1.1.1.1…). BOM creation rules are enforced in the UI: the <code>+ New Product</code> toolbar button creates top-level parents only; children are created exclusively via the <code>+ child</code> row button; the detail panel closes automatically on empty tree. <span class="doc-changed">PROP-015 adds <strong>Configure-to-Order Variant BOM</strong>: a <code>product_family</code> node type sits above all configurations; BOM edges gain a nullable <code>variant_condition JSONB</code> field (null = always included; <code>{"Power":"50W"}</code> = only when that attribute value is selected); <code>resolveVariant</code> BFS-filters the tree for any configuration; three new tables (<code>family_attributes</code>, <code>family_attribute_values</code>, <code>saved_configurations</code>); 9 new API actions; the tree renderer shows condition tags and a ⚙ Configure button on family roots.</span> <span class="doc-changed">PROP-016 adds a <code>+sib</code> button to every non-root BOM row — clicking it opens the add-child modal with the row's parent as context, so users can insert peer nodes without scrolling back up the tree. PROP-017 (UX polish): QTY is now always shown (×N on every row), "Expand all" / "Collapse all" buttons appear above the column header, the column header is sticky (visible while scrolling), and action button labels are compacted to <code>⚙</code> / <code>+sib</code> / <code>+child</code> / <code>Detail</code> / <code>Del</code> with tooltip titles.</span> Migrations 0007–0011 must be applied to production.</p>
 
             <div class="note"><strong>Single AI model.</strong> <span class="doc-changed">Every server-side AI call — draft generation, deviation scan, clause extraction, interpretations, classification suggestions, directive inference, compliance narrative — uses Anthropic <code>claude-opus-4-8</code></span> (constants <code>SCAN_MODEL</code> in <code>index.ts</code> and <code>CLAUDE_MODEL</code> in <code>cellar-service.ts</code>), via <code>api.anthropic.com/v1/messages</code> with adaptive thinking and JSON-schema structured output. No other model IDs are used.</div>
 
@@ -877,7 +877,7 @@
                 <rect x="50" y="60" width="280" height="35" fill="#3498db" stroke="#3498db" stroke-width="2" rx="4"/>
                 <text x="190" y="87" font-weight="bold" fill="white" text-anchor="middle" font-size="14">FRONTEND (Browser)</text>
                 
-                <text x="70" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Static site · GitHub Pages (?v=128)</text>
+                <text x="70" y="115" font-weight="bold" fill="#2c3e50" font-size="11">Static site · GitHub Pages (?v=130)</text>
                 <text x="80" y="135" fill="#555" font-size="10">index.html · supplier / verify / reset.html</text>
                 <text x="80" y="155" fill="#555" font-size="10">assets/app.js (portal UI)</text>
                 <text x="80" y="175" fill="#555" font-size="10">assets/api.js (edge-function client)</text>
@@ -1839,6 +1839,86 @@
                         <li><code>external_ref</code> on <code>component_costs</code> is the ERP sync anchor for the future bought-platform financial thread.</li>
                         <li><strong>Migration pending production apply</strong> — <code>supabase db push</code> or SQL-editor paste of <code>0007_product_information_system.sql</code>.</li>
                         <li>PROP-014 (Compliance–BOM Integration: Component Evidence Bridge) is specced and ready to build — awaiting "go ahead".</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="proposal-card implemented doc-section-new">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-015</div>
+                        <div class="proposal-title">Configure-to-Order Variant BOM <span class="doc-new-badge">Shipped 2026-08-29</span></div>
+                    </div>
+                    <span class="proposal-status status-implemented">IMPLEMENTED</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-high">HIGH</span></span>
+                    <span>Effort: ~8 hours</span>
+                    <span>Completion: 100%</span>
+                    <span>Proposed: 2026-08-28</span>
+                    <span>Completed: 2026-08-29</span>
+                </div>
+                <div class="effect-box">
+                    <strong>Effect (as delivered):</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>New <code>product_family</code> node type — sits above all configurations in the BOM tree; rendered with a green "FAMILY" badge and a ⚙ Configure button.</li>
+                        <li><code>variant_condition JSONB</code> on <code>bom_edges</code>: <code>NULL</code> = always included; <code>{"Power":"50W"}</code> = active only when that attribute is selected.</li>
+                        <li>Three new tables: <code>family_attributes</code>, <code>family_attribute_values</code>, <code>saved_configurations</code> (all carry <code>organization_id NOT NULL</code> + RLS deny-all, migration 0011).</li>
+                        <li>9 new API actions: <code>getFamilyAttributes</code>, <code>addFamilyAttribute</code>, <code>deleteFamilyAttribute</code>, <code>getFamilyAttributeValues</code>, <code>addFamilyAttributeValue</code>, <code>deleteFamilyAttributeValue</code>, <code>getSavedConfigurations</code>, <code>saveConfiguration</code>, <code>deleteConfiguration</code>.</li>
+                        <li><code>resolveVariant</code> BFS filter — walks the BOM tree filtering edges by condition match against a <code>selections</code> object; shared components appear exactly once.</li>
+                        <li>Condition picker in the <code>+ child</code> modal; ⚙ Configure modal for managing attributes, values, and saved configurations.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="proposal-card implemented doc-section-new">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-016</div>
+                        <div class="proposal-title">BOM Tree — Add Sibling shortcut button <span class="doc-new-badge">Shipped 2026-08-29</span></div>
+                    </div>
+                    <span class="proposal-status status-implemented">IMPLEMENTED</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-medium">MEDIUM</span></span>
+                    <span>Effort: ~0.5 hours</span>
+                    <span>Completion: 100%</span>
+                    <span>Proposed: 2026-08-29</span>
+                    <span>Completed: 2026-08-29</span>
+                </div>
+                <div class="effect-box">
+                    <strong>Effect (as delivered):</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>Every non-root BOM row now shows a <code>+sib</code> button that opens the add-child modal with the row's parent as context.</li>
+                        <li><code>parentNode</code> threaded through <code>walk()</code> as a seventh parameter and stored on each row in <code>buildRows()</code>.</li>
+                        <li>No new tables, API actions, or migrations — pure frontend change in <code>renderBomTree</code>.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="proposal-card implemented doc-section-new">
+                <div class="proposal-header">
+                    <div style="display: flex; align-items: center;">
+                        <div class="proposal-id">PROP-017</div>
+                        <div class="proposal-title">BOM Tree UX Polish — column alignment, expand/collapse, compact actions <span class="doc-new-badge">Shipped 2026-08-29</span></div>
+                    </div>
+                    <span class="proposal-status status-implemented">IMPLEMENTED</span>
+                </div>
+                <div class="proposal-meta">
+                    <span>Priority: <span class="priority-medium">MEDIUM</span></span>
+                    <span>Effort: ~1 hour</span>
+                    <span>Completion: 100%</span>
+                    <span>Proposed: 2026-08-29</span>
+                    <span>Completed: 2026-08-29</span>
+                </div>
+                <div class="effect-box">
+                    <strong>Effect (as delivered):</strong>
+                    <ul class="proposal-list" style="margin-top: 5px;">
+                        <li>QTY cell always renders <code>×N</code> — previously hidden when N=1, creating ambiguity about whether quantity was set.</li>
+                        <li>"Expand all" / "Collapse all" buttons rendered above the column header inside <code>render()</code>, sharing the live <code>collapsed</code> Set and <code>buildRows()</code> closure.</li>
+                        <li>Column header has <code>position:sticky;top:0;z-index:1</code> — stays visible while scrolling a long BOM tree.</li>
+                        <li>Action button labels compacted: <code>⚙ Configure</code>→<code>⚙</code>, <code>+ sibling</code>→<code>+sib</code>, <code>+ child</code>→<code>+child</code>, <code>Details</code>→<code>Detail</code>, <code>Delete</code>→<code>Del</code>; each has a <code>title</code> tooltip for discoverability.</li>
+                        <li>No new tables, API actions, or migrations — pure frontend change in <code>renderBomTree</code>.</li>
                     </ul>
                 </div>
             </div>
