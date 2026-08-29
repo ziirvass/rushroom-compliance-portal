@@ -3450,8 +3450,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       .select("child_id")
       .is("effective_to", null)
       .eq("organization_id", organizationId);
-    const childIds = new Set((edges || []).map((e: any) => e.child_id));
-    const rootIds = (comps || []).filter((c: any) => !childIds.has(c.id)).map((c: any) => c.id);
+    const rootIds = (comps || []).map((c: any) => c.id);
     return json({ components: comps || [], root_ids: rootIds });
   }
 
@@ -3727,6 +3726,30 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       .eq("organization_id", organizationId);
     if (error) return json({ error: error.message }, 400);
     return json({ ok: true });
+  }
+
+  // --- BOM: list all parent assemblies that include a given component --------
+  if (action === "listParentsOf") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    const { data: edges, error: ee } = await tdb("bom_edges")
+      .select("parent_id, quantity, reference_designator")
+      .eq("child_id", component_id)
+      .is("effective_to", null);
+    if (ee) return json({ error: ee.message }, 400);
+    const parentIds = (edges || []).map((e: any) => e.parent_id);
+    if (!parentIds.length) return json({ parents: [] });
+    const { data: parents } = await tdb("bom_components")
+      .select("id, part_number, name, type, lifecycle_status")
+      .in("id", parentIds);
+    const result = (edges || []).map((e: any) => ({
+      parent_id: e.parent_id,
+      quantity: e.quantity,
+      reference_designator: e.reference_designator,
+      parent: (parents || []).find((p: any) => p.id === e.parent_id) || null,
+    }));
+    return json({ parents: result });
   }
 
   // --- Delete a component and all its related data --------------------------

@@ -3463,13 +3463,7 @@
           ]));
           return;
         }
-        if (!root_ids.length) {
-          detailPanel.style.display = "none";
-          detailPanel.replaceChildren();
-          treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, "All components have a parent — no root found. Create a top-level product first."));
-          return;
-        }
-        // Render each root as its own tree (parallel BOM fetches)
+        // Render each BOM Node as its own tree (parallel BOM fetches)
         treeArea.replaceChildren(el("div", { class: "loading" }, `Loading ${root_ids.length} product tree${root_ids.length > 1 ? "s" : ""}…`));
         const trees = await Promise.all(root_ids.map((id) => API.post(token, "getBom", { root_component_id: id, max_depth: 10 })));
         treeArea.replaceChildren();
@@ -3860,12 +3854,13 @@
         API.post(token, "getComponentDocuments", { component_id: componentId }),
         API.post(token, "getComponentMaterials", { component_id: componentId }),
         API.post(token, "getComponentChangelog", { component_id: componentId }),
+        API.post(token, "listParentsOf",         { component_id: componentId }),
       ];
       const familyPromises = isFamily ? [
         API.post(token, "listFamilyAttributes", { family_id: componentId }),
         API.post(token, "listConfigurations",    { family_id: componentId }),
       ] : [null, null];
-      const [hist, docs, mats, cl, familyAttrs, familyConfigs] = await Promise.all([...basePromises, ...familyPromises]);
+      const [hist, docs, mats, cl, usedIn, familyAttrs, familyConfigs] = await Promise.all([...basePromises, ...familyPromises]);
       const history = hist.history || [];
       const current = history.find((v) => v.is_current) || history[0];
 
@@ -4004,6 +3999,22 @@
         ]);
       });
 
+      const usedInParents = (usedIn && usedIn.parents) || [];
+      const usedInSection = el("div", { style: "margin-top:1rem" }, [
+        el("h4", {}, "Used in"),
+        usedInParents.length
+          ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
+              el("thead", {}, el("tr", {}, ["Assembly", "Part #", "Qty", "Ref"].map((h) => el("th", {}, h)))),
+              el("tbody", {}, ...usedInParents.map((p) => el("tr", {}, [
+                el("td", {}, p.parent ? p.parent.name : "—"),
+                el("td", { style: "font-family:monospace;font-size:0.78rem;color:var(--muted,#8b93a1)" }, p.parent ? p.parent.part_number : "—"),
+                el("td", {}, `×${p.quantity}`),
+                el("td", { style: "color:var(--muted,#8b93a1)" }, p.reference_designator || "—"),
+              ]))),
+            ]))
+          : el("div", { style: "font-size:0.85rem;color:var(--muted,#8b93a1);margin-top:0.25rem" }, "Not linked in any assembly."),
+      ]);
+
       const changelogSection = el("div", { style: "margin-top:1.25rem" }, [
         el("h4", { style: "margin-bottom:0.4rem" }, "Change Log"),
         el("p", { style: "font-size:0.75rem;color:var(--muted,#8b93a1);margin:0 0 0.5rem" },
@@ -4113,7 +4124,7 @@
           el("button", { class: "btn btn-sm", type: "button", onclick: () => { panel.style.display = "none"; } }, "Close"),
         ]),
         ...(configSection ? [configSection] : []),
-        versionsSection, docsSection, matsSection, changelogSection,
+        versionsSection, usedInSection, docsSection, matsSection, changelogSection,
       );
     } catch (ex) {
       panel.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
