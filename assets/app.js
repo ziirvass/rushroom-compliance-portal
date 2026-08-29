@@ -3441,11 +3441,10 @@
     const wrap = el("div", { class: "pis-tree-wrap" });
     const detailPanel = el("div", { class: "pis-detail-panel", style: "display:none;margin-top:1rem;padding:1rem;background:var(--bg-2,#f5f5f5);border-radius:6px" });
 
-    const COMPONENT_TYPES = new Set(["Component", "SparePart", "Refurb"]);
     const TAB_DEFS = [
-      { id: "components", label: "Components", match: (t) => COMPONENT_TYPES.has(t) },
-      { id: "assemblies", label: "Assemblies",  match: (t) => t === "Product" },
-      { id: "dynamic",    label: "Dynamic BOMs", match: (t) => t === "product_family" },
+      { id: "components", label: "Components" },
+      { id: "assemblies", label: "Assemblies" },
+      { id: "dynamic",    label: "Dynamic BOMs" },
     ];
 
     let activeTab = "components";
@@ -3509,16 +3508,23 @@
           return;
         }
         const byId = Object.fromEntries(components.map((c) => [c.id, c]));
-        const grouped = { components: [], assemblies: [], dynamic: [] };
-        root_ids.forEach((id) => {
-          const type = byId[id]?.type;
-          for (const td of TAB_DEFS) { if (td.match(type)) { grouped[td.id].push(id); break; } }
-        });
 
         treeArea.replaceChildren(el("div", { class: "loading" }, `Loading ${root_ids.length} tree${root_ids.length !== 1 ? "s" : ""}…`));
         const treeResults = await Promise.all(root_ids.map((id) => API.post(token, "getBom", { root_component_id: id, max_depth: 10 })));
         const trees = {};
         root_ids.forEach((id, i) => { trees[id] = treeResults[i]; });
+
+        // Group by type, but treat any node with BOM children as an assembly
+        // regardless of its type field — so Component-typed nodes that have children
+        // (common in practice) land in Assemblies rather than Components.
+        const grouped = { components: [], assemblies: [], dynamic: [] };
+        root_ids.forEach((id) => {
+          const type = byId[id]?.type;
+          const hasChildren = (trees[id]?.edges?.length || 0) > 0;
+          if (type === "product_family") grouped.dynamic.push(id);
+          else if (type === "Product" || hasChildren) grouped.assemblies.push(id);
+          else grouped.components.push(id);
+        });
 
         allState = { components, grouped, trees };
         renderTabBar(grouped);
