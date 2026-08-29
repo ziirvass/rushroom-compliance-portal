@@ -210,3 +210,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** `walk()` now passes `qty * e.quantity` to children instead of `e.quantity`. This makes every displayed QTY the effective quantity from root to that node (e.g. if 1.1 is ×2 and 1.1.1 is ×3 per unit of 1.1, then 1.1.1 shows ×6). Cache bumped v132→v133.
 **Why:** The previous behaviour showed only the edge quantity — the quantity on the single parent→child edge — which is meaningless to anyone reading the tree top-down. Effective quantity (accumulated product of all ancestor edge quantities) is what a BOM reader actually needs: it tells you how many of that part go into one unit of the root product.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-29
+**Feature:** Rename product_family → "Dynamic BOM" in UI; hide ⚙ Configure button
+**Decision:** Renamed the `product_family` type label from "Product Family (CTO)" to "Dynamic BOM" in the type picker, the tree badge from "FAMILY" to "DYNAMIC BOM", and the detail panel heading accordingly. The ⚙ Configure button (which opened the variant-attribute modal from PROP-015) is hidden from the BOM tree row — it will return when the order-import integration (PROP-018) is built. The empty-state hint for saved configurations now references PROP-018 instead of pointing to the Configure button.
+**Why:** The PROP-015 configure modal manages abstract variant attributes (Power: 50W, Size: L) — not the actual components in the BOM. Users expected ⚙ to let them pick which components belong to the Dynamic BOM; instead it opened an unrelated attribute system. The term "Dynamic BOM" is already used elsewhere in Rushroom's digital stack (order system, bulk render pipeline) and correctly describes what this node type is. Components are added via `+child` as in any other BOM node — no special button needed.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/DECISIONS.md

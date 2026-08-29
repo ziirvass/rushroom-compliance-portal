@@ -3566,7 +3566,7 @@
 
         // Family badge for product_family roots
         const familyBadge = isFamily
-          ? el("span", { style: "font-size:0.68rem;font-weight:700;background:#2fa56420;color:#2fa564;border-radius:4px;padding:1px 5px;flex-shrink:0;white-space:nowrap;margin-left:4px" }, "FAMILY")
+          ? el("span", { style: "font-size:0.68rem;font-weight:700;background:#2fa56420;color:#2fa564;border-radius:4px;padding:1px 5px;flex-shrink:0;white-space:nowrap;margin-left:4px" }, "DYNAMIC BOM")
           : null;
 
         // Component cell: connector + toggle | name + badges (line 1) / part# (line 2)
@@ -3594,7 +3594,8 @@
           el("div", { style: "display:flex;justify-content:center" }, lifecycleBadge(n.lifecycle_status)),
           el("div", { style: "display:flex;justify-content:center" }, heatColor ? el("span", { style: `font-size:0.72rem;font-weight:600;color:${heatColor}` }, `${cogsPct}%`) : el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1)" }, "—")),
           el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0;flex-wrap:nowrap" }, [
-            isFamily ? el("button", { class: "btn btn-sm", type: "button", title: "Configure", style: "padding:1px 5px;font-size:0.7rem;color:#2fa564;border-color:#2fa56440", onclick: () => openConfigureModal(n, token, onRefresh) }, "⚙") : null,
+            // ⚙ variant-configure button hidden until import integration is built (PROP-018)
+
             parentNode ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+sib") : null,
             el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId) }, "+child"),
             el("button", { class: "btn btn-sm", type: "button", title: "Show details", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openComponentDetail(n.id, token, detailPanel, n) }, "Detail"),
@@ -4089,10 +4090,10 @@
                 try { await API.post(token, "deleteConfiguration", { configuration_id: cfg.id }); openComponentDetail(componentId, token, panel, nodeData); } catch (ex) { alert(ex.message); }
               } }, "Delete"),
             ])))
-          : el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1)" }, "No saved configurations yet. Use ⚙ Configure on the tree row to resolve and save one.");
+          : el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1)" }, "No saved configurations yet. Configurations will be imported from the order system (PROP-018).");
 
         configSection = el("div", { style: "margin-bottom:1rem;border:1px solid #2fa56440;border-radius:6px;padding:0.75rem" }, [
-          el("h4", { style: "margin:0 0 0.5rem;color:#2fa564" }, "⚙ Configuration (Product Family)"),
+          el("h4", { style: "margin:0 0 0.5rem;color:#2fa564" }, "Dynamic BOM — Variant Setup"),
           el("div", { style: "margin-bottom:0.6rem" }, [el("label", { style: LBL }, "Attributes"), attrList]),
           el("div", { style: "display:flex;flex-wrap:wrap;align-items:center;gap:0.35rem;margin-bottom:0.75rem" }, [
             newAttrName, newAttrLabel,
@@ -4131,7 +4132,7 @@
     }
 
     // --- Fields --------------------------------------------------------------
-    const TYPE_OPTS = [["Product", "Product"], ["Component", "Component"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"], ["product_family", "Product Family (CTO)"]];
+    const TYPE_OPTS = [["Product", "Product"], ["Component", "Component"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"], ["product_family", "Dynamic BOM"]];
     const pn   = el("input",    { class: "up-text", type: "text", placeholder: "Auto-generated if left empty" });
     const oem  = el("input",    { class: "up-text", type: "text", placeholder: "OEM / distributor reference (optional)" });
     const nm   = el("input",    { class: "up-text", type: "text", placeholder: "Name" });
