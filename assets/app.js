@@ -3488,7 +3488,7 @@
       const grouped = { components: [], assemblies: [], dynamic: [] };
       filtered.forEach((c) => {
         if (c.type === "product_family") grouped.dynamic.push(c);
-        else if (c.type === "Product" || c.has_children) grouped.assemblies.push(c);
+        else if (c.type === "Product") grouped.assemblies.push(c);
         else grouped.components.push(c);
       });
       return grouped;
