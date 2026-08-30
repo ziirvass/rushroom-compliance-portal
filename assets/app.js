@@ -4088,11 +4088,73 @@
       const previewRev = nextRevision(history.map((v) => v.revision));
 
       // Version section
-      const versionRows = history.map((v) => el("tr", {}, [
-        el("td", {}, v.revision), el("td", {}, v.spec_summary || "—"),
-        el("td", {}, v.is_current ? el("strong", {}, "current") : ""),
-        el("td", {}, v.created_at ? new Date(v.created_at).toLocaleDateString("sv") : ""),
-      ]));
+      function renderVersionSnapshot(snap) {
+        if (!snap) return el("em", { style: "color:var(--muted,#64748b)" },
+          "Snapshot not available — component predates this feature");
+        const parts = [];
+        if (snap.description) parts.push(
+          el("p", { style: "margin:0 0 0.4rem" }, [el("strong", {}, "Description: "), snap.description])
+        );
+        if (snap.notes) parts.push(
+          el("p", { style: "margin:0 0 0.4rem" }, [el("strong", {}, "Notes: "), snap.notes])
+        );
+        const statusLine = snap.lifecycle_status
+          ? snap.lifecycle_status + (snap.replacement_note ? " — " + snap.replacement_note : "") + (snap.flag_reason ? " — " + snap.flag_reason : "")
+          : null;
+        if (statusLine) parts.push(
+          el("p", { style: "margin:0 0 0.75rem" }, [el("strong", {}, "Status: "), statusLine])
+        );
+        parts.push(
+          el("strong", { style: "font-size:0.8rem" }, "Documents (" + (snap.documents || []).length + ")"),
+          (snap.documents || []).length
+            ? el("div", { class: "table-wrap", style: "margin:0.25rem 0 0.75rem" },
+                el("table", { style: "font-size:0.8rem" }, [
+                  el("thead", {}, el("tr", {}, ["Category", "Document", "Label"].map((h) => el("th", {}, h)))),
+                  el("tbody", {}, (snap.documents || []).map((d) =>
+                    el("tr", {}, [el("td", {}, d.category), el("td", {}, d.doc_name || "—"), el("td", {}, d.label || "—")])
+                  )),
+                ])
+              )
+            : el("p", { style: "color:var(--muted,#64748b);margin:0.25rem 0 0.75rem;font-size:0.85rem" }, "No documents linked at this revision"),
+          el("strong", { style: "font-size:0.8rem" }, "Materials (" + (snap.materials || []).length + ")"),
+          (snap.materials || []).length
+            ? el("div", { class: "table-wrap", style: "margin:0.25rem 0 0" },
+                el("table", { style: "font-size:0.8rem" }, [
+                  el("thead", {}, el("tr", {}, ["Substance", "CAS", "% w/w", "SVHC", "RoHS"].map((h) => el("th", {}, h)))),
+                  el("tbody", {}, (snap.materials || []).map((m) =>
+                    el("tr", {}, [
+                      el("td", {}, m.substance_name), el("td", {}, m.cas_number || "—"),
+                      el("td", {}, m.percentage_w_w != null ? m.percentage_w_w + "%" : "—"),
+                      el("td", {}, m.reach_svhc ? "Yes" : "No"),
+                      el("td", {}, m.rohs_restricted ? "Yes" : "No"),
+                    ])
+                  )),
+                ])
+              )
+            : el("p", { style: "color:var(--muted,#64748b);margin:0.25rem 0 0;font-size:0.85rem" }, "No materials declared at this revision"),
+        );
+        return el("div", {}, parts);
+      }
+      const versionRows = [];
+      for (const v of history) {
+        const indicator = el("span", { style: "font-size:0.7rem;margin-right:0.3rem;color:var(--muted,#64748b)" }, "▸");
+        const detailRow = el("tr", { style: "display:none" }, [
+          el("td", { colspan: "4", style: "padding:0.75rem 1rem 0.85rem;background:var(--subtle,#f8fafc);border-bottom:1px solid var(--border,#e2e8f0)" },
+            renderVersionSnapshot(v.version_snapshot)
+          ),
+        ]);
+        const headerRow = el("tr", { style: "cursor:pointer", onclick: () => {
+          const open = detailRow.style.display === "none";
+          detailRow.style.display = open ? "" : "none";
+          indicator.textContent = open ? "▾" : "▸";
+        }}, [
+          el("td", {}, [indicator, v.revision]),
+          el("td", {}, v.spec_summary || "—"),
+          el("td", {}, v.is_current ? el("strong", {}, "current") : ""),
+          el("td", {}, v.created_at ? new Date(v.created_at).toLocaleDateString("sv") : ""),
+        ]);
+        versionRows.push(headerRow, detailRow);
+      }
       const bumpSumInput = el("input", { class: "up-text", type: "text", placeholder: "What changed in this revision", style: "flex:1;min-width:12rem" });
       const bumpErr = el("span", { class: "form-error" }, "");
       const bumpForm = el("form", { style: "display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;align-items:center", onsubmit: async (e) => {

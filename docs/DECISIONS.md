@@ -329,3 +329,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Added `role` as the 8th parameter to `renderBomTree` and updated its single call site inside `bomTreeView` to pass `role`. Combined with the v154 fix (role as 5th param on `openComponentDetail`), all three peer functions that reference `role` — `bomTreeView`, `renderBomTree`, `openComponentDetail` — now receive it explicitly. The full chain is: `renderProduct(role)` → `bomTreeView(token, role)` → `renderBomTree(..., role)` → `openComponentDetail(..., role)`.
 **Why:** All three functions are defined at the same scope level inside the main app closure. None can close over another's local variables. `role` must be threaded explicitly as a parameter through the entire call chain. The PROP-023 status edit block was the first code inside these functions to use `role`, which is why this was never caught before.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/ROADMAP.md, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-30
+**Feature:** PROP-024 Component Version History — Full State Access Per Revision
+**Decision:** Store version snapshot as JSONB on `bom_component_versions` rather than adding version-scoped FK columns to `component_documents` / `component_materials`.
+**Why:** Adding `component_version_id FK` to the document and material tables would require migrating all existing rows and changing how documents are linked (to a version, not a component). The JSONB approach is additive-only: one new nullable column, no schema changes to existing linking tables, no migration of existing data. The tradeoff is that documents added after a bump but before the next are not captured — acceptable for MVP and documented in the UI as "snapshot as of version creation."
+**Files changed:** supabase/migrations/0014_version_snapshot.sql, supabase/functions/portal-api/index.ts, assets/app.js, index.html, CLAUDE.md

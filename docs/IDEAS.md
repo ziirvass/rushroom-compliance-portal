@@ -448,3 +448,52 @@ New (Layer 4 only): `component_specs`: `{id, organization_id NOT NULL FK→organ
 **Related PROPs:** PROP-013 (introduced lifecycle_status), PROP-022 (BOM list — STATUS_COLOR must be updated there too)
 
 **Status:** Raw idea
+
+---
+### Component Version History — Full State Access Per Revision — 2026-08-30
+**One sentence:** Make each component revision a complete, inspectable historical record — documents, materials, spec summary, and description — not just a timestamp and a note.
+
+**Problem it solves:**
+Right now, bumping a version produces a row in the Versions table that says "Revision B — something changed — 2026-08-30." That's all. You cannot click into Rev B and see what documents were attached, what REACH/RoHS materials were declared, or what the description said. If Rev C is current, the Rev B state is effectively gone from the UI.
+
+This matters for compliance: a test report linked to a component at Rev A may no longer apply at Rev C. A regulator or auditor asking "what was the component specification when you submitted the CE declaration in June?" should get a complete answer — not "it was Rev B, good luck."
+
+The data to reconstruct history exists in the DB (documents and materials are linked to `component_id`), but there is no version-scoped query and no snapshot is taken at bump time. The timestamps on `component_documents` could theoretically be used to reconstruct what existed "before the bump" but this is brittle and not exposed in the UI.
+
+**What already exists that could be extended:**
+- `bom_component_versions` — the revision record, currently just `revision, spec_summary, is_current, created_at`
+- `bom_component_history` — field-level snapshots of component metadata fields (part_number, name, description, lifecycle_status, etc.) written by Postgres triggers — but does NOT include documents or materials
+- `component_documents` — links documents to `component_id`, no `component_version_id`
+- `component_materials` — links substances to `component_id`, no `component_version_id`
+- The Versions table UI renders all revisions — rows just aren't expandable yet
+
+**MVP scope:**
+1. **Migration:** Add `version_snapshot JSONB` column to `bom_component_versions`. Default NULL (backward compat — existing rows stay null, UI handles gracefully).
+2. **Backend — `bumpComponentVersion`:** Before inserting the new version row, fetch the current component state and store it as the snapshot on the NEW row being inserted: `{ spec_summary, description, notes, lifecycle_status, documents: [{doc_name, version, category, label}], materials: [{substance_name, cas_number, percentage_w_w, reach_svhc, rohs_restricted}] }`. This captures "what existed when this revision was created" — i.e. the incoming state, not the outgoing.
+   - Alternative (simpler read): fetch and store snapshot on the PREVIOUS version row (update its `version_snapshot` to capture what it held before being retired). Either approach works; storing on the new row is more consistent with immutability.
+3. **Backend — `getComponentHistory`:** Include `version_snapshot` in the SELECT.
+4. **Frontend — Versions table:** Clicking a revision row expands it inline (accordion) to show: spec summary, description/notes (from snapshot or from current `bom_component_history`), linked documents at that revision, materials at that revision. For rows with `version_snapshot = null` (created before this feature), show "Snapshot not available for this revision."
+5. **No new tables.** No change to `component_documents` or `component_materials` schema.
+
+**Tables involved:**
+- `bom_component_versions` (add `version_snapshot JSONB` column — migration required)
+- `bom_component_history`, `component_documents`, `component_materials` — read-only at bump time to build the snapshot
+
+**Effort estimate:** 6–10 hours
+- Migration (1 column): 0.5 h
+- Backend snapshot fetch + store in `bumpComponentVersion`: 2 h
+- Backend `getComponentHistory` update: 0.5 h
+- Frontend expandable version rows + snapshot renderer: 3–6 h
+
+**Risks:**
+- **Snapshot timing:** Storing the snapshot on the NEW version row captures "what exists when this revision started" — documents and materials added AFTER the bump but before the next bump will not be in any snapshot. This is acceptable for the MVP; a more accurate approach (snapshot the outgoing state on the OLD row) requires an UPDATE to a row that was just retired, which conflicts with immutability conventions. Document this limitation clearly in the UI.
+- **Snapshot size:** A component with 20 documents and 50 substance rows could produce a large JSONB blob. In practice Rushroom's components are small; for future-proofing, limit snapshot to name/version/category per document (not the full doc content) and key fields per material.
+- **Backward compatibility:** Rows created before this feature have `version_snapshot = null`. The UI must handle this gracefully with a "snapshot not available" placeholder — not an error.
+- **PROP-021 Layer 2 interaction:** PROP-021 Layer 2 proposes `needs_review BOOLEAN` on `component_documents` to flag documents after a bump. That is a live-state flag; this idea is a historical record. They are complementary and do not conflict.
+
+**Related PROPs:**
+- PROP-013 (PIS — `bom_component_versions`, `component_documents`, `component_materials` defined here)
+- PROP-021 Layer 2 (revision-aware document validity — a lighter live-state flag; this idea adds the historical record layer)
+- PROP-014 (Compliance–BOM Integration — test report evidence must be traceable to a specific component revision; this snapshot is the foundation for that traceability)
+
+**Status:** Raw idea

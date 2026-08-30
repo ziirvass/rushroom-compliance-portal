@@ -3578,16 +3578,57 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
         .update({ is_current: false }).eq("component_id", component_id);
     }
 
+    // Fetch component fields for snapshot + audit trail
+    const { data: comp } = await tdb("bom_components")
+      .select("organization_id, part_number, oem_number, name, description, notes, type, lifecycle_status, replacement_note, flag_reason")
+      .eq("id", component_id).maybeSingle();
+
+    // Build version snapshot: capture documents + materials as they exist right now
+    const { data: snapDocs } = await tdb("component_documents")
+      .select("id, category, label, document_version_id").eq("component_id", component_id);
+    let snapDocNames: Record<string, string> = {};
+    if ((snapDocs || []).length) {
+      const dvIds = (snapDocs || []).map((d: any) => d.document_version_id);
+      const { data: dvs } = await tdb("document_versions").select("id, document_id").in("id", dvIds);
+      const docIds = (dvs || []).map((v: any) => v.document_id);
+      if (docIds.length) {
+        const { data: docRows } = await tdb("documents").select("id, name").in("id", docIds);
+        const nameMap: Record<string, string> = {};
+        (docRows || []).forEach((d: any) => { nameMap[d.id] = d.name; });
+        (dvs || []).forEach((v: any) => { snapDocNames[v.id] = nameMap[v.document_id] || ""; });
+      }
+    }
+    const { data: snapMats } = await tdb("component_materials")
+      .select("substance_name, cas_number, percentage_w_w, reach_svhc, rohs_restricted")
+      .eq("component_id", component_id);
+    const version_snapshot = comp ? {
+      description:      comp.description      || null,
+      notes:            comp.notes            || null,
+      lifecycle_status: comp.lifecycle_status,
+      replacement_note: comp.replacement_note || null,
+      flag_reason:      comp.flag_reason      || null,
+      documents: (snapDocs || []).map((d: any) => ({
+        doc_name: snapDocNames[d.document_version_id] || "",
+        category: d.category,
+        label:    d.label || null,
+      })),
+      materials: (snapMats || []).map((m: any) => ({
+        substance_name:  m.substance_name,
+        cas_number:      m.cas_number      || null,
+        percentage_w_w:  m.percentage_w_w  ?? null,
+        reach_svhc:      m.reach_svhc,
+        rohs_restricted: m.rohs_restricted,
+      })),
+    } : null;
+
     const { data: ver, error } = await tdb("bom_component_versions").insert({
       component_id, revision, spec_summary: spec_summary || null,
       is_current: true, created_by: session.uid || null,
+      version_snapshot,
     }).select("id").maybeSingle();
     if (error) return json({ error: error.message }, 400);
 
     // Write audit trail — trigger doesn't fire because bom_components isn't touched
-    const { data: comp } = await tdb("bom_components")
-      .select("organization_id, part_number, oem_number, name, description, type, lifecycle_status")
-      .eq("id", component_id).maybeSingle();
     if (comp) {
       await tdb("bom_component_history").insert({
         organization_id: comp.organization_id,
@@ -3612,7 +3653,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
     const { component_id } = body;
     if (!component_id) return json({ error: "component_id required" }, 400);
-    const { data, error } = await tdb("bom_component_versions").select("id, revision, spec_summary, is_current, created_at")
+    const { data, error } = await tdb("bom_component_versions").select("id, revision, spec_summary, is_current, created_at, version_snapshot")
       .eq("component_id", component_id).order("created_at", { ascending: false });
     if (error) return json({ error: error.message }, 400);
     return json({ history: data });

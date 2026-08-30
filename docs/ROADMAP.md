@@ -9,6 +9,7 @@ _Last updated: 2026-08-30 · Auto-maintained by /ship_
 - PROP-014 Compliance–BOM Integration: Component Evidence Bridge — spec complete, awaiting "go ahead"
 
 ## Backlog — Ideas to Spec
+- PROP-024 Component Version History — Full State Access Per Revision — written to IDEAS.md
 - PROP-005 Generate DPP from compliance matrix
 - PROP-009 Scheduled compliance scans + email alerts
 - PROP-007 Multi-language support EN/DE/SV
