@@ -1,5 +1,5 @@
 # Rushroom Compliance Portal — Roadmap
-_Last updated: 2026-08-29 · Auto-maintained by /ship_
+_Last updated: 2026-08-30 · Auto-maintained by /ship_
 
 ## Now — In Progress
 - PROP-021 Component Document Lifecycle — Layer 1 shipped (upload & link from component panel); Layers 2–4 (new revision, AI diff, data extraction) pending; PROP-014 must be reviewed before Layer 2 design
@@ -14,6 +14,8 @@ _Last updated: 2026-08-29 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Bug fix — Version history after bump** (all prior revisions now visible in Versions table and Change Log after bumping; explicit is_current retire in application code; panel refresh now awaits + passes nodeData; cache v151) — 2026-08-30
+- **PROP-023 Component Lifecycle Status — Rebuild** (4 operational states: active/inactive/replaced/flagged; migration 0013 migrates all existing rows; replacement_note + flag_reason columns; inline status editor in component detail panel; cache v150) — 2026-08-30
 - **PROP-022 BOM List Performance & Search** (lazy tree expansion, `has_children` from single edge query, search + 50-item pagination; cache v149) — 2026-08-30
 - **PROP-021 Component Document Lifecycle — Layer 1** (direct upload & link from component detail panel via new `uploadAndLinkComponentDocument` action; two-tab modal replaces single-flow link modal; cache v148) — 2026-08-29
 - **PROP-020 BOM List Split by Type** (Components / Assemblies / Dynamic BOMs tabs in BOM Tree view; delete button label "Delete Permanently"; cache v143) — 2026-08-29

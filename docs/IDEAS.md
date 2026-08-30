@@ -407,3 +407,44 @@ New (Layer 4 only): `component_specs`: `{id, organization_id NOT NULL FK→organ
 - PROP-012 (Multi-tenancy — `organization_id` required on `component_specs`)
 
 **Status:** Raw idea — Layer 1 ready to build; Layers 2–4 depend on PROP-014 decisions
+
+---
+### Component Lifecycle Status — Rebuild as Active / Inactive / Replaced / Flagged — 2026-08-30
+**One sentence:** Replace the six-stage engineering lifecycle (concept → specified → sourcing → approved → released → obsolete) with four operational states that reflect how Rushroom actually thinks about component health.
+
+**Problem it solves:** The current statuses (`concept`, `specified`, `sourcing`, `approved`, `released`, `obsolete`) are engineering-phase markers borrowed from PLM software. They answer "where is this in the development pipeline?" Rushroom needs statuses that answer "what is this component's operational standing right now?" — and the new four-state model maps directly to decisions users actually make.
+
+**The four states and their meaning:**
+- **Active** — in production, currently sold/used. The default healthy state.
+- **Inactive** — registered but not yet active: under development, under regulatory assessment, in procurement hold, not yet approved for production, or simply parked for future use. This is the "anything that isn't active yet" catch-all.
+- **Replaced** — retired or superseded. Critically: replacement is NOT 1:1. A single component may be replaced by a completely re-engineered 3-part sub-assembly, or merged into a larger unit. A free-text `replacement_note` field captures the "what replaced it and why" narrative. Optionally: a `replacement_component_ids UUID[]` for when the successors are also in the registry.
+- **Flagged** — needs attention NOW: a compliance concern, supplier quality issue, regulation change, pending re-assessment, or any user-defined alert. A `flag_reason` text field captures the specific concern. Flagged components should be visually prominent (red) and ideally surface in the Status Overview as a separate call-out.
+
+**Migration from existing values:**
+- `concept` → `inactive`
+- `specified` → `inactive`
+- `sourcing` → `inactive`
+- `approved` → `active`
+- `released` → `active`
+- `obsolete` → `replaced` (best-guess default; user can correct)
+
+**MVP scope:**
+1. DB migration: add `replacement_note TEXT` + `flag_reason TEXT` columns to `bom_components`; UPDATE rows to map old values; update the CHECK constraint (if one exists) to new four values.
+2. Backend `setComponentStatus`: new valid set `["active","inactive","replaced","flagged"]`; accept `replacement_note` and `flag_reason` in the same call.
+3. Frontend `LIFECYCLE_COLORS`: 4 colors — `active=#2fa564`, `inactive=#8b93a1`, `replaced=#f59e0b`, `flagged=#e05454`; `STATUS_COLOR` in `bomTreeView` updated to match.
+4. Component detail panel: status dropdown with 4 options; `replacement_note` text input appears when "Replaced" selected; `flag_reason` text input appears when "Flagged" selected.
+5. Status Overview: update the `lcOrder` counter list to the 4 new statuses; "Flagged" bar shown first (or as a highlighted call-out) since it signals action required.
+
+**Tables involved:** `bom_components`, `bom_component_history` (audit trail captures the transition — no schema change there)
+
+**Effort estimate:** ~2 hours (migration + backend + frontend, no new tables)
+
+**Risks:**
+- If a CHECK constraint exists on `lifecycle_status` in Postgres, it must be dropped and re-added in the migration — otherwise the `UPDATE` to new values will fail.
+- Old `bom_component_history` rows will contain legacy status values (`concept`, `released`, etc.) — these are historical snapshots and should be left as-is; the UI changelog reads them verbatim.
+- The `updateComponent` action (which patches many fields) does NOT currently update `lifecycle_status` — this is intentional (`setComponentStatus` is the dedicated path). Keep this separation.
+- Migration must be applied BEFORE deploying the backend, or the validation will reject the new status values in the window between deploy and migration.
+
+**Related PROPs:** PROP-013 (introduced lifecycle_status), PROP-022 (BOM list — STATUS_COLOR must be updated there too)
+
+**Status:** Raw idea

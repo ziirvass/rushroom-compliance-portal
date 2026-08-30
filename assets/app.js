@@ -3414,8 +3414,7 @@
 
   // --- colour tokens that mirror the compliance portal step statuses ----------
   const LIFECYCLE_COLORS = {
-    concept: "#8b93a1", specified: "#4a9eed", sourcing: "#e5a326",
-    approved: "#2bb5a0", released: "#2fa564", obsolete: "#e05454",
+    active: "#2fa564", inactive: "#8b93a1", replaced: "#e5a326", flagged: "#e05454",
   };
   const MATURITY_COLORS = {
     estimate: "#e5a326", budgetary_quote: "#4a9eed", firm_quote: "#2bb5a0",
@@ -3527,7 +3526,7 @@
     }
 
     function renderRootRow(comp) {
-      const STATUS_COLOR = { active: "#2fa564", obsolete: "#e05454", prototype: "#f59e0b", discontinued: "#8b93a1", draft: "#4a9eed" };
+      const STATUS_COLOR = { active: "#2fa564", inactive: "#8b93a1", replaced: "#e5a326", flagged: "#e05454" };
       const TYPE_COLOR   = { Product: "#4a9eed", Component: "#2fa564", SparePart: "#f59e0b", Refurb: "#a855f7", product_family: "#e05454" };
       const sfg = STATUS_COLOR[comp.lifecycle_status] || "#888";
       const tfg = TYPE_COLOR[comp.type] || "#888";
@@ -4103,7 +4102,7 @@
         btn.disabled = true; btn.textContent = "…";
         try {
           await API.post(token, "bumpComponentVersion", { component_id: componentId, spec_summary: summary || null });
-          openComponentDetail(componentId, token, panel);
+          await openComponentDetail(componentId, token, panel, nodeData);
         } catch (ex) {
           bumpErr.textContent = ex.message;
           btn.disabled = false; btn.textContent = "Bump version";
@@ -4456,11 +4455,62 @@
         ]);
       }
 
+      // --- Status edit block (rushroom only) -----------------------------------
+      let statusSection = null;
+      if (role === "rushroom") {
+        const VALID_STATUSES = ["active", "inactive", "replaced", "flagged"];
+        const currentStatus = nodeData?.lifecycle_status || "inactive";
+        const statusDropdown = el("select", { class: "up-text", style: "padding:0.3rem 0.5rem;font-size:0.82rem;border-radius:4px;border:1px solid var(--border,#e2e8f0);min-width:9rem" },
+          VALID_STATUSES.map((s) => el("option", { value: s, selected: s === currentStatus ? "selected" : null }, s))
+        );
+        const replNoteArea = el("textarea", { class: "up-text", rows: "2", placeholder: "What replaced this, and why?", style: "display:none;resize:vertical;font-size:0.82rem;margin-top:0.4rem;width:100%" });
+        replNoteArea.value = nodeData?.replacement_note || "";
+        const flagReasonArea = el("textarea", { class: "up-text", rows: "2", placeholder: "Describe the flag reason or concern", style: "display:none;resize:vertical;font-size:0.82rem;margin-top:0.4rem;width:100%" });
+        flagReasonArea.value = nodeData?.flag_reason || "";
+        function syncConditionalFields() {
+          const v = statusDropdown.value;
+          replNoteArea.style.display  = v === "replaced" ? "" : "none";
+          flagReasonArea.style.display = v === "flagged"  ? "" : "none";
+        }
+        syncConditionalFields();
+        statusDropdown.addEventListener("change", syncConditionalFields);
+        const statusSaveErr = el("span", { class: "form-error", style: "font-size:0.78rem" }, "");
+        const statusSaveBtn = el("button", { class: "btn btn-sm btn-primary", type: "button" }, "Save status");
+        statusSaveBtn.onclick = async () => {
+          statusSaveBtn.disabled = true; statusSaveBtn.textContent = "Saving…"; statusSaveErr.textContent = "";
+          try {
+            await API.post(token, "setComponentStatus", {
+              component_id: componentId,
+              lifecycle_status: statusDropdown.value,
+              replacement_note: statusDropdown.value === "replaced" ? replNoteArea.value.trim() || null : null,
+              flag_reason:      statusDropdown.value === "flagged"  ? flagReasonArea.value.trim() || null : null,
+            });
+            openComponentDetail(componentId, token, panel, {
+              ...nodeData,
+              lifecycle_status: statusDropdown.value,
+              replacement_note: statusDropdown.value === "replaced" ? replNoteArea.value.trim() || null : null,
+              flag_reason:      statusDropdown.value === "flagged"  ? flagReasonArea.value.trim() || null : null,
+            });
+          } catch (ex) {
+            statusSaveErr.textContent = ex.message;
+            statusSaveBtn.disabled = false; statusSaveBtn.textContent = "Save status";
+          }
+        };
+        statusSection = el("div", { style: "margin-bottom:1rem;padding:0.75rem;border:1px solid var(--border,#e2e8f0);border-radius:6px" }, [
+          el("div", { style: "display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem" }, [
+            el("span", { style: "font-size:0.82rem;font-weight:600;white-space:nowrap" }, "Lifecycle status"),
+            statusDropdown, statusSaveBtn, statusSaveErr,
+          ]),
+          replNoteArea, flagReasonArea,
+        ]);
+      }
+
       panel.replaceChildren(
         el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem" }, [
           el("strong", {}, `Component: ${componentId.slice(0, 8)}…`),
           el("button", { class: "btn btn-sm", type: "button", onclick: () => { panel.style.display = "none"; } }, "Close"),
         ]),
+        ...(statusSection ? [statusSection] : []),
         ...(configSection ? [configSection] : []),
         versionsSection, usedInSection, docsSection, matsSection, changelogSection,
       );
@@ -4718,7 +4768,7 @@
         if (!nodes || !nodes.length) { resultArea.replaceChildren(el("div", { class: "notice" }, "No components found.")); return; }
         // Lifecycle status distribution
         const lcCounts = {};
-        const lcOrder = ["concept", "specified", "sourcing", "approved", "released", "obsolete"];
+        const lcOrder = ["active", "inactive", "replaced", "flagged"];
         lcOrder.forEach((s) => { lcCounts[s] = 0; });
         nodes.forEach((n) => { if (lcCounts[n.lifecycle_status] !== undefined) lcCounts[n.lifecycle_status]++; });
         const lcPills = lcOrder.map((s) => {

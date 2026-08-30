@@ -3441,7 +3441,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     const parentIdSet = new Set((parentRows || []).map((r: any) => r.parent_id));
     const search = body.search ? String(body.search).trim() : null;
     let q = tdb("bom_components")
-      .select("id, part_number, oem_number, name, type, lifecycle_status")
+      .select("id, part_number, oem_number, name, type, lifecycle_status, replacement_note, flag_reason")
       .order("name");
     if (search) q = (q as any).or(`name.ilike.*${search}*,part_number.ilike.*${search}*`);
     const { data: comps, error: ce } = await q;
@@ -3525,11 +3525,22 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // --- BOM: advance lifecycle status ----------------------------------------
   if (action === "setComponentStatus") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
-    const validStatuses = ["concept", "specified", "sourcing", "approved", "released", "obsolete"];
-    const { component_id, lifecycle_status } = body;
+    const validStatuses = ["active", "inactive", "replaced", "flagged"];
+    const { component_id, lifecycle_status, replacement_note, flag_reason } = body;
     if (!component_id || !lifecycle_status) return json({ error: "component_id and lifecycle_status required" }, 400);
     if (!validStatuses.includes(lifecycle_status)) return json({ error: "Invalid lifecycle_status" }, 400);
-    const { error } = await tdb("bom_components").update({ lifecycle_status, updated_at: new Date().toISOString(), updated_by: session.uid || null }).eq("id", component_id);
+    const patch: any = { lifecycle_status, updated_at: new Date().toISOString(), updated_by: session.uid || null };
+    if (lifecycle_status === "replaced") {
+      patch.replacement_note = replacement_note ? String(replacement_note).slice(0, 1000) : null;
+      patch.flag_reason = null;
+    } else if (lifecycle_status === "flagged") {
+      patch.flag_reason = flag_reason ? String(flag_reason).slice(0, 1000) : null;
+      patch.replacement_note = null;
+    } else {
+      patch.replacement_note = null;
+      patch.flag_reason = null;
+    }
+    const { error } = await tdb("bom_components").update(patch).eq("id", component_id);
     if (error) return json({ error: error.message }, 400);
     return json({ ok: true });
   }
@@ -3556,8 +3567,16 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       return result;
     }
     const { data: existing } = await tdb("bom_component_versions")
-      .select("revision").eq("component_id", component_id);
+      .select("id, revision").eq("component_id", component_id);
     const revision = nextRev((existing || []).map((r: any) => r.revision));
+
+    // Explicitly retire old versions before inserting the new one.
+    // The trigger fn_set_current_version does the same but may not fire
+    // reliably in all Supabase RLS configurations, so we do it here too.
+    if ((existing || []).length > 0) {
+      await tdb("bom_component_versions")
+        .update({ is_current: false }).eq("component_id", component_id);
+    }
 
     const { data: ver, error } = await tdb("bom_component_versions").insert({
       component_id, revision, spec_summary: spec_summary || null,
