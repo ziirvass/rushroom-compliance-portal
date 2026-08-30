@@ -14,7 +14,8 @@ _Last updated: 2026-08-30 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
-- **Bug fix — Version history after bump** (all prior revisions now visible in Versions table and Change Log after bumping; explicit is_current retire in application code; panel refresh now awaits + passes nodeData; cache v151) — 2026-08-30
+- **Bug fix — Component detail tables only showing first row** (all 5 tables in the component detail panel — Versions, Documents, Materials, Used In, Change Log — were silently showing only their first row; root cause: `el("tbody", {}, ...rows)` spread rows as positional args but `el(tag, attrs, kids)` only reads the 3rd param; fix: remove spread so arrays pass directly; cache v152) — 2026-08-30
+- **Bug fix — Version history after bump** (explicit is_current retire in bumpComponentVersion application code; panel refresh awaits + passes nodeData; cache v151) — 2026-08-30
 - **PROP-023 Component Lifecycle Status — Rebuild** (4 operational states: active/inactive/replaced/flagged; migration 0013 migrates all existing rows; replacement_note + flag_reason columns; inline status editor in component detail panel; cache v150) — 2026-08-30
 - **PROP-022 BOM List Performance & Search** (lazy tree expansion, `has_children` from single edge query, search + 50-item pagination; cache v149) — 2026-08-30
 - **PROP-021 Component Document Lifecycle — Layer 1** (direct upload & link from component detail panel via new `uploadAndLinkComponentDocument` action; two-tab modal replaces single-flow link modal; cache v148) — 2026-08-29
