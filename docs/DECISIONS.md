@@ -308,3 +308,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Removed the spread operator from all five `el("tbody", {}, ...rows)` calls in `openComponentDetail`, changing them to `el("tbody", {}, rows)`. No other changes.
 **Why:** `el(tag, attrs, kids)` takes exactly three positional parameters; the spread operator was passing each row as a separate positional argument beyond the third, so only `rows[0]` was ever rendered. The data in the database was correct throughout — all version, document, material, used-in, and changelog rows existed. This was a pure frontend rendering bug. The v151 backend fix (explicit `is_current` retire) is also correct and harmless, but the missing rows were never a database problem.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/ROADMAP.md, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-30
+**Feature:** Bug fix — "Can't find variable: role" in component detail panel (v153)
+**Decision:** Added `role` as a second parameter to `bomTreeView(token, role)` and updated the single call site in `renderProduct` from `bomTreeView(token)` to `bomTreeView(token, role)`. The `openComponentDetail` function (defined inside `bomTreeView`) closes over `role` to gate the status-edit block behind `if (role === "rushroom")`.
+**Why:** `renderProduct(role, mount)` received `role` correctly but passed only `token` to `bomTreeView`, so `role` was never in scope for the inner functions. The status edit block added in PROP-023 introduced the first use of `role` inside `bomTreeView`, exposing the missing parameter.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/ROADMAP.md, docs/DECISIONS.md
