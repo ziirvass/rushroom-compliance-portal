@@ -4119,7 +4119,7 @@
         el("h4", {}, "Versions"),
         el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
           el("thead", {}, el("tr", {}, ["Revision", "Summary", "Status", "Created"].map((h) => el("th", {}, h)))),
-          el("tbody", {}, ...versionRows),
+          el("tbody", {}, versionRows),
         ])),
         bumpForm,
       ]);
@@ -4265,7 +4265,7 @@
         ]),
         docRows.length ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
           el("thead", {}, el("tr", {}, ["Category", "Name", "Supplier visible"].map((h) => el("th", {}, h)))),
-          el("tbody", {}, ...docRows),
+          el("tbody", {}, docRows),
         ])) : el("div", { class: "muted" }, "No documents attached yet."),
       ]);
 
@@ -4281,7 +4281,7 @@
         el("h4", {}, "Materials (REACH / RoHS)"),
         matRows.length ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
           el("thead", {}, el("tr", {}, ["Substance", "CAS", "% w/w", "SVHC", "RoHS restricted"].map((h) => el("th", {}, h)))),
-          el("tbody", {}, ...matRows),
+          el("tbody", {}, matRows),
         ])) : el("div", { class: "muted" }, "No substance data yet."),
       ]);
 
@@ -4342,7 +4342,7 @@
         usedInParents.length
           ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem" }, [
               el("thead", {}, el("tr", {}, ["Assembly", "Part #", "Qty", "Ref"].map((h) => el("th", {}, h)))),
-              el("tbody", {}, ...usedInParents.map((p) => el("tr", {}, [
+              el("tbody", {}, usedInParents.map((p) => el("tr", {}, [
                 el("td", {}, p.parent ? p.parent.name : "—"),
                 el("td", { style: "font-family:monospace;font-size:0.78rem;color:var(--muted,#8b93a1)" }, p.parent ? p.parent.part_number : "—"),
                 el("td", {}, `×${p.quantity}`),
@@ -4359,7 +4359,7 @@
         clRows.length
           ? el("div", { class: "table-wrap" }, el("table", { style: "font-size:0.85rem;width:100%" }, [
               el("thead", {}, el("tr", {}, ["Date", "Event", "Changes"].map((h) => el("th", {}, h)))),
-              el("tbody", {}, ...clRows),
+              el("tbody", {}, clRows),
             ]))
           : el("div", { class: "muted" }, "No history yet — changes will appear here automatically."),
       ]);
