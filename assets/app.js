@@ -3542,7 +3542,7 @@
           treeDiv.replaceChildren(el("div", { class: "error", style: "font-size:0.8rem;padding:0.4rem" }, "Failed to load tree."));
         } else {
           treeDiv.replaceChildren();
-          renderBomTree(comp.id, state, treeDiv, detailPanel, token, allComponents, refreshTree);
+          renderBomTree(comp.id, state, treeDiv, detailPanel, token, allComponents, refreshTree, role);
         }
         treeDiv.style.display = "";
       }
@@ -3661,7 +3661,7 @@
     return wrap;
   }
 
-  function renderBomTree(rootId, bom, container, detailPanel, token, allComponents, onRefresh) {
+  function renderBomTree(rootId, bom, container, detailPanel, token, allComponents, onRefresh, role) {
     const { nodes = [], edges = [] } = bom;
     if (!nodes.length) { container.replaceChildren(el("div", { class: "notice" }, "Empty BOM.")); return; }
 
