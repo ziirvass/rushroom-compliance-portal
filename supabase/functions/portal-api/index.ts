@@ -1875,7 +1875,7 @@ Deno.serve(async (req) => {
 - part_number: the manufacturer's own part number or SKU exactly as printed (e.g. "LED-STRIP-2835-24V-12W", "WAGO-221-412"). If none is visible, "".
 - oem_number: the OEM or distributor reference number if printed separately from the main part number (e.g. a Farnell order code, RS part number, or second manufacturer reference). If not present, "".
 - name: the component's concise descriptive name (e.g. "LED Strip 24V 12W/m", "PSU 24V 60W", "Wago 221 Lever Connector 2-pin").
-- type: exactly one of "Product", "Component", "SparePart", "Refurb". A complete sellable product → "Product"; a bought-in part or sub-assembly used inside a product → "Component"; a service/replacement part → "SparePart"; a refurbished unit → "Refurb".
+- type: exactly one of "part", "raw_material", "sub_assembly", "finished_good", "spare_part". A single purchased or manufactured item → "part"; a bulk raw/process material → "raw_material"; an intermediate built group of other parts → "sub_assembly"; the final saleable product → "finished_good"; a service or replacement part → "spare_part".
 - description: one sentence describing what this component is and what purpose it serves.
 - summary: one sentence on the document itself (for the upload status bar).`;
 
@@ -1909,13 +1909,13 @@ Deno.serve(async (req) => {
     let parsed: any;
     try { parsed = JSON.parse(textBlock?.text || "{}"); }
     catch { return json({ error: "The AI response could not be parsed. Try again or fill the fields manually." }, 502); }
-    const VALID_TYPES = ["Product", "Component", "SparePart", "Refurb"];
+    const VALID_TYPES = ["part", "raw_material", "sub_assembly", "finished_good", "spare_part"];
     return json({
       ok: true,
       part_number: String(parsed.part_number || ""),
       oem_number:  String(parsed.oem_number  || ""),
       name:        String(parsed.name        || ""),
-      type:        VALID_TYPES.includes(parsed.type) ? parsed.type : "Component",
+      type:        VALID_TYPES.includes(parsed.type) ? parsed.type : "part",
       description: String(parsed.description || ""),
       summary:     String(parsed.summary     || ""),
       usage: usageOf(apiJson),
@@ -3456,7 +3456,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     const { name, type, oem_number, description, notes } = body;
     let { part_number } = body;
     if (!name || !type) return json({ error: "name and type are required" }, 400);
-    const validTypes = ["Product", "Component", "SparePart", "Refurb", "product_family"];
+    const validTypes = ["part", "raw_material", "sub_assembly", "finished_good", "spare_part", "product_family"];
     if (!validTypes.includes(type)) return json({ error: "Invalid type" }, 400);
     // Auto-generate part number if not supplied
     if (!part_number || !String(part_number).trim()) {
@@ -3513,7 +3513,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     if (oem_number  !== undefined) patch.oem_number  = oem_number ? String(oem_number).trim() : null;
     if (part_number !== undefined && String(part_number).trim()) patch.part_number = String(part_number).trim();
     if (newType     !== undefined) {
-      const validTypes = ["Product", "Component", "SparePart", "Refurb", "product_family"];
+      const validTypes = ["part", "raw_material", "sub_assembly", "finished_good", "spare_part", "product_family"];
       if (!validTypes.includes(newType)) return json({ error: "Invalid type" }, 400);
       patch.type = newType;
     }

@@ -3488,7 +3488,7 @@
       const grouped = { components: [], assemblies: [], dynamic: [] };
       filtered.forEach((c) => {
         if (c.type === "product_family") grouped.dynamic.push(c);
-        else if (c.type === "Product") grouped.assemblies.push(c);
+        else if (c.has_children) grouped.assemblies.push(c);
         else grouped.components.push(c);
       });
       return grouped;
@@ -3527,7 +3527,7 @@
 
     function renderRootRow(comp) {
       const STATUS_COLOR = { active: "#2fa564", inactive: "#8b93a1", replaced: "#e5a326", flagged: "#e05454" };
-      const TYPE_COLOR   = { Product: "#4a9eed", Component: "#2fa564", SparePart: "#f59e0b", Refurb: "#a855f7", product_family: "#e05454" };
+      const TYPE_COLOR   = { part: "#2fa564", raw_material: "#8b93a1", sub_assembly: "#4a9eed", finished_good: "#a855f7", spare_part: "#f59e0b", product_family: "#e05454" };
       const sfg = STATUS_COLOR[comp.lifecycle_status] || "#888";
       const tfg = TYPE_COLOR[comp.type] || "#888";
 
@@ -3897,7 +3897,7 @@
       const now = new Date();
       return `RR-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${s}`;
     }
-    const TYPE_OPTS = [["Component", "Component"], ["Product", "Product"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"]];
+    const TYPE_OPTS = [["part", "Part"], ["raw_material", "Raw Material"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"], ["spare_part", "Spare Part"]];
     const newPN   = el("input",  { class: "up-text", type: "text" });
     const newName = el("input",  { class: "up-text", type: "text", placeholder: "Name (required)" });
     const newType = el("select", { class: "up-text" }, TYPE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
@@ -4596,7 +4596,7 @@
     }
 
     // --- Fields --------------------------------------------------------------
-    const TYPE_OPTS = [["Component", "Component"], ["Product", "Product"], ["SparePart", "Spare Part"], ["Refurb", "Refurb"], ["product_family", "Dynamic BOM"]];
+    const TYPE_OPTS = [["part", "Part"], ["raw_material", "Raw Material"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"], ["spare_part", "Spare Part"], ["product_family", "Dynamic BOM"]];
     const pn   = el("input",    { class: "up-text", type: "text", placeholder: "Auto-generated if left empty" });
     const oem  = el("input",    { class: "up-text", type: "text", placeholder: "OEM / distributor reference (optional)" });
     const nm   = el("input",    { class: "up-text", type: "text", placeholder: "Name" });
