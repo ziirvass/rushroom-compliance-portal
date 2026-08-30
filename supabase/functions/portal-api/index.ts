@@ -3432,16 +3432,22 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // --- BOM: list all components + identify roots (no active parent edge) -----
   if (action === "listComponents") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
-    const { data: comps, error: ce } = await tdb("bom_components")
+    // Fetch the set of component IDs that are active BOM parents in one indexed query.
+    // This lets the frontend classify tabs without N×getBom calls.
+    const { data: parentRows } = await db.from("bom_edges")
+      .select("parent_id")
+      .eq("organization_id", organizationId)
+      .is("effective_to", null);
+    const parentIdSet = new Set((parentRows || []).map((r: any) => r.parent_id));
+    const search = body.search ? String(body.search).trim() : null;
+    let q = tdb("bom_components")
       .select("id, part_number, oem_number, name, type, lifecycle_status")
       .order("name");
+    if (search) q = (q as any).or(`name.ilike.*${search}*,part_number.ilike.*${search}*`);
+    const { data: comps, error: ce } = await q;
     if (ce) return json({ error: ce.message }, 400);
-    const { data: edges } = await db.from("bom_edges")
-      .select("child_id")
-      .is("effective_to", null)
-      .eq("organization_id", organizationId);
-    const rootIds = (comps || []).map((c: any) => c.id);
-    return json({ components: comps || [], root_ids: rootIds });
+    const components = (comps || []).map((c: any) => ({ ...c, has_children: parentIdSet.has(c.id) }));
+    return json({ components, root_ids: components.map((c: any) => c.id) });
   }
 
   // --- BOM: add a new component (creates the node + first version "A") ------

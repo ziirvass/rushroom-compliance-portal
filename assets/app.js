@@ -3448,58 +3448,200 @@
     ];
 
     let activeTab = "components";
-    let allState = null;
+    let allComponents = [];
+    let searchQuery = "";
+    const PAGE_SIZE = 50;
+    const tabPageShown = { components: PAGE_SIZE, assemblies: PAGE_SIZE, dynamic: PAGE_SIZE };
+    const expandedTrees = {}; // compId → bom | "loading" | "error"
 
-    const tabBar  = el("div", { style: "display:flex;gap:0;margin-top:0.75rem;border-bottom:2px solid var(--border,#e2e8f0)" });
-    const treeArea = el("div", { class: "pis-tree-area", style: "margin-top:0.75rem" });
+    const tabBarEl = el("div", { style: "display:flex;gap:0;margin-top:0.75rem;border-bottom:2px solid var(--border,#e2e8f0)" });
+    const treeArea  = el("div", { class: "pis-tree-area", style: "margin-top:0.75rem" });
+
+    let searchTimer = null;
+    const searchInp = el("input", { type: "search", placeholder: "Search by name or part number…", class: "up-text",
+      style: "flex:1;min-width:140px;max-width:280px",
+      oninput: () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          searchQuery = searchInp.value.trim().toLowerCase();
+          tabPageShown.components = tabPageShown.assemblies = tabPageShown.dynamic = PAGE_SIZE;
+          renderAll();
+        }, 250);
+      },
+    });
 
     wrap.replaceChildren(
       el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap" }, [
         el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => { activeTab = "components"; refreshTree(); }) }, "+ New BOM Node"),
         el("button", { class: "btn btn-sm", type: "button", onclick: () => refreshTree() }, "↺ Refresh"),
+        searchInp,
       ]),
-      tabBar,
+      tabBarEl,
       treeArea,
       detailPanel,
     );
 
-    function renderTabBar(grouped) {
-      tabBar.replaceChildren(...TAB_DEFS.map((td) => {
+    function groupFiltered() {
+      const q = searchQuery;
+      const filtered = q
+        ? allComponents.filter((c) => (c.name || "").toLowerCase().includes(q) || (c.part_number || "").toLowerCase().includes(q))
+        : allComponents;
+      const grouped = { components: [], assemblies: [], dynamic: [] };
+      filtered.forEach((c) => {
+        if (c.type === "product_family") grouped.dynamic.push(c);
+        else if (c.type === "Product" || c.has_children) grouped.assemblies.push(c);
+        else grouped.components.push(c);
+      });
+      return grouped;
+    }
+
+    function renderAll() {
+      const grouped = groupFiltered();
+      // Tab bar
+      tabBarEl.replaceChildren(...TAB_DEFS.map((td) => {
         const count = (grouped[td.id] || []).length;
         const active = activeTab === td.id;
         return el("button", {
           type: "button",
           style: `padding:0.35rem 1rem;font-size:0.8125rem;font-weight:600;border:none;background:transparent;cursor:pointer;color:${active ? "var(--accent,#2fa564)" : "var(--muted,#888)"};border-bottom:${active ? "2px solid var(--accent,#2fa564)" : "2px solid transparent"};margin-bottom:-2px`,
-          onclick: () => { activeTab = td.id; renderTabBar(grouped); renderTabContent(); },
+          onclick: () => { activeTab = td.id; renderAll(); },
         }, `${td.label} (${count})`);
       }));
-    }
-
-    function renderTabContent() {
-      if (!allState) return;
-      const { components, grouped, trees } = allState;
-      const rootIds = grouped[activeTab] || [];
+      // List
       treeArea.replaceChildren();
-      if (!rootIds.length) {
+      const items = grouped[activeTab] || [];
+      if (!items.length) {
         const labels = { components: "components", assemblies: "assemblies", dynamic: "dynamic BOMs" };
-        treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, `No ${labels[activeTab]} yet. Use + New BOM Node to create one.`));
+        treeArea.append(el("div", { class: "notice", style: "margin-top:1rem" },
+          searchQuery ? `No ${labels[activeTab]} match "${searchQuery}".` : `No ${labels[activeTab]} yet. Use + New BOM Node to create one.`));
         return;
       }
-      rootIds.forEach((rootId, i) => {
-        const bom = trees[rootId];
-        if (!bom) return;
-        const section = el("div", { style: i > 0 ? "margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border,#e2e8f0)" : "" });
-        renderBomTree(rootId, bom, section, detailPanel, token, components, refreshTree);
-        treeArea.append(section);
-      });
+      const shown = Math.min(tabPageShown[activeTab], items.length);
+      items.slice(0, shown).forEach((comp) => treeArea.append(renderRootRow(comp)));
+      if (items.length > shown) {
+        const remaining = items.length - shown;
+        treeArea.append(el("div", { style: "text-align:center;padding:0.75rem" },
+          el("button", { class: "btn btn-sm", type: "button", onclick: () => { tabPageShown[activeTab] += PAGE_SIZE; renderAll(); } },
+            `Load ${Math.min(remaining, PAGE_SIZE)} more (${remaining} remaining)`)));
+      }
+    }
+
+    function renderRootRow(comp) {
+      const STATUS_COLOR = { active: "#2fa564", obsolete: "#e05454", prototype: "#f59e0b", discontinued: "#8b93a1", draft: "#4a9eed" };
+      const TYPE_COLOR   = { Product: "#4a9eed", Component: "#2fa564", SparePart: "#f59e0b", Refurb: "#a855f7", product_family: "#e05454" };
+      const sfg = STATUS_COLOR[comp.lifecycle_status] || "#888";
+      const tfg = TYPE_COLOR[comp.type] || "#888";
+
+      const container = el("div", { style: "border:1px solid var(--border,#e2e8f0);border-radius:6px;margin-bottom:0.4rem;overflow:hidden" });
+      const treeDiv   = el("div", { style: "display:none;padding:0 0.6rem 0.6rem;border-top:1px solid var(--border,#e2e8f0)" });
+
+      function rebuildTreeDiv() {
+        const state = expandedTrees[comp.id];
+        if (!state || state === "loading") {
+          treeDiv.replaceChildren(el("div", { class: "loading", style: "font-size:0.8rem;padding:0.4rem" }, "Loading tree…"));
+        } else if (state === "error") {
+          treeDiv.replaceChildren(el("div", { class: "error", style: "font-size:0.8rem;padding:0.4rem" }, "Failed to load tree."));
+        } else {
+          treeDiv.replaceChildren();
+          renderBomTree(comp.id, state, treeDiv, detailPanel, token, allComponents, refreshTree);
+        }
+        treeDiv.style.display = "";
+      }
+
+      const expandBtn = comp.has_children ? el("button", {
+        type: "button", title: "Expand",
+        style: "background:none;border:none;cursor:pointer;padding:0 4px;font-size:0.75rem;color:var(--accent,#2fa564);transition:transform 0.15s;flex-shrink:0",
+        onclick: async (ev) => {
+          ev.stopPropagation();
+          const open = treeDiv.style.display !== "none" && treeDiv.style.display !== "";
+          if (open) {
+            treeDiv.style.display = "none";
+            ev.currentTarget.style.transform = "rotate(0deg)";
+            ev.currentTarget.title = "Expand";
+          } else {
+            ev.currentTarget.style.transform = "rotate(90deg)";
+            ev.currentTarget.title = "Collapse";
+            if (!expandedTrees[comp.id]) {
+              expandedTrees[comp.id] = "loading";
+              rebuildTreeDiv();
+              try {
+                expandedTrees[comp.id] = await API.post(token, "getBom", { root_component_id: comp.id, max_depth: 10 });
+              } catch { expandedTrees[comp.id] = "error"; }
+            }
+            rebuildTreeDiv();
+          }
+        },
+      }, "▶") : el("span", { style: "width:20px;display:inline-block;flex-shrink:0" }, "");
+
+      // Restore expanded state across re-renders
+      if (expandedTrees[comp.id] && expandedTrees[comp.id] !== "loading") {
+        expandBtn.style && (expandBtn.style.transform = "rotate(90deg)");
+        if (expandBtn.title !== undefined) expandBtn.title = "Collapse";
+        rebuildTreeDiv();
+      }
+
+      const row = el("div", {
+        style: "display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0.6rem;user-select:none",
+        ondblclick: (ev) => { ev.stopPropagation(); openComponentDetail(comp.id, token, detailPanel, comp); },
+      }, [
+        expandBtn,
+        el("div", { style: "flex:1;min-width:0;overflow:hidden" }, [
+          el("span", { style: "font-weight:600;font-size:0.875rem" }, comp.name || "—"),
+          comp.part_number ? el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);margin-left:0.4rem;font-family:monospace" }, comp.part_number) : null,
+        ].filter(Boolean)),
+        el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${tfg}18;color:${tfg};white-space:nowrap;flex-shrink:0` }, comp.type || ""),
+        comp.lifecycle_status ? el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${sfg}18;color:${sfg};white-space:nowrap;flex-shrink:0` }, comp.lifecycle_status) : null,
+        el("button", {
+          class: "btn btn-sm", type: "button",
+          style: "color:#e05454;border-color:#e0545440;padding:0 7px;font-size:0.9rem;font-weight:700;line-height:1;flex-shrink:0",
+          title: "Delete", onclick: async (ev) => {
+            ev.stopPropagation();
+            ev.target.disabled = true;
+            try {
+              const { parents } = await API.post(token, "listParentsOf", { component_id: comp.id });
+              const confirmed = await new Promise((resolve) => {
+                const mo = el("div", { style: "position:fixed;inset:0;background:#00000080;z-index:2000;display:flex;align-items:center;justify-content:center" });
+                const close = (v) => { mo.remove(); resolve(v); };
+                mo.onclick = (e) => { if (e.target === mo) close(false); };
+                const rows = [
+                  el("div", { style: "display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem" }, [
+                    el("span", { style: "font-size:1.3rem;line-height:1" }, "🗑"),
+                    el("h3", { style: "margin:0;font-size:1rem;color:#e05454" }, `Delete "${comp.name}" from registry?`),
+                  ]),
+                  el("p", { style: "margin:0 0 0.75rem;font-size:0.875rem" }, "This permanently removes the component and all its compliance data."),
+                ];
+                if (parents && parents.length) rows.push(el("div", { style: "background:#e0545415;border:1px solid #e0545450;border-radius:6px;padding:0.6rem 0.75rem;margin-bottom:0.75rem" }, [
+                  el("div", { style: "font-size:0.82rem;font-weight:700;color:#e05454;margin-bottom:0.3rem" }, `⚠ Linked in ${parents.length} assembl${parents.length > 1 ? "ies" : "y"}:`),
+                  el("ul", { style: "margin:0.2rem 0 0.3rem;padding-left:1.2rem;font-size:0.82rem" }, parents.map((p) => el("li", {}, p.parent ? p.parent.name : p.parent_id))),
+                  el("div", { style: "font-size:0.78rem;color:var(--muted,#8b93a1)" }, "Deleting will unlink it from all of them."),
+                ]));
+                if (comp.has_children) rows.push(el("p", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);margin:0 0 0.5rem" }, "Direct children will become standalone BOM Nodes."));
+                rows.push(el("p", { style: "font-size:0.82rem;font-weight:700;color:#e05454;margin:0 0 1.1rem" }, "This cannot be undone."));
+                rows.push(el("div", { style: "display:flex;justify-content:flex-end;gap:0.5rem" }, [
+                  el("button", { class: "btn btn-sm", type: "button", onclick: () => close(false) }, "Cancel"),
+                  el("button", { type: "button", style: "background:#e05454;color:#fff;border:none;border-radius:6px;padding:0.45rem 1.1rem;font-size:0.875rem;font-weight:700;cursor:pointer;letter-spacing:0.01em", onclick: () => close(true) }, "Delete Permanently"),
+                ]));
+                mo.append(el("div", { style: "background:var(--bg,#fff);border:2px solid #e05454;border-radius:10px;padding:1.5rem;width:min(440px,95vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px #0003" }, rows));
+                document.body.append(mo);
+              });
+              if (!confirmed) { ev.target.disabled = false; return; }
+              await API.post(token, "deleteComponent", { component_id: comp.id });
+              refreshTree();
+            } catch (ex) { ev.target.disabled = false; alert(`Failed: ${ex.message}`); }
+          },
+        }, "×"),
+      ].filter(Boolean));
+
+      container.append(row, treeDiv);
+      return container;
     }
 
     async function refreshTree() {
       treeArea.replaceChildren(el("div", { class: "loading" }, "Loading BOM…"));
       try {
-        const { components, root_ids } = await API.post(token, "listComponents", {});
+        const { components } = await API.post(token, "listComponents", {});
         if (!components.length) {
-          tabBar.replaceChildren();
+          tabBarEl.replaceChildren();
           detailPanel.style.display = "none";
           detailPanel.replaceChildren();
           treeArea.replaceChildren(el("div", { class: "notice", style: "margin-top:1rem" }, [
@@ -3507,28 +3649,10 @@
           ]));
           return;
         }
-        const byId = Object.fromEntries(components.map((c) => [c.id, c]));
-
-        treeArea.replaceChildren(el("div", { class: "loading" }, `Loading ${root_ids.length} tree${root_ids.length !== 1 ? "s" : ""}…`));
-        const treeResults = await Promise.all(root_ids.map((id) => API.post(token, "getBom", { root_component_id: id, max_depth: 10 })));
-        const trees = {};
-        root_ids.forEach((id, i) => { trees[id] = treeResults[i]; });
-
-        // Group by type, but treat any node with BOM children as an assembly
-        // regardless of its type field — so Component-typed nodes that have children
-        // (common in practice) land in Assemblies rather than Components.
-        const grouped = { components: [], assemblies: [], dynamic: [] };
-        root_ids.forEach((id) => {
-          const type = byId[id]?.type;
-          const hasChildren = (trees[id]?.edges?.length || 0) > 0;
-          if (type === "product_family") grouped.dynamic.push(id);
-          else if (type === "Product" || hasChildren) grouped.assemblies.push(id);
-          else grouped.components.push(id);
-        });
-
-        allState = { components, grouped, trees };
-        renderTabBar(grouped);
-        renderTabContent();
+        allComponents = components;
+        const idSet = new Set(components.map((c) => c.id));
+        Object.keys(expandedTrees).forEach((k) => { if (!idSet.has(k)) delete expandedTrees[k]; });
+        renderAll();
       } catch (ex) {
         treeArea.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
       }

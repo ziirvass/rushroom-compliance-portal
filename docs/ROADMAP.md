@@ -14,6 +14,7 @@ _Last updated: 2026-08-29 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **PROP-022 BOM List Performance & Search** (lazy tree expansion, `has_children` from single edge query, search + 50-item pagination; cache v149) — 2026-08-30
 - **PROP-021 Component Document Lifecycle — Layer 1** (direct upload & link from component detail panel via new `uploadAndLinkComponentDocument` action; two-tab modal replaces single-flow link modal; cache v148) — 2026-08-29
 - **PROP-020 BOM List Split by Type** (Components / Assemblies / Dynamic BOMs tabs in BOM Tree view; delete button label "Delete Permanently"; cache v143) — 2026-08-29
 - **PROP-019 COGS Layer Removal** (5 tables, 10 API actions, Cost Canvas subtab removed; BOM tree kept for compliance tracing; cache v141) — 2026-08-29
