@@ -15,6 +15,7 @@ _Last updated: 2026-08-30 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Bug fix — BOM tab classification uses type only** (`|| c.has_children` in `groupFiltered()` caused any Component-typed node that gained a child to be reclassified as an Assembly root; fixed to use `type` exclusively for tab placement; cache v157) — 2026-08-30
 - **Bug fix — "Can't find variable: role" complete fix** (`renderBomTree` is also a peer function lacking `role`; added as 8th param and updated its call site; all three peer functions — `bomTreeView`, `renderBomTree`, `openComponentDetail` — now receive `role` explicitly from `renderProduct`; cache v155) — 2026-08-30
 - **Bug fix — "Can't find variable: role" correct fix** (`openComponentDetail` is a peer function of `bomTreeView`, not nested — added `role` as explicit 5th param and updated all 7 call sites; v154 supersedes the incorrect v153 attempt) — 2026-08-30
 - **Bug fix — "Can't find variable: role" incorrect attempt** (v153 added role to `bomTreeView` param but `openComponentDetail` is not nested inside it so it had no effect) (`role` not passed into `bomTreeView`; `renderProduct(role)` called `bomTreeView(token)` without it; fixed by adding `role` as second param; cache v153) — 2026-08-30

@@ -336,3 +336,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Store version snapshot as JSONB on `bom_component_versions` rather than adding version-scoped FK columns to `component_documents` / `component_materials`.
 **Why:** Adding `component_version_id FK` to the document and material tables would require migrating all existing rows and changing how documents are linked (to a version, not a component). The JSONB approach is additive-only: one new nullable column, no schema changes to existing linking tables, no migration of existing data. The tradeoff is that documents added after a bump but before the next are not captured — acceptable for MVP and documented in the UI as "snapshot as of version creation."
 **Files changed:** supabase/migrations/0014_version_snapshot.sql, supabase/functions/portal-api/index.ts, assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-30
+**Feature:** Bug fix — BOM tab classification type-only
+**Decision:** Tab placement in `groupFiltered()` now uses only `c.type`; removed `|| c.has_children` from the Assemblies condition.
+**Why:** `has_children` was added so that any component with children would surface in the Assemblies tab, but this caused Component-typed nodes to migrate tabs as soon as they got their first child — the wrong behaviour. Tab identity must be stable and reflect what the node *is* (its type), not what edges it has. `has_children` remains correct for driving the expand button.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
