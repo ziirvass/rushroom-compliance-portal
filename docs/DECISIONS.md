@@ -343,3 +343,17 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Tab placement in `groupFiltered()` now uses only `c.type`; removed `|| c.has_children` from the Assemblies condition.
 **Why:** `has_children` was added so that any component with children would surface in the Assemblies tab, but this caused Component-typed nodes to migrate tabs as soon as they got their first child — the wrong behaviour. Tab identity must be stable and reflect what the node *is* (its type), not what edges it has. `has_children` remains correct for driving the expand button.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-30
+**Feature:** PROP-025 Structural BOM Tab Classification + Meaningful Type Values
+**Decision:** Tab classification uses `has_children` (structural) rather than the `type` field; component type values renamed from Component/Product/SparePart/Refurb to part/raw_material/sub_assembly/finished_good/spare_part.
+**Why:** The old type values ("Component", "Product") clashed with tab names and led to visually contradictory states — a node typed "Component" appearing in the Components tab with an expand arrow because it had children. Structural routing means the UI reflects reality: if it has children it IS an assembly, regardless of what type label it carries. Renaming types to manufacturing categories makes the badge meaningful without conflicting with tab terminology.
+**Files changed:** supabase/migrations/0015_rename_component_types.sql, supabase/functions/portal-api/index.ts, assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-30
+**Feature:** PROP-026 Component Images — Paste, Drop, or Pick from Disk
+**Decision:** Store component images in the existing `documents` bucket under a `component-images/` prefix rather than a dedicated `component-images` bucket.
+**Why:** Creating a new bucket requires Supabase dashboard access and separate RLS bucket policies. Reusing the `documents` bucket with a path prefix achieves the same isolation at zero extra infra cost. Images are only exposed via 1-hour signed URLs (same as documents), keeping access control consistent.
+**Files changed:** supabase/migrations/0016_component_images.sql, supabase/functions/portal-api/index.ts, assets/app.js, index.html, CLAUDE.md

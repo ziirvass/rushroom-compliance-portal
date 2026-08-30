@@ -4053,6 +4053,7 @@
     panel.style.display = "";
     panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
     panel.replaceChildren(el("div", { class: "loading" }, "Loading…"));
+    if (panel.__imgPasteOff) { panel.__imgPasteOff(); delete panel.__imgPasteOff; }
     const isFamily = nodeData?.type === "product_family";
     try {
       const basePromises = [
@@ -4061,12 +4062,13 @@
         API.post(token, "getComponentMaterials", { component_id: componentId }),
         API.post(token, "getComponentChangelog", { component_id: componentId }),
         API.post(token, "listParentsOf",         { component_id: componentId }),
+        API.post(token, "listComponentImages",   { component_id: componentId }),
       ];
       const familyPromises = isFamily ? [
         API.post(token, "listFamilyAttributes", { family_id: componentId }),
         API.post(token, "listConfigurations",    { family_id: componentId }),
       ] : [null, null];
-      const [hist, docs, mats, cl, usedIn, familyAttrs, familyConfigs] = await Promise.all([...basePromises, ...familyPromises]);
+      const [hist, docs, mats, cl, usedIn, imgData, familyAttrs, familyConfigs] = await Promise.all([...basePromises, ...familyPromises]);
       const history = hist.history || [];
       const current = history.find((v) => v.is_current) || history[0];
 
@@ -4517,6 +4519,104 @@
         ]);
       }
 
+      // Images section (PROP-026) -----------------------------------------------
+      const imgStatus = el("span", { style: "font-size:0.78rem;color:#e05454;min-height:1.1em;display:block" }, "");
+      const imgGrid = el("div", { style: "display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.5rem;min-height:2rem" });
+
+      function openLightbox(url) {
+        const over = el("div", { style: "position:fixed;inset:0;background:#000c;z-index:3000;display:flex;align-items:center;justify-content:center;cursor:pointer", onclick: () => over.remove() });
+        over.append(el("img", { src: url, style: "max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 4px 32px #0008" }));
+        document.body.append(over);
+      }
+
+      function renderImgGrid(images) {
+        if (!images.length) {
+          imgGrid.replaceChildren(el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1)" }, "No images yet."));
+          return;
+        }
+        imgGrid.replaceChildren(...images.map((img) => {
+          const wrap = el("div", { style: "position:relative;display:inline-block" });
+          const thumb = el("img", { src: img.url, style: "width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid var(--border,#e2e8f0);cursor:pointer;display:block", title: img.file_name, onclick: () => openLightbox(img.url) });
+          const delBtn = el("button", { type: "button", style: "position:absolute;top:2px;right:2px;background:#000a;border:none;border-radius:50%;width:18px;height:18px;color:#fff;font-size:0.55rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1", onclick: async (ev) => {
+            ev.stopPropagation();
+            if (!confirm(`Delete "${img.file_name}"?`)) return;
+            imgStatus.textContent = "Deleting…";
+            try {
+              await API.post(token, "deleteComponentImage", { image_id: img.id });
+              imgStatus.textContent = "";
+              const fresh = await API.post(token, "listComponentImages", { component_id: componentId });
+              renderImgGrid(fresh.images || []);
+            } catch (ex) { imgStatus.textContent = ex.message; }
+          } }, "✕");
+          wrap.append(thumb, delBtn);
+          return wrap;
+        }));
+      }
+      renderImgGrid(imgData?.images || []);
+
+      async function uploadImage(file) {
+        const ALLOWED = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+        if (!ALLOWED.includes(file.type)) { alert("Only PNG, JPEG, WEBP, or GIF are supported."); return; }
+        imgStatus.textContent = "Uploading…";
+        try {
+          const { signedUrl, path } = await API.post(token, "imageUploadUrl", {
+            component_id: componentId, fileName: file.name || "paste.png", contentType: file.type,
+          });
+          await new Promise((res, rej) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("PUT", signedUrl);
+            xhr.setRequestHeader("Content-Type", file.type);
+            xhr.onload = () => xhr.status < 300 ? res() : rej(new Error(`Upload failed: ${xhr.status}`));
+            xhr.onerror = () => rej(new Error("Network error"));
+            xhr.send(file);
+          });
+          await API.post(token, "addComponentImage", {
+            component_id: componentId, storage_path: path,
+            file_name: file.name || "paste.png", content_type: file.type,
+          });
+          imgStatus.textContent = "";
+          const fresh = await API.post(token, "listComponentImages", { component_id: componentId });
+          renderImgGrid(fresh.images || []);
+        } catch (ex) { imgStatus.textContent = ex.message; }
+      }
+
+      const imgFileInput = el("input", { type: "file", accept: "image/*", style: "display:none", onchange: (ev) => {
+        const f = ev.target.files[0];
+        if (f) uploadImage(f);
+        imgFileInput.value = "";
+      } });
+      const imgDropZone = el("div", {
+        style: "border:2px dashed var(--border,#e2e8f0);border-radius:6px;padding:0.5rem 0.75rem;font-size:0.8rem;color:var(--muted,#8b93a1);cursor:pointer;text-align:center;margin-top:0.4rem",
+        ondragover: (ev) => { ev.preventDefault(); imgDropZone.style.borderColor = "var(--accent,#2fa564)"; },
+        ondragleave: () => { imgDropZone.style.borderColor = "var(--border,#e2e8f0)"; },
+        ondrop: (ev) => {
+          ev.preventDefault();
+          imgDropZone.style.borderColor = "var(--border,#e2e8f0)";
+          const f = ev.dataTransfer?.files[0];
+          if (f && f.type.startsWith("image/")) uploadImage(f);
+        },
+        onclick: () => imgFileInput.click(),
+      }, "Drop image here · click to pick file · or paste (Cmd+V / Ctrl+V)");
+
+      function handleImgPaste(ev) {
+        if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
+        const items = ev.clipboardData?.items || [];
+        for (const item of items) {
+          if (item.type.startsWith("image/")) {
+            ev.preventDefault();
+            uploadImage(item.getAsFile());
+            return;
+          }
+        }
+      }
+      document.addEventListener("paste", handleImgPaste);
+      panel.__imgPasteOff = () => document.removeEventListener("paste", handleImgPaste);
+
+      const imagesSection = el("div", { style: "margin-top:1rem" }, [
+        el("h4", {}, "Images"),
+        imgDropZone, imgFileInput, imgStatus, imgGrid,
+      ]);
+
       // --- Status edit block (rushroom only) -----------------------------------
       let statusSection = null;
       if (role === "rushroom") {
@@ -4574,7 +4674,7 @@
         ]),
         ...(statusSection ? [statusSection] : []),
         ...(configSection ? [configSection] : []),
-        versionsSection, usedInSection, docsSection, matsSection, changelogSection,
+        versionsSection, usedInSection, docsSection, matsSection, imagesSection, changelogSection,
       );
     } catch (ex) {
       panel.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));

@@ -199,6 +199,8 @@ const TENANT_TABLES = new Set([
   "component_materials", "component_documents",
   // PROP-015: Configure-to-Order Variant BOM
   "family_attributes", "family_attribute_values", "saved_configurations",
+  // PROP-026: Component image gallery
+  "component_images",
 ]);
 function makeTdb(orgId: string) {
   const stamp = (rows: any) => Array.isArray(rows)
@@ -4145,6 +4147,64 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     const { configuration_id } = body;
     if (!configuration_id) return json({ error: "configuration_id required" }, 400);
     const { error } = await tdb("saved_configurations").delete().eq("id", configuration_id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // ==========================================================================
+  // PROP-026: Component image gallery — paste, drop, or pick from disk
+  // ==========================================================================
+
+  if (action === "imageUploadUrl") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id, fileName, contentType } = body;
+    if (!component_id || !fileName) return json({ error: "component_id and fileName required" }, 400);
+    const path = `component-images/${orgPrefix}${component_id}/${Date.now()}-${safeName(String(fileName))}`;
+    const { data, error } = await db.storage.from(DOC_BUCKET).createSignedUploadUrl(path);
+    if (error) return json({ error: error.message }, 500);
+    return json({ signedUrl: data.signedUrl, token: data.token, path });
+  }
+
+  if (action === "addComponentImage") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { component_id, storage_path, file_name, content_type } = body;
+    if (!component_id || !storage_path || !file_name) return json({ error: "component_id, storage_path, file_name required" }, 400);
+    const { data, error } = await tdb("component_images").insert({
+      component_id: String(component_id),
+      storage_path: String(storage_path).slice(0, 400),
+      file_name: String(file_name).slice(0, 200),
+      content_type: String(content_type ?? "image/png").slice(0, 100),
+      uploaded_by: session.uid || null,
+    }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true, id: data?.id });
+  }
+
+  if (action === "listComponentImages") {
+    const { component_id } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    const { data, error } = await tdb("component_images")
+      .select("id, storage_path, file_name, content_type, uploaded_at")
+      .eq("component_id", component_id)
+      .order("uploaded_at", { ascending: true });
+    if (error) return json({ error: error.message }, 500);
+    const images = await Promise.all((data ?? []).map(async (img: any) => {
+      const { data: signed } = await db.storage.from(DOC_BUCKET).createSignedUrl(img.storage_path, 60 * 60);
+      return { ...img, url: signed?.signedUrl ?? "" };
+    }));
+    return json({ images });
+  }
+
+  if (action === "deleteComponentImage") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { image_id } = body;
+    if (!image_id) return json({ error: "image_id required" }, 400);
+    const { data: img } = await tdb("component_images")
+      .select("storage_path").eq("id", image_id).maybeSingle();
+    if (img?.storage_path) {
+      await db.storage.from(DOC_BUCKET).remove([img.storage_path]);
+    }
+    const { error } = await tdb("component_images").delete().eq("id", image_id);
     if (error) return json({ error: error.message }, 400);
     return json({ ok: true });
   }

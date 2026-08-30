@@ -497,3 +497,49 @@ The data to reconstruct history exists in the DB (documents and materials are li
 - PROP-014 (Compliance–BOM Integration — test report evidence must be traceable to a specific component revision; this snapshot is the foundation for that traceability)
 
 **Status:** Raw idea
+
+---
+### Component Images — Paste, Drop, or Pick from Disk — 2026-08-30
+**One sentence:** Add a photo gallery to each component's detail panel, with Ctrl/Cmd+V clipboard paste as the primary upload method alongside file drop and file picker.
+
+**Problem it solves:**
+A part number and a name tell you what something is called. A photo tells you what it actually looks like — which connector type, which side the mounting holes are on, whether it is the version with or without the blue stripe. Right now there is no way to attach any visual reference to a component. Engineers working on compliance or assembly verification have to search part numbers in separate tabs or open spec PDFs just to confirm they are looking at the right part.
+
+Clipboard paste is the killer feature here: take a screenshot of a component in a datasheet (Cmd+Shift+4 on Mac), switch to the portal, and Cmd+V drops it straight into the component. No export, no file picker, no rename. This is how Notion, Linear, and Figma handle it — it should work here too.
+
+**What already exists that could be extended:**
+- Supabase Storage is already live (`documents` bucket used by PROP-021)
+- `uploadZone` widget already handles file-drop and file-picker UX
+- Edge function already handles binary uploads to Storage with org-scoped paths
+- `component_documents` table exists but is wrong for photos — it requires versioned document records (`document_versions`), which is unnecessary overhead for a visual reference image
+
+**MVP scope:**
+1. **New table `component_images`**: `id, organization_id, component_id, storage_path, file_name, content_type, uploaded_at, uploaded_by`. No versioning — images are add/delete only.
+2. **Storage bucket**: use a new `component-images` bucket (or a `component-images/` prefix in the existing bucket) with org-scoped paths: `{org_id}/{component_id}/{uuid}.{ext}`.
+3. **New API actions**: `uploadComponentImage` (accepts base64 data + filename + MIME type, uploads to Storage, inserts row), `listComponentImages` (returns signed URLs for all images on a component), `deleteComponentImage` (deletes from Storage and removes row).
+4. **Frontend — component detail panel**: Image gallery section below the existing fields. Shows thumbnails in a 3-column grid. Click thumbnail → lightbox full-size view. Below the grid: paste zone with instruction "Paste (Ctrl+V / Cmd+V) or drop an image here", plus a "Choose file" button as fallback.
+5. **Paste handler**: listen for `paste` event on the detail panel container. Check `event.clipboardData.items` for `image/*` MIME types. Convert the `DataTransferItem` to a Blob, read as base64, upload via `uploadComponentImage`. Show upload progress inline.
+6. **Client-side size limit**: warn and reject if image exceeds 8 MB before upload. No server-side resize needed for MVP.
+
+**Tables involved:**
+- `component_images` (new — migration 0016)
+- Supabase Storage: `component-images` bucket (new)
+
+**Effort estimate:** 6–8 hours
+- Migration + storage bucket: 0.5 h
+- Backend (3 actions): 2 h
+- Frontend gallery + paste handler + lightbox: 3.5–5 h
+
+**Risks:**
+- **Paste scope conflict:** A `paste` event listener on the panel could fire when the user pastes text into one of the panel's text inputs (name, description, notes). Must check that the paste event target is NOT an input/textarea before treating it as an image paste.
+- **Clipboard image format:** Screenshots from macOS are PNG blobs. Images copied from a browser are sometimes `image/png`, sometimes `image/webp`. Both work fine with base64 upload. The filename should default to `screenshot-{timestamp}.png` when no filename is available.
+- **Large files:** A retina screenshot can be 3–5 MB. 8 MB limit is generous enough for real use. If the user pastes a raw camera photo (20 MB+), the rejection message must be clear.
+- **Signed URL expiry:** Supabase signed URLs expire. Use a generous TTL (1 hour) for the gallery view, or make the bucket policy public-read (simpler for internal tooling where all authenticated users are trusted).
+- **PROP-012 multi-tenancy:** `organization_id` on `component_images`, path includes `{org_id}/` prefix in Storage. `tdb()` enforces org isolation on DB reads automatically.
+
+**Related PROPs:**
+- PROP-013 (PIS — `component_documents`, `component_materials` defined here; `component_images` follows the same tenant pattern)
+- PROP-021 (Component Document Lifecycle — the upload infrastructure and `uploadZone` widget is reused; images are distinct from compliance documents)
+- PROP-024 (Version History — version snapshots currently capture documents and materials; a future extension could include image references per revision)
+
+**Status:** Raw idea
