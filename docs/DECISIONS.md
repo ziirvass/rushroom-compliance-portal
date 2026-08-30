@@ -322,3 +322,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Added `role` as an explicit 5th parameter to `openComponentDetail(componentId, token, panel, nodeData, role)` and updated all 7 call sites to pass it through. The two external entry points (`ondblclick` handlers inside `bomTreeView`) pass the `role` that `bomTreeView` now receives as its second param; the five internal recursive refresh calls forward `role` from the function's own parameter.
 **Why:** `openComponentDetail` is a peer-level function inside the main app closure — the same scope level as `bomTreeView`, `statusOverviewView`, and `renderProduct`. It cannot close over `bomTreeView`'s local variables. The v153 fix incorrectly assumed nesting; this fix threads `role` as a value through the call chain instead, which works regardless of scope structure.
 **Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/ROADMAP.md, docs/DECISIONS.md
+
+---
+**Date:** 2026-08-30
+**Feature:** Bug fix — "Can't find variable: role" complete fix (v155)
+**Decision:** Added `role` as the 8th parameter to `renderBomTree` and updated its single call site inside `bomTreeView` to pass `role`. Combined with the v154 fix (role as 5th param on `openComponentDetail`), all three peer functions that reference `role` — `bomTreeView`, `renderBomTree`, `openComponentDetail` — now receive it explicitly. The full chain is: `renderProduct(role)` → `bomTreeView(token, role)` → `renderBomTree(..., role)` → `openComponentDetail(..., role)`.
+**Why:** All three functions are defined at the same scope level inside the main app closure. None can close over another's local variables. `role` must be threaded explicitly as a parameter through the entire call chain. The PROP-023 status edit block was the first code inside these functions to use `role`, which is why this was never caught before.
+**Files changed:** assets/app.js, index.html, CLAUDE.md, docs/SYSTEM_OVERVIEW.html, docs/ROADMAP.md, docs/DECISIONS.md

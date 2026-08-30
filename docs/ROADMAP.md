@@ -14,6 +14,7 @@ _Last updated: 2026-08-30 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Bug fix — "Can't find variable: role" complete fix** (`renderBomTree` is also a peer function lacking `role`; added as 8th param and updated its call site; all three peer functions — `bomTreeView`, `renderBomTree`, `openComponentDetail` — now receive `role` explicitly from `renderProduct`; cache v155) — 2026-08-30
 - **Bug fix — "Can't find variable: role" correct fix** (`openComponentDetail` is a peer function of `bomTreeView`, not nested — added `role` as explicit 5th param and updated all 7 call sites; v154 supersedes the incorrect v153 attempt) — 2026-08-30
 - **Bug fix — "Can't find variable: role" incorrect attempt** (v153 added role to `bomTreeView` param but `openComponentDetail` is not nested inside it so it had no effect) (`role` not passed into `bomTreeView`; `renderProduct(role)` called `bomTreeView(token)` without it; fixed by adding `role` as second param; cache v153) — 2026-08-30
 - **Bug fix — Component detail tables only showing first row** (all 5 tables in the component detail panel — Versions, Documents, Materials, Used In, Change Log — were silently showing only their first row; root cause: `el("tbody", {}, ...rows)` spread rows as positional args but `el(tag, attrs, kids)` only reads the 3rd param; fix: remove spread so arrays pass directly; cache v152) — 2026-08-30
