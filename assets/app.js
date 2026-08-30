@@ -3581,7 +3581,7 @@
 
       const row = el("div", {
         style: "display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0.6rem;user-select:none",
-        ondblclick: (ev) => { ev.stopPropagation(); openComponentDetail(comp.id, token, detailPanel, comp); },
+        ondblclick: (ev) => { ev.stopPropagation(); openComponentDetail(comp.id, token, detailPanel, comp, role); },
       }, [
         expandBtn,
         el("div", { style: "flex:1;min-width:0;overflow:hidden" }, [
@@ -3760,7 +3760,7 @@
           style: `display:grid;grid-template-columns:6rem 1fr 4rem 7rem 12rem;gap:0.5rem;align-items:center;padding:0.3rem 0.5rem;border-left:3px solid ${isFamily ? "#2fa564" : "transparent"};border-radius:3px;margin-bottom:1px;cursor:default`,
           onmouseenter: (ev) => { ev.currentTarget.style.background = "var(--bg-2,rgba(0,0,0,0.03))"; },
           onmouseleave: (ev) => { ev.currentTarget.style.background = ""; },
-          ondblclick: (ev) => { ev.stopPropagation(); openComponentDetail(n.id, token, detailPanel, n); },
+          ondblclick: (ev) => { ev.stopPropagation(); openComponentDetail(n.id, token, detailPanel, n, role); },
         }, [
           el("span", { style: "font-family:monospace;font-size:0.78rem;font-weight:600;color:var(--muted,#8b93a1)" }, posNum),
           compCell,
@@ -4049,7 +4049,7 @@
   }
 
   // --- Component detail panel (slide-in below the tree) ----------------------
-  async function openComponentDetail(componentId, token, panel, nodeData) {
+  async function openComponentDetail(componentId, token, panel, nodeData, role) {
     panel.style.display = "";
     panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
     panel.replaceChildren(el("div", { class: "loading" }, "Loading…"));
@@ -4102,7 +4102,7 @@
         btn.disabled = true; btn.textContent = "…";
         try {
           await API.post(token, "bumpComponentVersion", { component_id: componentId, spec_summary: summary || null });
-          await openComponentDetail(componentId, token, panel, nodeData);
+          await openComponentDetail(componentId, token, panel, nodeData, role);
         } catch (ex) {
           bumpErr.textContent = ex.message;
           btn.disabled = false; btn.textContent = "Bump version";
@@ -4185,7 +4185,7 @@
                   try {
                     await API.post(token, "addComponentDocument", { component_id: componentId, document_version_id: dvSel.value, category: catSel.value, label: labelInp.value.trim() || null, is_supplier_visible: supVis.checked });
                     overlay.remove();
-                    openComponentDetail(componentId, token, panel, nodeData);
+                    openComponentDetail(componentId, token, panel, nodeData, role);
                   } catch (ex) { statusEl.textContent = ex.message; ev.target.disabled = false; }
                 } }, "Link"),
               ]),
@@ -4243,7 +4243,7 @@
                     label: labelInp.value.trim() || null, is_supplier_visible: supVis.checked,
                   });
                   overlay.remove();
-                  openComponentDetail(componentId, token, panel, nodeData);
+                  openComponentDetail(componentId, token, panel, nodeData, role);
                 } catch (ex) {
                   statusEl.textContent = ex.message;
                   ev.target.disabled = false;
@@ -4438,7 +4438,7 @@
               ].filter(Boolean)),
               el("button", { class: "btn btn-sm", type: "button", style: "padding:1px 5px;font-size:0.7rem;color:#e05454;border-color:#e0545440", onclick: async () => {
                 if (!confirm(`Delete configuration "${cfg.name}"?`)) return;
-                try { await API.post(token, "deleteConfiguration", { configuration_id: cfg.id }); openComponentDetail(componentId, token, panel, nodeData); } catch (ex) { alert(ex.message); }
+                try { await API.post(token, "deleteConfiguration", { configuration_id: cfg.id }); openComponentDetail(componentId, token, panel, nodeData, role); } catch (ex) { alert(ex.message); }
               } }, "Delete"),
             ])))
           : el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1)" }, "No saved configurations yet. Configurations will be imported from the order system (PROP-018).");
@@ -4490,7 +4490,7 @@
               lifecycle_status: statusDropdown.value,
               replacement_note: statusDropdown.value === "replaced" ? replNoteArea.value.trim() || null : null,
               flag_reason:      statusDropdown.value === "flagged"  ? flagReasonArea.value.trim() || null : null,
-            });
+            }, role);
           } catch (ex) {
             statusSaveErr.textContent = ex.message;
             statusSaveBtn.disabled = false; statusSaveBtn.textContent = "Save status";
