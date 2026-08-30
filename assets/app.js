@@ -3436,7 +3436,7 @@
   }
 
   // --- BOM tree view ---------------------------------------------------------
-  async function bomTreeView(token) {
+  async function bomTreeView(token, role) {
     const wrap = el("div", { class: "pis-tree-wrap" });
     const detailPanel = el("div", { class: "pis-detail-panel", style: "display:none;margin-top:1rem;padding:1rem;background:var(--bg-2,#f5f5f5);border-radius:6px" });
 
@@ -4797,7 +4797,7 @@
   async function renderProduct(role, mount) {
     const token = API.getToken();
     mount.replaceChildren(subTabs("product", [
-      { id: "bom", label: "BOM Tree", icon: "layers", build: () => { const m = el("div", {}); bomTreeView(token).then((v) => m.replaceChildren(v)); return m; } },
+      { id: "bom", label: "BOM Tree", icon: "layers", build: () => { const m = el("div", {}); bomTreeView(token, role).then((v) => m.replaceChildren(v)); return m; } },
       { id: "overview", label: "Status Overview", icon: "eye", build: () => { const m = el("div", {}); statusOverviewView(token).then((v) => m.replaceChildren(v)); return m; } },
     ]));
   }
