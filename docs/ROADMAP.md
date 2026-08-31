@@ -15,6 +15,7 @@ _Last updated: 2026-08-30 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Inline photo thumbnails on BOM Node list rows** (`listComponentThumbnails` action; 36×36 thumbnail per row + 200×200 hover preview tooltip; viewport-aware positioning; cache v162) — 2026-08-31
 - **Photos in New BOM Node modal** (same paste/drop/pick as detail panel; images queued locally then uploaded after component ID returned; cache v161) — 2026-08-31
 - **Bug fix — BOM Node tree arrows cannot collapse** (`display !== ""` treated default-display as "not open"; fixed to `display !== "none"`; cache v160) — 2026-08-31
 - **PROP-026 Component Images — Paste, Drop, or Pick from Disk** (component_images table; imageUploadUrl/addComponentImage/listComponentImages/deleteComponentImage; drop zone + paste handler + thumbnail grid with lightbox; cache v159) — 2026-08-30

@@ -371,3 +371,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Queue images as `File` objects with local `createObjectURL` previews during the modal; upload them to Supabase Storage only after `addComponent` returns the new component ID. Upload failures are swallowed (best-effort) — the component was already created successfully.
 **Why:** The signed upload URL requires a `component_id`, which doesn't exist until after creation. Queueing avoids a two-step UX while keeping the upload flow identical to the detail panel (`imageUploadUrl` → XHR PUT → `addComponentImage`). No new API actions needed.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Inline photo thumbnails on BOM Node list rows with hover preview
+**Decision:** One `listComponentThumbnails` request fetches the first image per component for the whole org, rather than N per-component requests.
+**Why:** Fetching images individually per row would fire N concurrent API calls on every list load — one org-wide query deduplicates in JS and generates signed URLs only for components that have images. A single shared tooltip div (pointer-events:none) is repositioned on mouseenter rather than creating one tooltip element per row.
+**Files changed:** supabase/functions/portal-api/index.ts, assets/app.js, index.html, CLAUDE.md
