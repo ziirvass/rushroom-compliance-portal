@@ -448,3 +448,17 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Type is the sole authority on tab placement and on whether a node can have children. part/raw_material/spare_part are always leaf nodes; sub_assembly/finished_good are always assembly containers. has_children plays no role in either decision.
 **Why:** Allowing has_children to drive tab placement created a confusing mid-interaction jump (a part moved from Components to Assemblies the moment its first child was added). Restricting +child/+sib to assembly types enforces the intended BOM semantics in the UI: the user declares what something IS via the type field, and the system respects that declaration consistently.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Fix — duplicate root row in BOM tree expansion (v173)
+**Decision:** `renderBomTree`'s `buildRows()` walk starts from the root's children (not the root itself), numbering them 1, 2, 3… with `parentNode` set to the root node.
+**Why:** The assembly root is already rendered as the list-row header; starting the DFS walk at the root caused it to appear a second time as position "1" inside its own expanded tree. Setting `parentNode = nodeMap[rootId]` for depth-0 children ensures +sib on those children correctly targets the parent assembly.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Fix — assembly types visible in both Components and Assemblies tabs (v174)
+**Decision:** `groupFiltered()` pushes `sub_assembly` and `finished_good` nodes into both `grouped.assemblies` and `grouped.components`, so they appear in both tabs simultaneously.
+**Why:** A sub-assembly is still a component — it has a part number, lifecycle status, images, and a detail panel. Routing it exclusively to Assemblies made it invisible as a standalone record in the flat Components list. The correct model: Components tab is a universal flat list of every non-product-family node; Assemblies tab overlaps for assembly types to show the BOM tree view.
+**Files changed:** assets/app.js, index.html, CLAUDE.md

@@ -15,6 +15,8 @@ _Last updated: 2026-08-31 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Fix — assembly types visible in both Components and Assemblies tabs** (sub_assembly and finished_good now appear in flat Components list AND in Assemblies BOM tree; groupFiltered() pushes to both; no migration; cache v174) — 2026-08-31
+- **Fix — duplicate root row in BOM tree expansion** (renderBomTree buildRows() walk starts from root's children, not the root itself; parentNode set to root so +sib on depth-0 nodes targets the parent assembly; cache v173) — 2026-08-31
 - **Fix — +child/+sib restricted to assembly types; type-only tab routing** (part/raw_material/spare_part are leaf nodes — no +child or +sib anywhere; sub_assembly/finished_good always route to Assemblies tab; has_children no longer drives tab placement; v170–v172) — 2026-08-31
 - **Inline type editor in component detail panel** (Type dropdown + Save button in detail panel; calls updateComponent; panel refreshes on save; no new API action; cache v169) — 2026-08-31
 - **Bug fix — deleteComponent blocked by component_images FK** (deleteComponent now fetches all component_images rows, removes storage objects, then deletes DB rows before the component; no migration) — 2026-08-31
