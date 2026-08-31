@@ -392,3 +392,24 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Inline the lightbox overlay directly in the thumbnail's `onclick` handler rather than extracting the `openLightbox` helper from `openComponentDetail`.
 **Why:** `openLightbox` is scoped inside `openComponentDetail` and extracting it would widen its scope for a single call site. The lightbox is three lines — duplicating it inline is the right call at this scale. `stopPropagation` prevents the row's `ondblclick` from firing; tooltip is hidden immediately on click to prevent visual overlap.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** PROP-027 — Shared Component Awareness (BOM Tree Refresh & Usage Indicators)
+**Decision:** Aggregate parent counts in JS rather than a Postgres GROUP BY via RPC; re-fetch all expanded BOM trees in `refreshTree()` rather than targeted invalidation.
+**Why:** JS aggregation over `bom_edges` is simpler (no migration, no RPC function) and sufficient at Rushroom's scale. Re-fetching all expanded trees on refresh is O(N parallel getBom calls) but N is typically 0–3 in practice; it ensures no stale data without complex cache-invalidation bookkeeping. A targeted "invalidate this root only" approach would require threading `expandedTrees` through the entire `openAddChildModal` call chain — not worth the complexity for now.
+**Files changed:** supabase/functions/portal-api/index.ts, assets/app.js, index.html, CLAUDE.md, docs/IDEAS.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Fix — input fields match button height everywhere
+**Decision:** Single base `.up-text` CSS rule (`min-height:44px; box-sizing:border-box; padding:0.5rem 0.75rem`) rather than per-element inline height fixes.
+**Why:** The root cause was structural — `.btn` sets `min-height:44px` globally but `.up-text` had zero base CSS. One rule fixes all 9 occurrences simultaneously. Per-element fixes would be brittle and easy to miss on new inputs. Box-sizing included because inputs default to content-box, which causes width surprises when padding is added.
+**Files changed:** assets/styles.css, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Multi-image lightbox navigation in component image gallery
+**Decision:** Refactored `openLightbox(url)` → `openLightbox(images[], startIndex)` rather than a separate navigator wrapper. Keyboard events cleaned up via `removeEventListener` on close.
+**Why:** The array-based signature is the minimal change that supports N images — no second overlay, no separate state object. Keyboard listener is attached to `document` and explicitly removed on close (both Escape and backdrop click) to avoid stale handlers accumulating across opens. Arrows are omitted entirely when `images.length === 1` so the single-image case is visually clean.
+**Files changed:** assets/app.js, index.html, CLAUDE.md

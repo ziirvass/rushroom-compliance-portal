@@ -1,5 +1,5 @@
 # Rushroom Compliance Portal — Roadmap
-_Last updated: 2026-08-30 · Auto-maintained by /ship_
+_Last updated: 2026-08-31 · Auto-maintained by /ship_
 
 ## Now — In Progress
 - PROP-021 Component Document Lifecycle — Layer 1 shipped (upload & link from component panel); Layers 2–4 (new revision, AI diff, data extraction) pending; PROP-014 must be reviewed before Layer 2 design
@@ -15,6 +15,9 @@ _Last updated: 2026-08-30 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Multi-image lightbox navigation in component gallery** (‹ › buttons + ← → keyboard; image counter "N / total"; openLightbox now takes images[] + startIndex; cache v167) — 2026-08-31
+- **Fix — input fields match button height everywhere** (base `.up-text` CSS rule: min-height:44px, box-sizing:border-box; fixes 9 input+button rows; focus ring added; cache v166) — 2026-08-31
+- **PROP-027 Shared Component Awareness** (listParentCounts action; refreshTree re-fetches expanded BOM trees after structural change; ↗ N badge on shared components; link-existing warning; cache v165) — 2026-08-31
 - **Click BOM list thumbnail to open full lightbox** (same overlay as detail panel; click-to-dismiss; cache v164) — 2026-08-31
 - **Bug fix — BOM thumbnail hover tooltip invisible** (`position:fixed` trapped by transformed ancestor; moved tooltip to `document.body` with stable id; z-index 9999; cache v163) — 2026-08-31
 - **Inline photo thumbnails on BOM Node list rows** (`listComponentThumbnails` action; 36×36 thumbnail per row + 200×200 hover preview tooltip; viewport-aware positioning; cache v162) — 2026-08-31
