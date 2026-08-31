@@ -4586,9 +4586,45 @@
       const imgStatus = el("span", { style: "font-size:0.78rem;color:#e05454;min-height:1.1em;display:block" }, "");
       const imgGrid = el("div", { style: "display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.5rem;min-height:2rem" });
 
-      function openLightbox(url) {
-        const over = el("div", { style: "position:fixed;inset:0;background:#000c;z-index:3000;display:flex;align-items:center;justify-content:center;cursor:pointer", onclick: () => over.remove() });
-        over.append(el("img", { src: url, style: "max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 4px 32px #0008" }));
+      function openLightbox(images, startIndex) {
+        let idx = startIndex ?? 0;
+        const multi = images.length > 1;
+
+        const imgEl = el("img", {
+          style: "max-width:min(90vw,860px);max-height:82vh;border-radius:6px;box-shadow:0 4px 32px #0008;display:block;object-fit:contain",
+          onclick: (ev) => ev.stopPropagation(),
+        });
+        const counter = el("div", {
+          style: "color:rgba(255,255,255,0.6);font-size:0.78rem;margin-top:0.5rem;text-align:center;min-height:1.1em",
+        });
+
+        function show(i) {
+          idx = ((i % images.length) + images.length) % images.length;
+          imgEl.src = images[idx].url;
+          counter.textContent = multi ? `${idx + 1} / ${images.length}` : "";
+        }
+
+        const navBtnStyle = "background:#fff2;border:1px solid #fff3;border-radius:50%;width:42px;height:42px;color:#fff;font-size:1.4rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1;padding:0";
+        const prevBtn = multi ? el("button", { type: "button", style: navBtnStyle, title: "Previous (←)", onclick: (ev) => { ev.stopPropagation(); show(idx - 1); } }, "‹") : null;
+        const nextBtn = multi ? el("button", { type: "button", style: navBtnStyle, title: "Next (→)",     onclick: (ev) => { ev.stopPropagation(); show(idx + 1); } }, "›") : null;
+
+        function onKey(ev) {
+          if (ev.key === "ArrowLeft"  || ev.key === "ArrowUp")    { ev.preventDefault(); if (multi) show(idx - 1); }
+          if (ev.key === "ArrowRight" || ev.key === "ArrowDown")   { ev.preventDefault(); if (multi) show(idx + 1); }
+          if (ev.key === "Escape") close();
+        }
+        function close() { over.remove(); document.removeEventListener("keydown", onKey); }
+
+        const over = el("div", {
+          style: "position:fixed;inset:0;background:#000c;z-index:3000;display:flex;flex-direction:column;align-items:center;justify-content:center",
+          onclick: close,
+        });
+        over.append(
+          el("div", { style: "display:flex;align-items:center;gap:1rem" }, [prevBtn, imgEl, nextBtn].filter(Boolean)),
+          counter,
+        );
+        document.addEventListener("keydown", onKey);
+        show(idx);
         document.body.append(over);
       }
 
@@ -4597,9 +4633,9 @@
           imgGrid.replaceChildren(el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1)" }, "No images yet."));
           return;
         }
-        imgGrid.replaceChildren(...images.map((img) => {
+        imgGrid.replaceChildren(...images.map((img, i) => {
           const wrap = el("div", { style: "position:relative;display:inline-block" });
-          const thumb = el("img", { src: img.url, style: "width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid var(--border,#e2e8f0);cursor:pointer;display:block", title: img.file_name, onclick: () => openLightbox(img.url) });
+          const thumb = el("img", { src: img.url, style: "width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid var(--border,#e2e8f0);cursor:pointer;display:block", title: img.file_name, onclick: () => openLightbox(images, i) });
           const delBtn = el("button", { type: "button", style: "position:absolute;top:2px;right:2px;background:#000a;border:none;border-radius:50%;width:18px;height:18px;color:#fff;font-size:0.55rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1", onclick: async (ev) => {
             ev.stopPropagation();
             if (!confirm(`Delete "${img.file_name}"?`)) return;
