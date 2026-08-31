@@ -15,6 +15,7 @@ _Last updated: 2026-08-30 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Click BOM list thumbnail to open full lightbox** (same overlay as detail panel; click-to-dismiss; cache v164) — 2026-08-31
 - **Bug fix — BOM thumbnail hover tooltip invisible** (`position:fixed` trapped by transformed ancestor; moved tooltip to `document.body` with stable id; z-index 9999; cache v163) — 2026-08-31
 - **Inline photo thumbnails on BOM Node list rows** (`listComponentThumbnails` action; 36×36 thumbnail per row + 200×200 hover preview tooltip; viewport-aware positioning; cache v162) — 2026-08-31
 - **Photos in New BOM Node modal** (same paste/drop/pick as detail panel; images queued locally then uploaded after component ID returned; cache v161) — 2026-08-31

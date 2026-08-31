@@ -385,3 +385,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Moved the tooltip `<div>` from `wrap` to `document.body`; assigned `id="bom-thumb-tooltip"` so re-renders remove the previous element before creating a new one.
 **Why:** `position:fixed` is only viewport-relative when no ancestor has a CSS `transform`, `filter`, `will-change`, or `perspective`. Any such ancestor creates a new containing block that traps the fixed element inside it. Appending to `document.body` (which has no such ancestor) guarantees true viewport positioning regardless of the page's CSS.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Click BOM list thumbnail to open full lightbox
+**Decision:** Inline the lightbox overlay directly in the thumbnail's `onclick` handler rather than extracting the `openLightbox` helper from `openComponentDetail`.
+**Why:** `openLightbox` is scoped inside `openComponentDetail` and extracting it would widen its scope for a single call site. The lightbox is three lines — duplicating it inline is the right call at this scale. `stopPropagation` prevents the row's `ondblclick` from firing; tooltip is hidden immediately on click to prevent visual overlap.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
