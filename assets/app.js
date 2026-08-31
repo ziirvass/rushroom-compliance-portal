@@ -3500,7 +3500,7 @@
       const grouped = { components: [], assemblies: [], dynamic: [] };
       filtered.forEach((c) => {
         if (c.type === "product_family") grouped.dynamic.push(c);
-        else if (c.type === "sub_assembly" || c.type === "finished_good" || c.has_children) grouped.assemblies.push(c);
+        else if (c.type === "sub_assembly" || c.type === "finished_good") grouped.assemblies.push(c);
         else grouped.components.push(c);
       });
       return grouped;
