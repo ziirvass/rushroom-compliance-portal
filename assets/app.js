@@ -3500,7 +3500,7 @@
       const grouped = { components: [], assemblies: [], dynamic: [] };
       filtered.forEach((c) => {
         if (c.type === "product_family") grouped.dynamic.push(c);
-        else if (c.has_children) grouped.assemblies.push(c);
+        else if (c.type === "sub_assembly" || c.type === "finished_good" || c.has_children) grouped.assemblies.push(c);
         else grouped.components.push(c);
       });
       return grouped;
@@ -3659,6 +3659,12 @@
         ].filter(Boolean)),
         el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${tfg}18;color:${tfg};white-space:nowrap;flex-shrink:0` }, comp.type || ""),
         comp.lifecycle_status ? el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${sfg}18;color:${sfg};white-space:nowrap;flex-shrink:0` }, comp.lifecycle_status) : null,
+        role === "rushroom" && comp.type !== "product_family" ? el("button", {
+          class: "btn btn-sm", type: "button",
+          style: "padding:0 6px;font-size:0.72rem;flex-shrink:0",
+          title: "Add child",
+          onclick: (ev) => { ev.stopPropagation(); openAddChildModal(comp, allComponents, token, refreshTree, comp.id); },
+        }, "+child") : null,
         el("button", {
           class: "btn btn-sm", type: "button",
           style: "color:#e05454;border-color:#e0545440;padding:0 7px;font-size:0.9rem;font-weight:700;line-height:1;flex-shrink:0",
