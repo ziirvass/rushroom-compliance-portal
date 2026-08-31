@@ -413,3 +413,24 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Refactored `openLightbox(url)` → `openLightbox(images[], startIndex)` rather than a separate navigator wrapper. Keyboard events cleaned up via `removeEventListener` on close.
 **Why:** The array-based signature is the minimal change that supports N images — no second overlay, no separate state object. Keyboard listener is attached to `document` and explicitly removed on close (both Escape and backdrop click) to avoid stale handlers accumulating across opens. Arrows are omitted entirely when `images.length === 1` so the single-image case is visually clean.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Multi-image lightbox in BOM list row thumbnails
+**Decision:** Inline async fetch + duplicate multi-image lightbox code in `renderRootRow` onclick, rather than hoisting `openLightbox` to a shared scope.
+**Why:** `openLightbox` is defined inside `openComponentDetail` — not accessible from `bomTreeView`/`renderRootRow`. Hoisting it to module scope would be a larger refactor with no other benefit yet. At this scale, duplicating ~30 lines of well-understood lightbox code is the safer, localised change; a future refactor can extract it when a third call site appears.
+**Files changed:** assets/app.js, assets/config.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Bug fix — deleteComponent blocked by component_images FK
+**Decision:** Application-level cascade (fetch images → remove storage objects → delete DB rows) in `deleteComponent`, rather than adding `ON DELETE CASCADE` to the FK in a new migration.
+**Why:** A DB-level cascade deletes the `component_images` rows but leaves the storage objects orphaned — the bucket accumulates unreachable files indefinitely. The application-level approach mirrors what `deleteComponentImage` already does for individual images. No schema change needed; the fix is one deploy of the edge function.
+**Files changed:** supabase/functions/portal-api/index.ts
+
+---
+**Date:** 2026-08-31
+**Feature:** Inline type editor in component detail panel
+**Decision:** Reuse the existing `updateComponent` action (which already accepts `type`) rather than adding a dedicated `setComponentType` action. Mirror the lifecycle status editor pattern (dropdown + save button in the panel).
+**Why:** `updateComponent` already validates the six valid type values server-side. A dedicated action would be dead weight. The status editor is the established pattern for inline field editing in the detail panel; mirroring it keeps the UI consistent and the code predictable.
+**Files changed:** assets/app.js, index.html, CLAUDE.md

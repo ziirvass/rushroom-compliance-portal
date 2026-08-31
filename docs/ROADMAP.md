@@ -15,6 +15,9 @@ _Last updated: 2026-08-31 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Inline type editor in component detail panel** (Type dropdown + Save button in detail panel; calls updateComponent; panel refreshes on save; no new API action; cache v169) — 2026-08-31
+- **Bug fix — deleteComponent blocked by component_images FK** (deleteComponent now fetches all component_images rows, removes storage objects, then deletes DB rows before the component; no migration) — 2026-08-31
+- **Multi-image lightbox in BOM list row thumbnails** (async fetch of listComponentImages on thumbnail click; same ‹ › nav, keyboard, counter as detail panel; fallback to single image on error; cache v168) — 2026-08-31
 - **Multi-image lightbox navigation in component gallery** (‹ › buttons + ← → keyboard; image counter "N / total"; openLightbox now takes images[] + startIndex; cache v167) — 2026-08-31
 - **Fix — input fields match button height everywhere** (base `.up-text` CSS rule: min-height:44px, box-sizing:border-box; fixes 9 input+button rows; focus ring added; cache v166) — 2026-08-31
 - **PROP-027 Shared Component Awareness** (listParentCounts action; refreshTree re-fetches expanded BOM trees after structural change; ↗ N badge on shared components; link-existing warning; cache v165) — 2026-08-31

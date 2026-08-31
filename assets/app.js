@@ -4793,12 +4793,41 @@
         ]);
       }
 
+      // --- Type edit block (rushroom only) -------------------------------------
+      let typeSection = null;
+      if (role === "rushroom") {
+        const TYPE_OPTS = [["part", "Part"], ["raw_material", "Raw Material"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"], ["spare_part", "Spare Part"], ["product_family", "Dynamic BOM"]];
+        const currentType = nodeData?.type || "part";
+        const typeDropdown = el("select", { class: "up-text", style: "padding:0.3rem 0.5rem;font-size:0.82rem;border-radius:4px;border:1px solid var(--border,#e2e8f0);min-width:9rem" },
+          TYPE_OPTS.map(([v, l]) => el("option", { value: v, selected: v === currentType ? "selected" : null }, l))
+        );
+        const typeSaveErr = el("span", { style: "font-size:0.78rem;color:#e05454" }, "");
+        const typeSaveBtn = el("button", { class: "btn btn-sm btn-primary", type: "button" }, "Save type");
+        typeSaveBtn.onclick = async () => {
+          typeSaveBtn.disabled = true; typeSaveBtn.textContent = "Saving…"; typeSaveErr.textContent = "";
+          try {
+            await API.post(token, "updateComponent", { component_id: componentId, type: typeDropdown.value });
+            openComponentDetail(componentId, token, panel, { ...nodeData, type: typeDropdown.value }, role);
+          } catch (ex) {
+            typeSaveErr.textContent = ex.message;
+            typeSaveBtn.disabled = false; typeSaveBtn.textContent = "Save type";
+          }
+        };
+        typeSection = el("div", { style: "margin-bottom:1rem;padding:0.75rem;border:1px solid var(--border,#e2e8f0);border-radius:6px" }, [
+          el("div", { style: "display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem" }, [
+            el("span", { style: "font-size:0.82rem;font-weight:600;white-space:nowrap" }, "Type"),
+            typeDropdown, typeSaveBtn, typeSaveErr,
+          ]),
+        ]);
+      }
+
       panel.replaceChildren(
         el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem" }, [
           el("strong", {}, `Component: ${componentId.slice(0, 8)}…`),
           el("button", { class: "btn btn-sm", type: "button", onclick: () => { panel.style.display = "none"; } }, "Close"),
         ]),
         ...(statusSection ? [statusSection] : []),
+        ...(typeSection ? [typeSection] : []),
         ...(configSection ? [configSection] : []),
         versionsSection, usedInSection, docsSection, matsSection, imagesSection, changelogSection,
       );

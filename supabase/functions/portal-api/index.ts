@@ -3821,6 +3821,14 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     await tdb("component_materials").delete().eq("component_id", component_id);
     await tdb("bom_component_versions").delete().eq("component_id", component_id);
 
+    // Delete component images: remove storage objects then DB rows
+    const { data: imgs } = await tdb("component_images").select("storage_path").eq("component_id", component_id);
+    if (imgs?.length) {
+      const paths = (imgs as Array<{ storage_path: string }>).map((i) => i.storage_path).filter(Boolean);
+      if (paths.length) await db.storage.from(DOC_BUCKET).remove(paths);
+      await tdb("component_images").delete().eq("component_id", component_id);
+    }
+
     // Delete all BOM edges where this component is parent or child (both directions)
     await tdb("bom_edges").delete().eq("parent_id", component_id);
     await tdb("bom_edges").delete().eq("child_id", component_id);
