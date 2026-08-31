@@ -543,3 +543,50 @@ Clipboard paste is the killer feature here: take a screenshot of a component in 
 - PROP-024 (Version History — version snapshots currently capture documents and materials; a future extension could include image references per revision)
 
 **Status:** Raw idea
+
+---
+### Shared Component Awareness — BOM Tree Refresh & Usage Indicators — 2026-08-31
+**One sentence:** After linking an existing component as a child, immediately reflect it in the BOM tree and show a "used in N assemblies" badge on shared components so their multi-context nature is always visible.
+
+**Problem it solves:**
+Two friction points emerge when a component appears in more than one place in the hierarchy:
+
+1. **Stale tree display** — after using the "Link existing" tab to add CONFIRMAT as a child of Rail (1.2.1.1), the Left Side Panel tree does not update. The new node at 1.2.1.1.1 is invisible until the user reloads the page or manually collapses and re-expands the tree. The data is correct in the DB but the rendered tree is stale.
+
+2. **Silent sharing** — CONFIRMAT at 1.1 and CONFIRMAT at 1.2.1.1.1 are the same record. Editing CONFIRMAT (name, materials, lifecycle status, documents) affects both positions. Nothing in the tree communicates this — the row looks identical to a component used in only one place. A user who doesn't know the data model will be surprised when a change they made to a "local" component propagates elsewhere.
+
+Both issues are specific to the "link existing" flow, which creates a new `bom_edges` row pointing at an already-existing `bom_components` row. The "create new" flow does not have these problems.
+
+**What already exists that could be extended:**
+- `listParentsOf` action already fetches all assemblies that use a given component — used in the "Used in" section of the detail panel
+- `refreshTree()` in `bomTreeView` already re-fetches `listComponents` + re-renders all expanded roots — just not called after `addBomEdge` succeeds
+- `thumbMap` pattern in `bomTreeView` (a per-component map fetched once alongside `listComponents`) can be extended to carry a `parentCountMap`
+
+**MVP scope:**
+1. **Auto-refresh tree after `addBomEdge`** — in the frontend modal success handler, call `refreshTree()` (already exists). This re-fetches `listComponents` (which now returns `has_children=true` for the parent) and re-renders expanded roots. Cost: ~5 lines of code.
+2. **New API action `listParentCounts`** — single query: `SELECT child_id AS component_id, COUNT(DISTINCT parent_id) AS parent_count FROM bom_edges WHERE organization_id = $org GROUP BY child_id HAVING COUNT(DISTINCT parent_id) > 1`. Returns `{component_id, parent_count}[]` — only components with more than one parent. Called alongside `listComponents` in `refreshTree()`.
+3. **"Used in N assemblies" badge in tree rows** — in `renderRootRow`, if `parentCountMap[comp.id] > 1`, append a small inline chip after the component name: `↗ N` (styled like the existing `×qty` badge). Tooltip: "This component is used in N assemblies — changes affect all of them."
+4. **Warning in "Link existing" tab** — after the user selects a component from the search dropdown in the add-child modal, if `parentCountMap[selected.id]` exists (> 1), show an inline callout: "⚠ Already used in [N] other assemblies. Linking it here means structural changes propagate everywhere it is used."
+
+**Tables involved:**
+- `bom_edges` (read-only — one new GROUP BY query)
+- No new tables
+
+**Effort estimate:** 3–5 hours
+- `listParentCounts` backend action: 0.5 h
+- Auto-refresh call in modal success handler: 0.5 h
+- Badge rendering in `renderRootRow`: 1 h
+- Warning in link-existing UI: 1–2 h
+
+**Risks:**
+- **`refreshTree()` cost:** Re-rendering re-fetches `listComponents` + `listComponentThumbnails` + re-renders all open expanded trees. On a BOM with many open sub-trees this can feel slow. For MVP this is acceptable; a targeted "refresh this root" would be the optimisation path later.
+- **`listParentCounts` on large BOMs:** A single aggregation query is O(edges) — fast. Not a concern at Rushroom's scale.
+- **DAG cycles:** The existing cycle-prevention trigger (if any) guards against infinite loops; this feature only reads edges, so no new cycle risk.
+- **"Phantom" shared components:** A component linked as a child in five assemblies but with no structural significance (a generic M3 screw) will show "↗ 5" prominently. That may be noisy. The badge should be subtle (small, low-contrast) so it informs without alarming.
+
+**Related PROPs:**
+- PROP-013 (bom_edges, `listParentsOf` defined)
+- PROP-022 (lazy tree, `listComponents`, `refreshTree` pattern)
+- PROP-025 (has_children drives tab routing — after refresh, a newly promoted Assembly node correctly moves to the Assemblies tab)
+
+**Status:** Raw idea

@@ -3449,6 +3449,7 @@
     let activeTab = "components";
     let allComponents = [];
     let thumbMap = {}; // component_id → signed thumbnail URL
+    let parentCountMap = {}; // component_id → number of distinct parent assemblies (only entries with count > 1)
     let searchQuery = "";
     const PAGE_SIZE = 50;
     const tabPageShown = { components: PAGE_SIZE, assemblies: PAGE_SIZE, dynamic: PAGE_SIZE };
@@ -3624,6 +3625,10 @@
         el("div", { style: "flex:1;min-width:0;overflow:hidden" }, [
           el("span", { style: "font-weight:600;font-size:0.875rem" }, comp.name || "—"),
           comp.part_number ? el("span", { style: "font-size:0.72rem;color:var(--muted,#8b93a1);margin-left:0.4rem;font-family:monospace" }, comp.part_number) : null,
+          parentCountMap[comp.id] ? el("span", {
+            title: `Used in ${parentCountMap[comp.id]} assemblies — changes propagate to all of them`,
+            style: "margin-left:6px;font-size:0.66rem;color:var(--muted,#94a3b8);cursor:default;white-space:nowrap;vertical-align:middle",
+          }, `↗ ${parentCountMap[comp.id]}`) : null,
         ].filter(Boolean)),
         el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${tfg}18;color:${tfg};white-space:nowrap;flex-shrink:0` }, comp.type || ""),
         comp.lifecycle_status ? el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${sfg}18;color:${sfg};white-space:nowrap;flex-shrink:0` }, comp.lifecycle_status) : null,
@@ -3675,11 +3680,14 @@
     async function refreshTree() {
       treeArea.replaceChildren(el("div", { class: "loading" }, "Loading BOM…"));
       try {
-        const [{ components }, thumbRes] = await Promise.all([
+        const expandedIds = Object.keys(expandedTrees).filter((id) => expandedTrees[id] !== "loading" && expandedTrees[id] !== "error");
+        const [{ components }, thumbRes, pcRes] = await Promise.all([
           API.post(token, "listComponents", {}),
           API.post(token, "listComponentThumbnails", {}).catch(() => ({ thumbnails: [] })),
+          API.post(token, "listParentCounts", {}).catch(() => ({ parentCounts: [] })),
         ]);
         thumbMap = Object.fromEntries((thumbRes.thumbnails || []).map((t) => [t.component_id, t.url]));
+        parentCountMap = Object.fromEntries((pcRes.parentCounts || []).map((p) => [p.component_id, p.parent_count]));
         if (!components.length) {
           tabBarEl.replaceChildren();
           detailPanel.style.display = "none";
@@ -3692,6 +3700,12 @@
         allComponents = components;
         const idSet = new Set(components.map((c) => c.id));
         Object.keys(expandedTrees).forEach((k) => { if (!idSet.has(k)) delete expandedTrees[k]; });
+        if (expandedIds.length) {
+          await Promise.all(expandedIds.filter((id) => idSet.has(id)).map(async (id) => {
+            try { expandedTrees[id] = await API.post(token, "getBom", { root_component_id: id, max_depth: 10 }); }
+            catch { expandedTrees[id] = "error"; }
+          }));
+        }
         renderAll();
       } catch (ex) {
         treeArea.replaceChildren(el("div", { class: "error" }, `Couldn't load: ${ex.message}`));
@@ -3903,6 +3917,7 @@
     const listEl = el("div", { style: "max-height:200px;overflow-y:auto;border:1px solid var(--border,#2d3748);border-radius:4px;margin-bottom:0.5rem" });
     let selectedId = null;
     const selectedLabel = el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1);margin-bottom:0.5rem;min-height:1.2rem" }, "");
+    const sharedWarn = el("p", { style: "display:none;margin:4px 0 6px;font-size:0.8rem;color:#d97706;background:#fef3c715;border:1px solid #d9770640;border-radius:4px;padding:4px 8px" }, "");
 
     function buildList(filter) {
       const filtered = filter ? candidates.filter((c) => (c.part_number + " " + c.name).toLowerCase().includes(filter.toLowerCase())) : candidates;
@@ -3912,6 +3927,13 @@
           onclick: () => {
             selectedId = c.id;
             selectedLabel.textContent = `Selected: ${c.part_number} — ${c.name}`;
+            const pc = parentCountMap[c.id];
+            if (pc) {
+              sharedWarn.textContent = `⚠ Already used in ${pc} other assembl${pc === 1 ? "y" : "ies"} — linking it here means structural changes propagate everywhere it is used.`;
+              sharedWarn.style.display = "";
+            } else {
+              sharedWarn.style.display = "none";
+            }
             buildList(searchInput.value);
           },
         }, [
@@ -3927,7 +3949,7 @@
     searchInput.oninput = () => buildList(searchInput.value);
     const existingSection = el("div", {}, [
       el("label", { style: "display:block;margin-bottom:0.25rem;font-size:0.82rem;font-weight:600" }, "Select child"),
-      searchInput, listEl, selectedLabel,
+      searchInput, listEl, selectedLabel, sharedWarn,
     ]);
 
     // Create-new section

@@ -4227,6 +4227,22 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     return json({ thumbnails });
   }
 
+  if (action === "listParentCounts") {
+    const { data, error } = await tdb("bom_edges")
+      .select("child_id, parent_id")
+      .is("effective_to", null);
+    if (error) return json({ error: error.message }, 500);
+    const counts: Record<string, Set<string>> = {};
+    for (const row of (data ?? [])) {
+      if (!counts[row.child_id]) counts[row.child_id] = new Set();
+      counts[row.child_id].add(row.parent_id);
+    }
+    const parentCounts = Object.entries(counts)
+      .filter(([, s]) => s.size > 1)
+      .map(([component_id, s]) => ({ component_id, parent_count: s.size }));
+    return json({ parentCounts });
+  }
+
   // ==========================================================================
 
   return json({ error: `Unknown action: ${action}` }, 400);
