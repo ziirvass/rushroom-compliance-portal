@@ -3596,12 +3596,39 @@
       const thumbEl = thumbUrl ? el("img", {
         src: thumbUrl,
         style: "width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid var(--border,#e2e8f0);flex-shrink:0;cursor:zoom-in",
-        onclick: (ev) => {
+        onclick: async (ev) => {
           ev.stopPropagation();
           imgTooltip.style.display = "none";
-          const over = el("div", { style: "position:fixed;inset:0;background:#000c;z-index:10000;display:flex;align-items:center;justify-content:center;cursor:pointer", onclick: () => over.remove() });
-          over.append(el("img", { src: thumbUrl, style: "max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 4px 32px #0008" }));
-          document.body.append(over);
+          // Fetch all images for this component; fall back to the thumbnail if the request fails
+          let imgs = [{ url: thumbUrl }];
+          try {
+            const r = await API.post(token, "listComponentImages", { component_id: comp.id });
+            if (r.images && r.images.length) imgs = r.images;
+          } catch { /* use thumbnail fallback */ }
+          // Multi-image lightbox — same behaviour as detail panel
+          let idx = 0;
+          const multi = imgs.length > 1;
+          const lbImg = el("img", { style: "max-width:min(90vw,860px);max-height:82vh;border-radius:6px;box-shadow:0 4px 32px #0008;display:block;object-fit:contain", onclick: (e) => e.stopPropagation() });
+          const lbCount = el("div", { style: "color:rgba(255,255,255,0.6);font-size:0.78rem;margin-top:0.5rem;text-align:center;min-height:1.1em" });
+          function lbShow(i) {
+            idx = ((i % imgs.length) + imgs.length) % imgs.length;
+            lbImg.src = imgs[idx].url;
+            lbCount.textContent = multi ? `${idx + 1} / ${imgs.length}` : "";
+          }
+          const navStyle = "background:#fff2;border:1px solid #fff3;border-radius:50%;width:42px;height:42px;color:#fff;font-size:1.4rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1;padding:0";
+          const lbPrev = multi ? el("button", { type: "button", style: navStyle, title: "Previous (←)", onclick: (e) => { e.stopPropagation(); lbShow(idx - 1); } }, "‹") : null;
+          const lbNext = multi ? el("button", { type: "button", style: navStyle, title: "Next (→)",     onclick: (e) => { e.stopPropagation(); lbShow(idx + 1); } }, "›") : null;
+          function lbOnKey(e) {
+            if (e.key === "ArrowLeft"  || e.key === "ArrowUp")   { e.preventDefault(); if (multi) lbShow(idx - 1); }
+            if (e.key === "ArrowRight" || e.key === "ArrowDown")  { e.preventDefault(); if (multi) lbShow(idx + 1); }
+            if (e.key === "Escape") lbClose();
+          }
+          function lbClose() { lbOver.remove(); document.removeEventListener("keydown", lbOnKey); }
+          const lbOver = el("div", { style: "position:fixed;inset:0;background:#000c;z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center", onclick: lbClose });
+          lbOver.append(el("div", { style: "display:flex;align-items:center;gap:1rem" }, [lbPrev, lbImg, lbNext].filter(Boolean)), lbCount);
+          document.addEventListener("keydown", lbOnKey);
+          lbShow(0);
+          document.body.append(lbOver);
         },
         onmouseenter: (ev) => {
           if (!wrap.isConnected) { imgTooltip.style.display = "none"; return; }
