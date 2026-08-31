@@ -128,6 +128,16 @@ main {
 .btn-primary:hover { filter: brightness(1.05); background: var(--accent); }
 .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.85rem; }
 
+/* Text / number / email inputs — match .btn's min-height so input+button
+   rows always render at the same height regardless of which .btn variant
+   sits alongside the field. */
+.up-text {
+  font: inherit; padding: 0.5rem 0.75rem; border-radius: 8px; min-height: 44px;
+  box-sizing: border-box; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border);
+}
+.up-text:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+
 /* ---- Access gate (landing / sign-in) ---- */
 .gate { min-height: 76vh; display: grid; place-items: center; padding: 3rem 1rem; position: relative; }
 /* soft branded glow behind the sign-in card */
