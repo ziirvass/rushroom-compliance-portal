@@ -378,3 +378,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** One `listComponentThumbnails` request fetches the first image per component for the whole org, rather than N per-component requests.
 **Why:** Fetching images individually per row would fire N concurrent API calls on every list load — one org-wide query deduplicates in JS and generates signed URLs only for components that have images. A single shared tooltip div (pointer-events:none) is repositioned on mouseenter rather than creating one tooltip element per row.
 **Files changed:** supabase/functions/portal-api/index.ts, assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Bug fix — BOM thumbnail hover tooltip invisible (stacking context)
+**Decision:** Moved the tooltip `<div>` from `wrap` to `document.body`; assigned `id="bom-thumb-tooltip"` so re-renders remove the previous element before creating a new one.
+**Why:** `position:fixed` is only viewport-relative when no ancestor has a CSS `transform`, `filter`, `will-change`, or `perspective`. Any such ancestor creates a new containing block that traps the fixed element inside it. Appending to `document.body` (which has no such ancestor) guarantees true viewport positioning regardless of the page's CSS.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
