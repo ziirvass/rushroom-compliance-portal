@@ -3552,7 +3552,7 @@
         style: "background:none;border:none;cursor:pointer;padding:0 4px;font-size:0.75rem;color:var(--accent,#2fa564);transition:transform 0.15s;flex-shrink:0",
         onclick: async (ev) => {
           ev.stopPropagation();
-          const open = treeDiv.style.display !== "none" && treeDiv.style.display !== "";
+          const open = treeDiv.style.display !== "none";
           if (open) {
             treeDiv.style.display = "none";
             ev.currentTarget.style.transform = "rotate(0deg)";
