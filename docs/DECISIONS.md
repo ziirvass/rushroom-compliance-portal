@@ -434,3 +434,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Reuse the existing `updateComponent` action (which already accepts `type`) rather than adding a dedicated `setComponentType` action. Mirror the lifecycle status editor pattern (dropdown + save button in the panel).
 **Why:** `updateComponent` already validates the six valid type values server-side. A dedicated action would be dead weight. The status editor is the established pattern for inline field editing in the detail panel; mirroring it keeps the UI consistent and the code predictable.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Fix — +child button on BOM list rows + Assemblies tab routing
+**Decision:** Add +child directly to the root list row rather than only inside the expanded tree; route sub_assembly and finished_good to Assemblies tab by type rather than by has_children.
+**Why:** The expand arrow (▶) gating on has_children created a chicken-and-egg problem — no way to add a first child to a new leaf node. Adding +child to the row breaks the loop with minimal code. Tab routing by type is more predictable: the user declares intent (sub_assembly) and the tab reflects it immediately, not only after the node acquires children.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
