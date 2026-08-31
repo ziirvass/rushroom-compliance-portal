@@ -3659,7 +3659,7 @@
         ].filter(Boolean)),
         el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${tfg}18;color:${tfg};white-space:nowrap;flex-shrink:0` }, comp.type || ""),
         comp.lifecycle_status ? el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${sfg}18;color:${sfg};white-space:nowrap;flex-shrink:0` }, comp.lifecycle_status) : null,
-        role === "rushroom" && comp.type !== "product_family" ? el("button", {
+        role === "rushroom" && (comp.type === "sub_assembly" || comp.type === "finished_good") ? el("button", {
           class: "btn btn-sm", type: "button",
           style: "padding:0 6px;font-size:0.72rem;flex-shrink:0",
           title: "Add child",
@@ -3857,8 +3857,8 @@
           el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0;flex-wrap:nowrap" }, [
             // ⚙ variant-configure button hidden until import integration is built (PROP-018)
 
-            parentNode && !isDynamicBom ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+sib") : null,
-            isDynamicBom && depth > 0 ? null : el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId, { linkExistingOnly: isDynamicBom }) }, "+child"),
+            parentNode && !isDynamicBom && (parentNode.type === "sub_assembly" || parentNode.type === "finished_good") ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+sib") : null,
+            (isDynamicBom ? depth === 0 : (n.type === "sub_assembly" || n.type === "finished_good")) ? el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId, { linkExistingOnly: isDynamicBom }) }, "+child") : null,
             el("button", {
               class: "btn btn-sm", type: "button",
               style: "padding:1px 6px;font-size:0.85rem;font-weight:700;color:#e05454;border-color:#e0545440;line-height:1",
