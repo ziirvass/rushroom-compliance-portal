@@ -462,3 +462,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** `groupFiltered()` pushes `sub_assembly` and `finished_good` nodes into both `grouped.assemblies` and `grouped.components`, so they appear in both tabs simultaneously.
 **Why:** A sub-assembly is still a component — it has a part number, lifecycle status, images, and a detail panel. Routing it exclusively to Assemblies made it invisible as a standalone record in the flat Components list. The correct model: Components tab is a universal flat list of every non-product-family node; Assemblies tab overlaps for assembly types to show the BOM tree view.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Revert — restore exclusive tab routing (v175)
+**Decision:** Tab routing is strictly exclusive: `part`/`raw_material`/`spare_part` → Components only; `sub_assembly`/`finished_good` → Assemblies only; `product_family` → Dynamic BOMs only.
+**Why:** v174 added sub_assembly/finished_good to both tabs, which was semantically wrong. A sub-assembly is not a standalone part — it is an aggregation of parts. The Components tab should list only items that exist independently as leaf-node parts. When a node's type changes from part → sub_assembly, moving it from Components to Assemblies is correct and intentional behavior.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
