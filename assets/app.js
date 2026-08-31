@@ -3779,7 +3779,10 @@
           walk(e.child_id, qty * e.quantity, `${posNum}.${i + 1}`, depth + 1, [...ancestorLastFlags, i === children.length - 1], e.variant_condition, n);
         });
       }
-      walk(rootId, 1, "1", 0, [], null, null);
+      // Root is already shown as the list-row header — start from its children
+      (childrenOf[rootId] || []).forEach((e, i) => {
+        walk(e.child_id, e.quantity, `${i + 1}`, 0, [], e.variant_condition, nodeMap[rootId]);
+      });
       return rows;
     }
 
