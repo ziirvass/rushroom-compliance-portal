@@ -15,7 +15,7 @@ _Last updated: 2026-08-31 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
-- **Fix — +child button on BOM list rows + Assemblies tab routing** (+child button on every non-product_family list row for Rushroom; sub_assembly/finished_good route to Assemblies tab by type, not has_children; cache v170) — 2026-08-31
+- **Fix — +child/+sib restricted to assembly types; type-only tab routing** (part/raw_material/spare_part are leaf nodes — no +child or +sib anywhere; sub_assembly/finished_good always route to Assemblies tab; has_children no longer drives tab placement; v170–v172) — 2026-08-31
 - **Inline type editor in component detail panel** (Type dropdown + Save button in detail panel; calls updateComponent; panel refreshes on save; no new API action; cache v169) — 2026-08-31
 - **Bug fix — deleteComponent blocked by component_images FK** (deleteComponent now fetches all component_images rows, removes storage objects, then deletes DB rows before the component; no migration) — 2026-08-31
 - **Multi-image lightbox in BOM list row thumbnails** (async fetch of listComponentImages on thumbnail click; same ‹ › nav, keyboard, counter as detail panel; fallback to single image on error; cache v168) — 2026-08-31

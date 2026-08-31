@@ -441,3 +441,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Add +child directly to the root list row rather than only inside the expanded tree; route sub_assembly and finished_good to Assemblies tab by type rather than by has_children.
 **Why:** The expand arrow (▶) gating on has_children created a chicken-and-egg problem — no way to add a first child to a new leaf node. Adding +child to the row breaks the loop with minimal code. Tab routing by type is more predictable: the user declares intent (sub_assembly) and the tab reflects it immediately, not only after the node acquires children.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Fix — +child/+sib restricted to assembly types; type-only tab routing (v170–v172)
+**Decision:** Type is the sole authority on tab placement and on whether a node can have children. part/raw_material/spare_part are always leaf nodes; sub_assembly/finished_good are always assembly containers. has_children plays no role in either decision.
+**Why:** Allowing has_children to drive tab placement created a confusing mid-interaction jump (a part moved from Components to Assemblies the moment its first child was added). Restricting +child/+sib to assembly types enforces the intended BOM semantics in the UI: the user declares what something IS via the type field, and the system respects that declaration consistently.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
