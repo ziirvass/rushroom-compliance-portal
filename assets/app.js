@@ -4739,6 +4739,51 @@
     const submitBtn = el("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Create BOM Node");
     zone.register(submitBtn, false);
 
+    // --- Photo queue (uploaded after component ID is known) ------------------
+    const pendingImgs = []; // [{file, url}]
+    const pendingGrid = el("div", { style: "display:flex;flex-wrap:wrap;gap:0.4rem;margin-top:0.4rem;min-height:0" });
+
+    function renderPendingGrid() {
+      pendingGrid.replaceChildren(...pendingImgs.map(({ file, url }, i) => {
+        const wrap = el("div", { style: "position:relative;display:inline-block" });
+        wrap.append(
+          el("img", { src: url, style: "width:64px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border,#e2e8f0);display:block", title: file.name }),
+          el("button", { type: "button", style: "position:absolute;top:2px;right:2px;background:#000a;border:none;border-radius:50%;width:16px;height:16px;color:#fff;font-size:0.5rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1", onclick: () => {
+            URL.revokeObjectURL(url); pendingImgs.splice(i, 1); renderPendingGrid();
+          } }, "✕"),
+        );
+        return wrap;
+      }));
+    }
+
+    function addPendingImg(file) {
+      const ALLOWED = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+      if (!ALLOWED.includes(file.type)) return;
+      pendingImgs.push({ file, url: URL.createObjectURL(file) });
+      renderPendingGrid();
+    }
+
+    const imgPickInput = el("input", { type: "file", accept: "image/*", style: "display:none", onchange: (ev) => {
+      const f = ev.target.files[0]; if (f) addPendingImg(f); imgPickInput.value = "";
+    } });
+    const imgZone = el("div", {
+      style: "border:2px dashed var(--border,#e2e8f0);border-radius:6px;padding:0.45rem 0.75rem;font-size:0.78rem;color:var(--muted,#8b93a1);cursor:pointer;text-align:center",
+      ondragover: (ev) => { ev.preventDefault(); imgZone.style.borderColor = "var(--accent,#2fa564)"; },
+      ondragleave: () => { imgZone.style.borderColor = "var(--border,#e2e8f0)"; },
+      ondrop: (ev) => { ev.preventDefault(); imgZone.style.borderColor = "var(--border,#e2e8f0)"; const f = ev.dataTransfer?.files[0]; if (f && f.type.startsWith("image/")) addPendingImg(f); },
+      onclick: () => imgPickInput.click(),
+    }, "Drop photo · click to pick · or paste (Cmd+V / Ctrl+V)");
+
+    function handleModalPaste(ev) {
+      if (!overlay.isConnected) { document.removeEventListener("paste", handleModalPaste); return; }
+      if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
+      const items = ev.clipboardData?.items || [];
+      for (const item of items) {
+        if (item.type.startsWith("image/")) { ev.preventDefault(); addPendingImg(item.getAsFile()); return; }
+      }
+    }
+    document.addEventListener("paste", handleModalPaste);
+
     // --- Form submit ---------------------------------------------------------
     const errEl = el("span", { class: "form-error" }, "");
     const form = el("form", { onsubmit: async (e) => {
@@ -4754,6 +4799,31 @@
           type:        typ.value,
           description: desc.value.trim() || null,
         });
+        // Upload any queued photos — non-blocking (component creation already succeeded)
+        if (pendingImgs.length && r.id) {
+          submitBtn.textContent = `Uploading ${pendingImgs.length} photo${pendingImgs.length > 1 ? "s" : ""}…`;
+          for (const { file } of pendingImgs) {
+            try {
+              const { signedUrl, path } = await API.post(token, "imageUploadUrl", {
+                component_id: r.id, fileName: file.name || "photo.png", contentType: file.type,
+              });
+              await new Promise((res, rej) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("PUT", signedUrl);
+                xhr.setRequestHeader("Content-Type", file.type);
+                xhr.onload = () => xhr.status < 300 ? res() : rej(new Error(`${xhr.status}`));
+                xhr.onerror = () => rej(new Error("Network error"));
+                xhr.send(file);
+              });
+              await API.post(token, "addComponentImage", {
+                component_id: r.id, storage_path: path,
+                file_name: file.name || "photo.png", content_type: file.type,
+              });
+            } catch { /* photo upload is best-effort — component exists */ }
+          }
+          pendingImgs.forEach(({ url }) => URL.revokeObjectURL(url));
+        }
+        document.removeEventListener("paste", handleModalPaste);
         overlay.remove();
         if (onCreated) onCreated(r.id);
       } catch (ex) {
@@ -4781,7 +4851,7 @@
     form.append(
       el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem" }, [
         el("h3", { style: "margin:0;font-size:1rem" }, "New BOM Node"),
-        el("button", { class: "btn btn-sm", type: "button", style: "padding:2px 8px", onclick: () => overlay.remove() }, "✕"),
+        el("button", { class: "btn btn-sm", type: "button", style: "padding:2px 8px", onclick: () => { document.removeEventListener("paste", handleModalPaste); overlay.remove(); } }, "✕"),
       ]),
       el("p", { style: "font-size:0.8rem;color:var(--muted,#8b93a1);margin:0 0 0.5rem" },
         "Creates a top-level product or assembly. To add components under it, use the + child button on any tree row."),
@@ -4793,9 +4863,13 @@
       frow("Name",        nm,   null),
       frow("Type",        typ,  null),
       frow("Description", desc, "Purpose — what does this product/assembly do?"),
+      el("div", { style: ROW }, [
+        el("label", { style: LBL }, "Photos (optional)"),
+        imgZone, imgPickInput, pendingGrid,
+      ]),
       errEl,
       el("div", { style: "display:flex;gap:0.5rem;margin-top:1.1rem;justify-content:flex-end" }, [
-        el("button", { class: "btn btn-sm", type: "button", onclick: () => overlay.remove() }, "Cancel"),
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => { document.removeEventListener("paste", handleModalPaste); overlay.remove(); } }, "Cancel"),
         submitBtn,
       ]),
     );

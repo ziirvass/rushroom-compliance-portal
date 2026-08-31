@@ -357,3 +357,17 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Store component images in the existing `documents` bucket under a `component-images/` prefix rather than a dedicated `component-images` bucket.
 **Why:** Creating a new bucket requires Supabase dashboard access and separate RLS bucket policies. Reusing the `documents` bucket with a path prefix achieves the same isolation at zero extra infra cost. Images are only exposed via 1-hour signed URLs (same as documents), keeping access control consistent.
 **Files changed:** supabase/migrations/0016_component_images.sql, supabase/functions/portal-api/index.ts, assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Bug fix — BOM Node tree arrows cannot collapse after initial expand
+**Decision:** Changed open-state check from `display !== "none" && display !== ""` to `display !== "none"` in the outer BOM Node list expand button.
+**Why:** A freshly-rendered expanded tree has `style.display = ""` (the browser default for visible). The extra `!== ""` condition made this evaluate to `false`, so every click went into the expand branch and never collapsed. Empty string means visible — only `"none"` means hidden.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-08-31
+**Feature:** Photos in New BOM Node creation modal
+**Decision:** Queue images as `File` objects with local `createObjectURL` previews during the modal; upload them to Supabase Storage only after `addComponent` returns the new component ID. Upload failures are swallowed (best-effort) — the component was already created successfully.
+**Why:** The signed upload URL requires a `component_id`, which doesn't exist until after creation. Queueing avoids a two-step UX while keeping the upload flow identical to the detail panel (`imageUploadUrl` → XHR PUT → `addComponentImage`). No new API actions needed.
+**Files changed:** assets/app.js, index.html, CLAUDE.md

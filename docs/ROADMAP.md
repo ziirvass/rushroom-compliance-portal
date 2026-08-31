@@ -15,6 +15,8 @@ _Last updated: 2026-08-30 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Photos in New BOM Node modal** (same paste/drop/pick as detail panel; images queued locally then uploaded after component ID returned; cache v161) — 2026-08-31
+- **Bug fix — BOM Node tree arrows cannot collapse** (`display !== ""` treated default-display as "not open"; fixed to `display !== "none"`; cache v160) — 2026-08-31
 - **PROP-026 Component Images — Paste, Drop, or Pick from Disk** (component_images table; imageUploadUrl/addComponentImage/listComponentImages/deleteComponentImage; drop zone + paste handler + thumbnail grid with lightbox; cache v159) — 2026-08-30
 - **PROP-025 Structural BOM tab classification + meaningful type values** (has_children drives tab routing; type values renamed to manufacturing categories: part/raw_material/sub_assembly/finished_good/spare_part; migration 0015; cache v158) — 2026-08-30
 - **Bug fix — BOM tab classification uses type only** (`|| c.has_children` in `groupFiltered()` caused any Component-typed node that gained a child to be reclassified as an Assembly root; fixed to use `type` exclusively for tab placement; cache v157) — 2026-08-30
