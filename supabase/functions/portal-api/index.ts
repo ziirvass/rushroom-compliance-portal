@@ -4209,6 +4209,24 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     return json({ ok: true });
   }
 
+  if (action === "listComponentThumbnails") {
+    // Returns the first uploaded image per component — for inline thumbnail previews on the BOM list.
+    const { data, error } = await tdb("component_images")
+      .select("component_id, storage_path")
+      .order("uploaded_at", { ascending: true });
+    if (error) return json({ error: error.message }, 500);
+    const seen = new Set<string>();
+    const firsts: Array<{ component_id: string; storage_path: string }> = [];
+    for (const row of (data ?? [])) {
+      if (!seen.has(row.component_id)) { seen.add(row.component_id); firsts.push(row); }
+    }
+    const thumbnails = await Promise.all(firsts.map(async (row) => {
+      const { data: signed } = await db.storage.from(DOC_BUCKET).createSignedUrl(row.storage_path, 60 * 60);
+      return { component_id: row.component_id, url: signed?.signedUrl ?? "" };
+    }));
+    return json({ thumbnails });
+  }
+
   // ==========================================================================
 
   return json({ error: `Unknown action: ${action}` }, 400);
