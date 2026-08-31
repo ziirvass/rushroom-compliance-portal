@@ -3454,12 +3454,15 @@
     const tabPageShown = { components: PAGE_SIZE, assemblies: PAGE_SIZE, dynamic: PAGE_SIZE };
     const expandedTrees = {}; // compId → bom | "loading" | "error"
 
-    // Shared hover-preview tooltip — one element reused for every thumbnail
+    // Shared hover-preview tooltip — appended to body to avoid stacking-context issues
+    // (position:fixed breaks inside any ancestor with transform/filter)
+    document.getElementById("bom-thumb-tooltip")?.remove();
     const tooltipImg = el("img", { style: "width:200px;height:200px;object-fit:cover;display:block" });
     const imgTooltip = el("div", {
-      style: "position:fixed;z-index:3000;display:none;pointer-events:none;border-radius:8px;overflow:hidden;box-shadow:0 6px 28px #0004;border:1px solid var(--border,#e2e8f0)",
+      id: "bom-thumb-tooltip",
+      style: "position:fixed;z-index:9999;display:none;pointer-events:none;border-radius:8px;overflow:hidden;box-shadow:0 6px 28px #0004;border:1px solid var(--border,#e2e8f0)",
     }, tooltipImg);
-    wrap.append(imgTooltip);
+    document.body.append(imgTooltip);
 
     const tabBarEl = el("div", { style: "display:flex;gap:0;margin-top:0.75rem;border-bottom:2px solid var(--border,#e2e8f0)" });
     const treeArea  = el("div", { class: "pis-tree-area", style: "margin-top:0.75rem" });
@@ -3593,6 +3596,7 @@
         src: thumbUrl,
         style: "width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid var(--border,#e2e8f0);flex-shrink:0;cursor:zoom-in",
         onmouseenter: (ev) => {
+          if (!wrap.isConnected) { imgTooltip.style.display = "none"; return; }
           const rect = ev.currentTarget.getBoundingClientRect();
           tooltipImg.src = thumbUrl;
           const tipLeft = rect.right + 10;
