@@ -3595,6 +3595,13 @@
       const thumbEl = thumbUrl ? el("img", {
         src: thumbUrl,
         style: "width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid var(--border,#e2e8f0);flex-shrink:0;cursor:zoom-in",
+        onclick: (ev) => {
+          ev.stopPropagation();
+          imgTooltip.style.display = "none";
+          const over = el("div", { style: "position:fixed;inset:0;background:#000c;z-index:10000;display:flex;align-items:center;justify-content:center;cursor:pointer", onclick: () => over.remove() });
+          over.append(el("img", { src: thumbUrl, style: "max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 4px 32px #0008" }));
+          document.body.append(over);
+        },
         onmouseenter: (ev) => {
           if (!wrap.isConnected) { imgTooltip.style.display = "none"; return; }
           const rect = ev.currentTarget.getBoundingClientRect();
