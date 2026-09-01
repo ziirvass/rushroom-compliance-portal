@@ -504,3 +504,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Every non-product_family component appears in the Parts tab (master catalog). A component also appears in the Assemblies tab when has_children=true. The `type` field is a manufacturing-classification attribute only — it no longer determines tab placement. +child available on every component row (rushroom role). groupFiltered() pushes all to components; those with has_children also to assemblies.
 **Why:** Standard PLM practice — every item is a part first (it has a part number and identity). Some parts also have a BOM (they are assemblies). These are not mutually exclusive. Routing by type forced users to choose one identity; routing by has_children lets the system reflect reality: a component naturally becomes an assembly the moment it gets its first child.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-09-01
+**Feature:** Fix — Parts tab always flat; no BOM tree expansion (v181)
+**Decision:** `renderRootRow` gains an `allowExpand` parameter (default `false`). `renderAll` passes `allowExpand = activeTab !== "components"`. The expand arrow is only rendered when `allowExpand && comp.has_children`. Parts tab is always flat regardless of `has_children` or `type`.
+**Why:** The v180 PLM dual-view correctly placed all components in the Parts tab as a master catalog, but the has_children-based expand gate made some parts render BOM trees inside the flat catalog — e.g. a component typed "part" with has_children=true showed its entire assembly tree in the Parts tab. This made it impossible to find the isolated part without seeing structural context that belongs only in the Assemblies view. The `allowExpand` context parameter decouples the "is this component also an assembly?" question from "should this view show tree expansion?" — the Parts tab never needs tree expansion; its purpose is the flat catalog where you pick individual parts.
+**Files changed:** assets/app.js, index.html, CLAUDE.md

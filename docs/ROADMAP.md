@@ -15,6 +15,7 @@ _Last updated: 2026-08-31 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Fix — Parts tab always flat catalog; no BOM trees** (renderRootRow gains allowExpand param; Parts tab suppresses expand regardless of has_children; cache v181) — 2026-09-01
 - **PLM dual-view — Parts = master catalog; Assemblies = has_children** (every component in Parts tab; Assemblies auto-populates from has_children; +child on all rows; type is classification metadata only; cache v180) — 2026-09-01
 - **Fix — Parts tab flat rows only** (expand arrow gated on sub_assembly/product_family type to prevent parts with children expanding in Parts tab; cache v179) — 2026-09-01
 - **Fix — unlimited depth in Assemblies BOM tree** (every tree row gets +child and +sib regardless of type; type controls tab placement only; cache v178) — 2026-09-01

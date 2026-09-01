@@ -590,3 +590,37 @@ Both issues are specific to the "link existing" flow, which creates a new `bom_e
 - PROP-025 (has_children drives tab routing — after refresh, a newly promoted Assembly node correctly moves to the Assemblies tab)
 
 **Status:** Raw idea
+
+---
+### BOM Tree — Terminology & Interaction Consistency — 2026-09-01
+**One sentence:** Rename "Components" → "Parts" throughout the BOM Tree view, rename the COMPONENT column header inside assemblies to "Part", and replace the developer-term "+sib" button label with something users recognise.
+
+**Problem it solves:**
+Three terminology mismatches make the BOM Tree harder to learn than it needs to be:
+
+1. **"Components" tab shows parts, not components.** The tab is labelled "Components" but it exclusively contains leaf-node types (`part`, `raw_material`, `spare_part`). In manufacturing language, a sub-assembly is also a "component" of its parent — so the label is misleading. The user's mental model is: isolated physical objects that haven't been assembled into anything are "parts"; assembled groups of parts are "sub-assemblies." The tab label should match: **"Parts"**.
+
+2. **"COMPONENT" column header inside an assembly BOM tree.** When you expand a sub-assembly, the tree column header reads "COMPONENT". The items listed are parts. The column should read **"Part"** (matching the tab name and the user's vocabulary).
+
+3. **"+sib" is a developer abbreviation users don't understand.** "+sib" (sibling) is a CS tree-traversal term. When a user sees it on a row, it is not obvious that clicking it opens a modal to add another part at the same level inside the parent assembly. A clearer label: **"+ part"** (since the parent is always a `sub_assembly` or `finished_good`, and what you're adding is another part or sub-assembly to sit beside the current row).
+
+**On the "can't add a second child" confusion:**
+The frontend has no guard on adding a second child — the +child button on the assembly header row is always available for `sub_assembly`/`finished_good` nodes. The backend constraint is `UNIQUE (parent_id, child_id, effective_from)`, which means: adding a *different* part as a second child works fine; adding the *same part twice on the same date* is rejected by Postgres with a unique-violation error. If adding a child fails, it is because the exact same component was selected again, not because a "second child" is forbidden.
+
+**MVP scope:**
+1. `TAB_DEFS` in `bomTreeView` (line 3444): change `label: "Components"` → `label: "Parts"`. One character change; the count suffix `(N)` remains.
+2. `renderBomTree` column header (line 3811): change the string `"Component"` → `"Part"`. The `isDynamicBom` branch stays `"Configuration"` — no change there.
+3. `+sib` button label in `renderBomTree` (line 3863): change `"+sib"` → `"+part"` (keep `title: "Add sibling"` as the tooltip for users who want the precise term).
+4. No DB changes, no API changes, no migration.
+
+**Tables involved:** None — frontend only (`assets/app.js`).
+
+**Effort estimate:** 0.5 hours (three string changes, one line each).
+
+**Risks:**
+- Any user-facing documentation, screenshots, or onboarding text that says "Components tab" will be out of date — low risk since there is none yet.
+- The word "Part" could be confused with a specific `type=part` node (vs `raw_material`, `spare_part`) — but the tab shows ALL leaf types, and in practice users already call all of them "parts." The consistency gain outweighs the edge-case ambiguity.
+
+**Related PROPs:** PROP-020 (introduced the three-tab split and the column header), PROP-025 (established the type vocabulary: part/raw_material/sub_assembly/finished_good/spare_part).
+
+**Status:** Raw idea — tiny effort, high clarity gain
