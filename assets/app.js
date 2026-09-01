@@ -3502,7 +3502,7 @@
         if (c.type === "product_family") grouped.dynamic.push(c);
         else {
           grouped.components.push(c);          // every component is in the Parts catalog
-          if (c.has_children) grouped.assemblies.push(c); // also in Assemblies if it has a BOM
+          if (c.has_children || c.type === "sub_assembly") grouped.assemblies.push(c); // sub_assembly always in Assemblies; others when they have children
         }
       });
       return grouped;
@@ -3662,7 +3662,7 @@
         ].filter(Boolean)),
         el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${tfg}18;color:${tfg};white-space:nowrap;flex-shrink:0` }, comp.type || ""),
         comp.lifecycle_status ? el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${sfg}18;color:${sfg};white-space:nowrap;flex-shrink:0` }, comp.lifecycle_status) : null,
-        role === "rushroom" ? el("button", {
+        role === "rushroom" && allowExpand ? el("button", {
           class: "btn btn-sm", type: "button",
           style: "padding:0 6px;font-size:0.72rem;flex-shrink:0",
           title: "Add child",
