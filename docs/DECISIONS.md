@@ -469,3 +469,10 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Tab routing is strictly exclusive: `part`/`raw_material`/`spare_part` → Components only; `sub_assembly`/`finished_good` → Assemblies only; `product_family` → Dynamic BOMs only.
 **Why:** v174 added sub_assembly/finished_good to both tabs, which was semantically wrong. A sub-assembly is not a standalone part — it is an aggregation of parts. The Components tab should list only items that exist independently as leaf-node parts. When a node's type changes from part → sub_assembly, moving it from Components to Assemblies is correct and intentional behavior.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-09-01
+**Feature:** PROP-028 — BOM Tree Terminology & Interaction Consistency
+**Decision:** Rename "Components" tab → "Parts", "Component" column header → "Part", "+sib" button → "+part". The tooltip on +part retains "Add sibling" for precision.
+**Why:** The tab that shows leaf-node types (part/raw_material/spare_part) should be called "Parts" — "Components" was ambiguous because sub-assemblies are also components of their parents in manufacturing terminology. "+sib" (sibling) is a computer-science tree term; "+part" describes the action in manufacturing vocabulary: add another part at the same level in the assembly.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
