@@ -15,6 +15,8 @@ _Last updated: 2026-08-31 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **PLM dual-view — Parts = master catalog; Assemblies = has_children** (every component in Parts tab; Assemblies auto-populates from has_children; +child on all rows; type is classification metadata only; cache v180) — 2026-09-01
+- **Fix — Parts tab flat rows only** (expand arrow gated on sub_assembly/product_family type to prevent parts with children expanding in Parts tab; cache v179) — 2026-09-01
 - **Fix — unlimited depth in Assemblies BOM tree** (every tree row gets +child and +sib regardless of type; type controls tab placement only; cache v178) — 2026-09-01
 - **PROP-029 — Simplified type system: part / sub_assembly / finished_good** (raw_material, spare_part, product_family removed from type pickers; finished_good is a leaf node in Parts tab; +sib label restored; cache v177) — 2026-09-01
 - **PROP-028 BOM Tree Terminology Consistency** (Parts tab, Part column header, +part button; three string changes; no DB/API changes; cache v176) — 2026-09-01

@@ -490,3 +490,17 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Within an Assemblies BOM tree, every row gets +child and +sib regardless of the node's type. Type controls only top-level tab placement, never child-add capability inside a tree.
 **Why:** Restricting +child to sub_assembly/finished_good typed nodes made it impossible to build multi-level depth without first leaving the tree to change a node's type. The correct model: any node inside an assembly can have children; the tree is the place where structure is built freely. A new component created via +child is added to bom_components normally and appears in the Parts tab as a standalone record.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-09-01
+**Feature:** Fix — Parts tab flat rows only (v179)
+**Decision:** Expand arrow in `renderRootRow` requires `comp.type === "sub_assembly" || comp.type === "product_family"` in addition to `has_children`. Leaf-type nodes (part, finished_good) never show BOM tree expansion in the flat Parts list.
+**Why:** When a part is used as a child inside an assembly it gains has_children=true in the DB. Without the type gate it rendered a BOM tree in the Parts tab — the wrong context. The Parts tab is the flat catalog; BOM trees belong in Assemblies.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-09-01
+**Feature:** PLM dual-view — Parts = master catalog; Assemblies = has_children (v180)
+**Decision:** Every non-product_family component appears in the Parts tab (master catalog). A component also appears in the Assemblies tab when has_children=true. The `type` field is a manufacturing-classification attribute only — it no longer determines tab placement. +child available on every component row (rushroom role). groupFiltered() pushes all to components; those with has_children also to assemblies.
+**Why:** Standard PLM practice — every item is a part first (it has a part number and identity). Some parts also have a BOM (they are assemblies). These are not mutually exclusive. Routing by type forced users to choose one identity; routing by has_children lets the system reflect reality: a component naturally becomes an assembly the moment it gets its first child.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
