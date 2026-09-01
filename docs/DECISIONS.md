@@ -476,3 +476,17 @@ _Append-only. Claude Code appends one entry here after every /ship._
 **Decision:** Rename "Components" tab → "Parts", "Component" column header → "Part", "+sib" button → "+part". The tooltip on +part retains "Add sibling" for precision.
 **Why:** The tab that shows leaf-node types (part/raw_material/spare_part) should be called "Parts" — "Components" was ambiguous because sub-assemblies are also components of their parents in manufacturing terminology. "+sib" (sibling) is a computer-science tree term; "+part" describes the action in manufacturing vocabulary: add another part at the same level in the assembly.
 **Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-09-01
+**Feature:** PROP-029 — Simplified type system (part / sub_assembly / finished_good)
+**Decision:** Three types only. `finished_good` is a leaf node (Parts tab, no +child) — it is a bought-in complete product, never assembled by Rushroom. `raw_material`, `spare_part`, `product_family` removed from all type pickers; existing DB rows untouched. `+sib` label restored.
+**Why:** The previous six-type system mixed manufacturing categories with structural roles. The simplified model maps directly to what Rushroom actually does: make parts, assemble sub-assemblies from parts, buy finished goods. Dynamic BOM is a separate concept (not a node type) — product families are built from existing sub-assemblies and parts.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-09-01
+**Feature:** Fix — unlimited depth in Assemblies BOM tree (v178)
+**Decision:** Within an Assemblies BOM tree, every row gets +child and +sib regardless of the node's type. Type controls only top-level tab placement, never child-add capability inside a tree.
+**Why:** Restricting +child to sub_assembly/finished_good typed nodes made it impossible to build multi-level depth without first leaving the tree to change a node's type. The correct model: any node inside an assembly can have children; the tree is the place where structure is built freely. A new component created via +child is added to bom_components normally and appears in the Parts tab as a standalone record.
+**Files changed:** assets/app.js, index.html, CLAUDE.md

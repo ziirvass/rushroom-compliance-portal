@@ -15,6 +15,8 @@ _Last updated: 2026-08-31 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **Fix — unlimited depth in Assemblies BOM tree** (every tree row gets +child and +sib regardless of type; type controls tab placement only; cache v178) — 2026-09-01
+- **PROP-029 — Simplified type system: part / sub_assembly / finished_good** (raw_material, spare_part, product_family removed from type pickers; finished_good is a leaf node in Parts tab; +sib label restored; cache v177) — 2026-09-01
 - **PROP-028 BOM Tree Terminology Consistency** (Parts tab, Part column header, +part button; three string changes; no DB/API changes; cache v176) — 2026-09-01
 - **Revert — restore exclusive tab routing** (v174 dual-tab logic was wrong; sub_assembly/finished_good belong in Assemblies only; Components tab shows isolated parts only; cache v175) — 2026-08-31
 - **Fix — assembly types visible in both Components and Assemblies tabs** (sub_assembly and finished_good now appear in flat Components list AND in Assemblies BOM tree; groupFiltered() pushes to both; no migration; cache v174) — 2026-08-31
