@@ -3500,7 +3500,7 @@
       const grouped = { components: [], assemblies: [], dynamic: [] };
       filtered.forEach((c) => {
         if (c.type === "product_family") grouped.dynamic.push(c);
-        else if (c.type === "sub_assembly" || c.type === "finished_good") grouped.assemblies.push(c);
+        else if (c.type === "sub_assembly") grouped.assemblies.push(c);
         else grouped.components.push(c);
       });
       return grouped;
@@ -3659,7 +3659,7 @@
         ].filter(Boolean)),
         el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${tfg}18;color:${tfg};white-space:nowrap;flex-shrink:0` }, comp.type || ""),
         comp.lifecycle_status ? el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${sfg}18;color:${sfg};white-space:nowrap;flex-shrink:0` }, comp.lifecycle_status) : null,
-        role === "rushroom" && (comp.type === "sub_assembly" || comp.type === "finished_good") ? el("button", {
+        role === "rushroom" && comp.type === "sub_assembly" ? el("button", {
           class: "btn btn-sm", type: "button",
           style: "padding:0 6px;font-size:0.72rem;flex-shrink:0",
           title: "Add child",
@@ -3860,8 +3860,8 @@
           el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0;flex-wrap:nowrap" }, [
             // ⚙ variant-configure button hidden until import integration is built (PROP-018)
 
-            parentNode && !isDynamicBom && (parentNode.type === "sub_assembly" || parentNode.type === "finished_good") ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+part") : null,
-            (isDynamicBom ? depth === 0 : (n.type === "sub_assembly" || n.type === "finished_good")) ? el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId, { linkExistingOnly: isDynamicBom }) }, "+child") : null,
+            parentNode && !isDynamicBom && parentNode.type === "sub_assembly" ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+sib") : null,
+            (isDynamicBom ? depth === 0 : n.type === "sub_assembly") ? el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId, { linkExistingOnly: isDynamicBom }) }, "+child") : null,
             el("button", {
               class: "btn btn-sm", type: "button",
               style: "padding:1px 6px;font-size:0.85rem;font-weight:700;color:#e05454;border-color:#e0545440;line-height:1",
@@ -3996,7 +3996,7 @@
       const now = new Date();
       return `RR-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${s}`;
     }
-    const TYPE_OPTS = [["part", "Part"], ["raw_material", "Raw Material"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"], ["spare_part", "Spare Part"]];
+    const TYPE_OPTS = [["part", "Part"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"]];
     const newPN   = el("input",  { class: "up-text", type: "text" });
     const newName = el("input",  { class: "up-text", type: "text", placeholder: "Name (required)" });
     const newType = el("select", { class: "up-text" }, TYPE_OPTS.map(([v, l]) => el("option", { value: v }, l)));
@@ -4805,7 +4805,7 @@
       // --- Type edit block (rushroom only) -------------------------------------
       let typeSection = null;
       if (role === "rushroom") {
-        const TYPE_OPTS = [["part", "Part"], ["raw_material", "Raw Material"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"], ["spare_part", "Spare Part"], ["product_family", "Dynamic BOM"]];
+        const TYPE_OPTS = [["part", "Part"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"]];
         const currentType = nodeData?.type || "part";
         const typeDropdown = el("select", { class: "up-text", style: "padding:0.3rem 0.5rem;font-size:0.82rem;border-radius:4px;border:1px solid var(--border,#e2e8f0);min-width:9rem" },
           TYPE_OPTS.map(([v, l]) => el("option", { value: v, selected: v === currentType ? "selected" : null }, l))
@@ -4860,7 +4860,7 @@
     }
 
     // --- Fields --------------------------------------------------------------
-    const TYPE_OPTS = [["part", "Part"], ["raw_material", "Raw Material"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"], ["spare_part", "Spare Part"], ["product_family", "Dynamic BOM"]];
+    const TYPE_OPTS = [["part", "Part"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"]];
     const pn   = el("input",    { class: "up-text", type: "text", placeholder: "Auto-generated if left empty" });
     const oem  = el("input",    { class: "up-text", type: "text", placeholder: "OEM / distributor reference (optional)" });
     const nm   = el("input",    { class: "up-text", type: "text", placeholder: "Name" });
