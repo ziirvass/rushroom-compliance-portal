@@ -507,6 +507,13 @@ _Append-only. Claude Code appends one entry here after every /ship._
 
 ---
 **Date:** 2026-09-01
+**Feature:** Fix — Parts tab catalog-only; +child removed; sub_assembly always in Assemblies tab (v183)
+**Decision:** `+child` in `renderRootRow` gated on `allowExpand` (false in Parts tab). `groupFiltered()` routes `sub_assembly` typed nodes to the Assemblies tab regardless of `has_children`.
+**Why:** Adding a child to a part from the flat catalog was modifying an existing BOM structure without the user intending to — Parts tab is a read-only catalog, not a place to build structure. Removing `+child` from the Parts tab enforces this. The `groupFiltered` change is necessary to close the chicken-and-egg loop: a freshly created `sub_assembly` node has no children yet, so without the type-based route it would never appear in the Assemblies tab, leaving the user with no way to build it out. By routing on `type === "sub_assembly"` (regardless of `has_children`), the node is immediately available in Assemblies after creation, where `+child`/`+sib` work correctly.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-09-01
 **Feature:** Fix — Parts tab tree-state restore guard (v182)
 **Decision:** Added `allowExpand &&` to the `expandedTrees` restore condition inside `renderRootRow`. The expand-button suppression (v181) was correct but incomplete — the restore block that re-renders cached tree state on `renderAll()` had no corresponding guard, so a component expanded in the Assemblies tab would still show its full BOM tree when the Parts tab re-rendered (e.g. after `refreshTree()` fires post-child-add).
 **Why:** `expandedTrees` is a shared in-memory map across all tabs. Suppressing the expand button prevents the user from manually expanding in Parts tab, but `refreshTree()` re-fetches BOM data for all previously-expanded ids and calls `renderAll()` — the restore block then fires unconditionally, undoing the v181 fix. The correct invariant is: the tree body never renders in Parts tab, not just the expand button. One `allowExpand &&` guard enforces it at the only place where `expandedTrees` state is consumed during render.
