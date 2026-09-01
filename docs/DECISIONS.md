@@ -507,6 +507,13 @@ _Append-only. Claude Code appends one entry here after every /ship._
 
 ---
 **Date:** 2026-09-01
+**Feature:** Fix — Parts tab tree-state restore guard (v182)
+**Decision:** Added `allowExpand &&` to the `expandedTrees` restore condition inside `renderRootRow`. The expand-button suppression (v181) was correct but incomplete — the restore block that re-renders cached tree state on `renderAll()` had no corresponding guard, so a component expanded in the Assemblies tab would still show its full BOM tree when the Parts tab re-rendered (e.g. after `refreshTree()` fires post-child-add).
+**Why:** `expandedTrees` is a shared in-memory map across all tabs. Suppressing the expand button prevents the user from manually expanding in Parts tab, but `refreshTree()` re-fetches BOM data for all previously-expanded ids and calls `renderAll()` — the restore block then fires unconditionally, undoing the v181 fix. The correct invariant is: the tree body never renders in Parts tab, not just the expand button. One `allowExpand &&` guard enforces it at the only place where `expandedTrees` state is consumed during render.
+**Files changed:** assets/app.js, index.html, CLAUDE.md
+
+---
+**Date:** 2026-09-01
 **Feature:** Fix — Parts tab always flat; no BOM tree expansion (v181)
 **Decision:** `renderRootRow` gains an `allowExpand` parameter (default `false`). `renderAll` passes `allowExpand = activeTab !== "components"`. The expand arrow is only rendered when `allowExpand && comp.has_children`. Parts tab is always flat regardless of `has_children` or `type`.
 **Why:** The v180 PLM dual-view correctly placed all components in the Parts tab as a master catalog, but the has_children-based expand gate made some parts render BOM trees inside the flat catalog — e.g. a component typed "part" with has_children=true showed its entire assembly tree in the Parts tab. This made it impossible to find the isolated part without seeing structural context that belongs only in the Assemblies view. The `allowExpand` context parameter decouples the "is this component also an assembly?" question from "should this view show tree expansion?" — the Parts tab never needs tree expansion; its purpose is the flat catalog where you pick individual parts.
