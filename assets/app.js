@@ -3530,7 +3530,8 @@
         return;
       }
       const shown = Math.min(tabPageShown[activeTab], items.length);
-      items.slice(0, shown).forEach((comp) => treeArea.append(renderRootRow(comp)));
+      const allowExpand = activeTab !== "components";
+      items.slice(0, shown).forEach((comp) => treeArea.append(renderRootRow(comp, allowExpand)));
       if (items.length > shown) {
         const remaining = items.length - shown;
         treeArea.append(el("div", { style: "text-align:center;padding:0.75rem" },
@@ -3539,7 +3540,7 @@
       }
     }
 
-    function renderRootRow(comp) {
+    function renderRootRow(comp, allowExpand = false) {
       const STATUS_COLOR = { active: "#2fa564", inactive: "#8b93a1", replaced: "#e5a326", flagged: "#e05454" };
       const TYPE_COLOR   = { part: "#2fa564", raw_material: "#8b93a1", sub_assembly: "#4a9eed", finished_good: "#a855f7", spare_part: "#f59e0b", product_family: "#e05454" };
       const sfg = STATUS_COLOR[comp.lifecycle_status] || "#888";
@@ -3561,7 +3562,7 @@
         treeDiv.style.display = "";
       }
 
-      const expandBtn = comp.has_children ? el("button", {
+      const expandBtn = allowExpand && comp.has_children ? el("button", {
         type: "button", title: "Expand",
         style: "background:none;border:none;cursor:pointer;padding:0 4px;font-size:0.75rem;color:var(--accent,#2fa564);transition:transform 0.15s;flex-shrink:0",
         onclick: async (ev) => {
