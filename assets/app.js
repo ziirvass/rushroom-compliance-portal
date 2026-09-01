@@ -3559,7 +3559,7 @@
         treeDiv.style.display = "";
       }
 
-      const expandBtn = comp.has_children ? el("button", {
+      const expandBtn = comp.has_children && (comp.type === "sub_assembly" || comp.type === "product_family") ? el("button", {
         type: "button", title: "Expand",
         style: "background:none;border:none;cursor:pointer;padding:0 4px;font-size:0.75rem;color:var(--accent,#2fa564);transition:transform 0.15s;flex-shrink:0",
         onclick: async (ev) => {
