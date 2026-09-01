@@ -3500,8 +3500,10 @@
       const grouped = { components: [], assemblies: [], dynamic: [] };
       filtered.forEach((c) => {
         if (c.type === "product_family") grouped.dynamic.push(c);
-        else if (c.type === "sub_assembly") grouped.assemblies.push(c);
-        else grouped.components.push(c);
+        else {
+          grouped.components.push(c);          // every component is in the Parts catalog
+          if (c.has_children) grouped.assemblies.push(c); // also in Assemblies if it has a BOM
+        }
       });
       return grouped;
     }
@@ -3559,7 +3561,7 @@
         treeDiv.style.display = "";
       }
 
-      const expandBtn = comp.has_children && (comp.type === "sub_assembly" || comp.type === "product_family") ? el("button", {
+      const expandBtn = comp.has_children ? el("button", {
         type: "button", title: "Expand",
         style: "background:none;border:none;cursor:pointer;padding:0 4px;font-size:0.75rem;color:var(--accent,#2fa564);transition:transform 0.15s;flex-shrink:0",
         onclick: async (ev) => {
@@ -3659,7 +3661,7 @@
         ].filter(Boolean)),
         el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${tfg}18;color:${tfg};white-space:nowrap;flex-shrink:0` }, comp.type || ""),
         comp.lifecycle_status ? el("span", { style: `font-size:0.7rem;padding:1px 6px;border-radius:4px;background:${sfg}18;color:${sfg};white-space:nowrap;flex-shrink:0` }, comp.lifecycle_status) : null,
-        role === "rushroom" && comp.type === "sub_assembly" ? el("button", {
+        role === "rushroom" ? el("button", {
           class: "btn btn-sm", type: "button",
           style: "padding:0 6px;font-size:0.72rem;flex-shrink:0",
           title: "Add child",
