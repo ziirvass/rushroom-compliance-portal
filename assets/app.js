@@ -3441,7 +3441,7 @@
     const detailPanel = el("div", { class: "pis-detail-panel", style: "display:none;margin-top:1rem;padding:1rem;background:var(--bg-2,#f5f5f5);border-radius:6px" });
 
     const TAB_DEFS = [
-      { id: "components", label: "Components" },
+      { id: "components", label: "Parts" },
       { id: "assemblies", label: "Assemblies" },
       { id: "dynamic",    label: "Dynamic BOMs" },
     ];
@@ -3808,7 +3808,7 @@
 
     wrap.append(el("div", {
         style: "display:grid;grid-template-columns:6rem 1fr 4rem 7rem 12rem;gap:0.5rem;padding:0.2rem 0.5rem 0.35rem;font-size:0.71rem;font-weight:700;color:var(--muted,#8b93a1);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border,#e2e8f0);margin-bottom:0.15rem;position:sticky;top:0;z-index:1;background:var(--bg,#fff)",
-      }, ["Pos.", isDynamicBom ? "Configuration" : "Component", "Qty", "Status", ""].map((t, i) => el("span", { style: i >= 2 && i <= 3 ? "text-align:center" : "" }, t))));
+      }, ["Pos.", isDynamicBom ? "Configuration" : "Part", "Qty", "Status", ""].map((t, i) => el("span", { style: i >= 2 && i <= 3 ? "text-align:center" : "" }, t))));
 
       rows.forEach(({ n, qty, posNum, depth, ancestorLastFlags, hasChildren, edgeCondition, parentNode }) => {
         const isCollapsed = collapsed.has(posNum);
@@ -3860,7 +3860,7 @@
           el("div", { style: "display:flex;gap:0.2rem;flex-shrink:0;flex-wrap:nowrap" }, [
             // ⚙ variant-configure button hidden until import integration is built (PROP-018)
 
-            parentNode && !isDynamicBom && (parentNode.type === "sub_assembly" || parentNode.type === "finished_good") ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+sib") : null,
+            parentNode && !isDynamicBom && (parentNode.type === "sub_assembly" || parentNode.type === "finished_good") ? el("button", { class: "btn btn-sm", type: "button", title: "Add sibling", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(parentNode, allComponents, token, onRefresh, rootId) }, "+part") : null,
             (isDynamicBom ? depth === 0 : (n.type === "sub_assembly" || n.type === "finished_good")) ? el("button", { class: "btn btn-sm", type: "button", title: "Add child", style: "padding:1px 5px;font-size:0.7rem", onclick: () => openAddChildModal(n, allComponents, token, onRefresh, rootId, { linkExistingOnly: isDynamicBom }) }, "+child") : null,
             el("button", {
               class: "btn btn-sm", type: "button",
