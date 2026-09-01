@@ -3587,8 +3587,8 @@
         },
       }, "▶") : el("span", { style: "width:20px;display:inline-block;flex-shrink:0" }, "");
 
-      // Restore expanded state across re-renders
-      if (expandedTrees[comp.id] && expandedTrees[comp.id] !== "loading") {
+      // Restore expanded state across re-renders (only when expand is allowed — Parts tab is always flat)
+      if (allowExpand && expandedTrees[comp.id] && expandedTrees[comp.id] !== "loading") {
         expandBtn.style && (expandBtn.style.transform = "rotate(90deg)");
         if (expandBtn.title !== undefined) expandBtn.title = "Collapse";
         rebuildTreeDiv();
