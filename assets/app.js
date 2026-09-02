@@ -3443,7 +3443,7 @@
     const TAB_DEFS = [
       { id: "components", label: "Parts" },
       { id: "assemblies", label: "Assemblies" },
-      { id: "dynamic",    label: "Dynamic BOMs" },
+      { id: "dynamic",    label: "Product Families" },
     ];
 
     let activeTab = "components";
@@ -3524,7 +3524,7 @@
       treeArea.replaceChildren();
       const items = grouped[activeTab] || [];
       if (!items.length) {
-        const labels = { components: "components", assemblies: "assemblies", dynamic: "dynamic BOMs" };
+        const labels = { components: "components", assemblies: "assemblies", dynamic: "product families" };
         treeArea.append(el("div", { class: "notice", style: "margin-top:1rem" },
           searchQuery ? `No ${labels[activeTab]} match "${searchQuery}".` : `No ${labels[activeTab]} yet. Use + New BOM Node to create one.`));
         return;
@@ -3833,7 +3833,7 @@
 
         // Family badge for product_family roots
         const familyBadge = isFamily
-          ? el("span", { style: "font-size:0.68rem;font-weight:700;background:#2fa56420;color:#2fa564;border-radius:4px;padding:1px 5px;flex-shrink:0;white-space:nowrap;margin-left:4px" }, "DYNAMIC BOM")
+          ? el("span", { style: "font-size:0.68rem;font-weight:700;background:#2fa56420;color:#2fa564;border-radius:4px;padding:1px 5px;flex-shrink:0;white-space:nowrap;margin-left:4px" }, "PRODUCT FAMILY")
           : null;
 
         // Component cell: connector + toggle | name + badges (line 1) / part# (line 2)
@@ -4610,7 +4610,7 @@
           : el("div", { style: "font-size:0.82rem;color:var(--muted,#8b93a1)" }, "No saved configurations yet. Configurations will be imported from the order system (PROP-018).");
 
         configSection = el("div", { style: "margin-bottom:1rem;border:1px solid #2fa56440;border-radius:6px;padding:0.75rem" }, [
-          el("h4", { style: "margin:0 0 0.5rem;color:#2fa564" }, "Dynamic BOM — Variant Setup"),
+          el("h4", { style: "margin:0 0 0.5rem;color:#2fa564" }, "Product Family — Variant Configuration"),
           el("div", { style: "margin-bottom:0.6rem" }, [el("label", { style: LBL }, "Attributes"), attrList]),
           el("div", { style: "display:flex;flex-wrap:wrap;align-items:center;gap:0.35rem;margin-bottom:0.75rem" }, [
             newAttrName, newAttrLabel,
@@ -4863,7 +4863,7 @@
     }
 
     // --- Fields --------------------------------------------------------------
-    const TYPE_OPTS = [["part", "Part"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"], ["product_family", "Dynamic BOM (product family)"]];
+    const TYPE_OPTS = [["part", "Part"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"], ["product_family", "Product Family"]];
     const pn   = el("input",    { class: "up-text", type: "text", placeholder: "Auto-generated if left empty" });
     const oem  = el("input",    { class: "up-text", type: "text", placeholder: "OEM / distributor reference (optional)" });
     const nm   = el("input",    { class: "up-text", type: "text", placeholder: "Name" });
