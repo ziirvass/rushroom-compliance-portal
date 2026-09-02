@@ -4,7 +4,7 @@
 Compliance portal for Rushroom AB's LED furniture product.
 - Frontend: GitHub Pages (static, cache-busted via ?v=N in assets/config.js)
 - Backend: Single Supabase Edge Function `portal-api` (Deno, --no-verify-jwt)
-- DB: Supabase Postgres (25 tables). Schema in supabase/migrations/*.sql
+- DB: Supabase Postgres (29 tables). Schema in supabase/migrations/*.sql
 - AI: ALL calls use `claude-opus-4-8` via api.anthropic.com/v1/messages
 
 ## Commands I use to deploy
@@ -31,7 +31,7 @@ Bump cache:            increment ?v=N in assets/config.js
 - docs/IDEAS.md             — raw feature ideas (Claude reads this before /build)
 - docs/DECISIONS.md         — architectural decisions log (Claude appends after /ship)
 
-## Database — 25 tables across 6 domains
+## Database — 29 tables across 7 domains
 Action plan: steps
 Documents: documents, document_versions, uploads
 Standards: standards, standard_versions
@@ -45,8 +45,10 @@ Classification: classification_log
 SaaS (PROP-012 IN PROGRESS): organizations, memberships,
         invitations, platform_audit, ai_usage_events
 Links (PROP-011): requirement_links, document_statements
+Manufacturing (PROP-030): family_routing_steps, work_orders,
+        work_order_steps, work_order_components
 
 ## Current state
-Frontend cache version: ?v=183
+Frontend cache version: ?v=184
 Last SYSTEM_OVERVIEW audit: 2026-08-29
 PROP-012 (multi-tenant SaaS): IN PROGRESS — do not break organization_id logic

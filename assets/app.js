@@ -5197,6 +5197,403 @@
   }
 
   // --- Main renderProduct entry point ----------------------------------------
+  // PROP-030: Manufacturing BOM — Routing + Work Orders
+  async function mBomView(role, mount) {
+    const token = API.getToken();
+    const OPTYPES = ["drill","route","insert","attach","cut","surface_treat","inspect","other"];
+    const OP_LABEL = { drill:"Drill", route:"Route / CNC", insert:"Insert", attach:"Attach", cut:"Cut", surface_treat:"Surface treat", inspect:"Inspect", other:"Other" };
+    const OP_COLOR = { drill:"#4a9eed", route:"#8b5cf6", insert:"#2fa564", attach:"#f59e0b", cut:"#e05454", surface_treat:"#0ea5e9", inspect:"#8b93a1", other:"#6b7280" };
+    const STATUS_COLORS = { planned:"#8b93a1", in_progress:"#4a9eed", completed:"#2fa564", shipped:"#a855f7" };
+    const STATUS_OPTS = ["planned","in_progress","completed","shipped"];
+
+    async function loadFamilies() {
+      const r = await API.post(token, "listComponents", {});
+      return (r.components || []).filter((c) => c.type === "product_family");
+    }
+
+    const opBadge = (type) => el("span", {
+      style: `display:inline-block;font-size:0.7rem;font-weight:700;padding:2px 6px;border-radius:3px;background:${(OP_COLOR[type]||"#6b7280")}22;color:${OP_COLOR[type]||"#6b7280"};text-transform:uppercase;letter-spacing:0.03em`,
+    }, OP_LABEL[type] || type);
+
+    const statusBadge = (status) => el("span", {
+      style: `display:inline-block;font-size:0.7rem;font-weight:700;padding:2px 7px;border-radius:3px;background:${(STATUS_COLORS[status]||"#8b93a1")}22;color:${STATUS_COLORS[status]||"#8b93a1"};text-transform:uppercase`,
+    }, status.replace(/_/g, " "));
+
+    // ---- Routing sub-tab ------------------------------------------------
+    function buildRoutingTab() {
+      const wrap = el("div", { style: "padding:1rem;max-width:860px" });
+      const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+      const familySel = el("select", { class: "up-text", style: "max-width:280px" }, [el("option", { value: "" }, "— choose product family —")]);
+      const stepsArea = el("div", { style: "margin-top:1rem" });
+
+      let selectedFamilyId = null;
+      let steps = [];
+
+      const loadFamiliesIntoSel = async () => {
+        try {
+          const families = await loadFamilies();
+          families.forEach((f) => familySel.appendChild(el("option", { value: f.id }, f.name)));
+        } catch (ex) { note.textContent = "Could not load families: " + ex.message; }
+      };
+
+      const loadSteps = async (familyId) => {
+        stepsArea.replaceChildren(el("div", { class: "loading" }, "Loading routing steps…"));
+        try {
+          const r = await API.post(token, "listFamilyRoutingSteps", { family_id: familyId });
+          steps = r.steps || [];
+          renderSteps();
+        } catch (ex) { stepsArea.replaceChildren(el("div", { class: "error" }, ex.message)); }
+      };
+
+      const renderSteps = () => {
+        if (!steps.length) {
+          stepsArea.replaceChildren(
+            el("div", { class: "empty" }, "No routing steps defined for this family yet."),
+            el("div", { style: "margin-top:0.75rem" }, addStepBtn()),
+          );
+          return;
+        }
+        stepsArea.replaceChildren(
+          el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem" }, [
+            el("span", { class: "muted" }, `${steps.length} step${steps.length !== 1 ? "s" : ""}`),
+            addStepBtn(),
+          ]),
+          el("div", {}, steps.map((s, i) => stepRow(s, i))),
+        );
+      };
+
+      const addStepBtn = () => actionBtn("+ Add step", "plus", { primary: true, onClick: () => openStepModal(null) });
+
+      const stepRow = (s, idx) => el("div", { style: "padding:0.5rem 0.6rem;border-bottom:1px solid var(--border,#e2e8f0);display:flex;align-items:flex-start;gap:0.5rem" }, [
+        el("span", { style: "font-size:0.75rem;font-weight:700;color:var(--muted,#8b93a1);min-width:1.6rem;text-align:right;padding-top:2px" }, `${s.step_number}.`),
+        el("div", { style: "flex:1;min-width:0" }, [
+          el("div", { style: "display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap" }, [
+            opBadge(s.operation_type),
+            s.applies_to_name ? el("span", { class: "muted", style: "font-size:0.78rem" }, "→ " + s.applies_to_name) : null,
+            s.variant_condition && Object.keys(s.variant_condition).length ? el("span", { style: "font-size:0.7rem;background:var(--bg-2,#f5f5f5);border-radius:3px;padding:1px 5px;color:var(--muted,#8b93a1)" }, "conditional") : null,
+          ].filter(Boolean)),
+          el("div", { style: "margin-top:0.25rem;font-size:0.9rem" }, s.instruction_text),
+          s.reference_document_name ? el("div", { class: "muted", style: "font-size:0.78rem;margin-top:0.1rem" }, "📎 " + s.reference_document_name) : null,
+          s.notes ? el("div", { class: "muted", style: "font-size:0.78rem;margin-top:0.1rem" }, s.notes) : null,
+        ].filter(Boolean)),
+        el("div", { style: "display:flex;gap:0.25rem;flex-shrink:0" }, [
+          el("button", { class: "btn btn-sm", type: "button", title: "Move up",   disabled: idx === 0 ? "" : null, onclick: () => moveStep(idx, -1) }, "↑"),
+          el("button", { class: "btn btn-sm", type: "button", title: "Move down", disabled: idx === steps.length - 1 ? "" : null, onclick: () => moveStep(idx, +1) }, "↓"),
+          actionBtn("Edit", "edit", { onClick: () => openStepModal(s) }),
+          actionBtn("Delete", "trash", { danger: true, onClick: () => deleteStep(s) }),
+        ]),
+      ]);
+
+      const moveStep = async (idx, dir) => {
+        const newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= steps.length) return;
+        const orderedIds = steps.map((s) => s.id);
+        [orderedIds[idx], orderedIds[newIdx]] = [orderedIds[newIdx], orderedIds[idx]];
+        try {
+          await API.post(token, "reorderFamilyRoutingSteps", { family_id: selectedFamilyId, ordered_ids: orderedIds });
+          await loadSteps(selectedFamilyId);
+        } catch (ex) { note.textContent = ex.message; }
+      };
+
+      const deleteStep = async (s) => {
+        if (!confirm(`Delete step ${s.step_number}: "${s.instruction_text.slice(0, 60)}"?`)) return;
+        try {
+          await API.post(token, "deleteFamilyRoutingStep", { id: s.id });
+          await loadSteps(selectedFamilyId);
+        } catch (ex) { note.textContent = ex.message; }
+      };
+
+      const openStepModal = async (existing) => {
+        let familyComps = [];
+        let docVersions = [];
+        try {
+          const bom = await API.post(token, "getBom", { id: selectedFamilyId });
+          familyComps = (bom.nodes || []).filter((n) => n.id !== selectedFamilyId);
+        } catch { /* optional */ }
+        try {
+          const r = await API.post(token, "data", {});
+          docVersions = (r.documents || []).flatMap((d) =>
+            (d.versions || []).map((v) => ({ id: v.id, label: `${d.name} (${v.version_label || v.version || "v?"})` }))
+          );
+        } catch { /* optional */ }
+
+        const v = existing || {};
+        const frow = (lbl, inp) => el("label", { class: "form-row" }, [el("span", { class: "form-label" }, lbl), inp]);
+        const stepNumInp = el("input", { type: "number", class: "up-text", min: "1", value: existing ? String(existing.step_number) : String(steps.length + 1) });
+        const opSel = el("select", { class: "up-text" }, OPTYPES.map((t) => el("option", { value: t, selected: t === (v.operation_type || "drill") ? "selected" : null }, OP_LABEL[t])));
+        const instrInp = el("textarea", { rows: "3", class: "up-text", placeholder: "Describe exactly what the operator must do…" }, v.instruction_text || "");
+        const appliesToSel = el("select", { class: "up-text" }, [
+          el("option", { value: "" }, "— whole assembly / no specific component —"),
+          ...familyComps.map((c) => el("option", { value: c.id, selected: c.id === v.applies_to_component_id ? "selected" : null }, c.name || c.part_number || c.id)),
+        ]);
+        const refDocSel = el("select", { class: "up-text" }, [
+          el("option", { value: "" }, "— no reference document —"),
+          ...docVersions.map((d) => el("option", { value: d.id, selected: d.id === v.reference_document_id ? "selected" : null }, d.label)),
+        ]);
+        const notesInp = el("input", { type: "text", class: "up-text", placeholder: "Optional notes", value: v.notes || "" });
+        const errEl2 = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+        const saveBtn = el("button", { class: "btn btn-primary", type: "button" }, existing ? "Save changes" : "Add step");
+
+        let closeStepModal;
+        saveBtn.onclick = async () => {
+          const instr = instrInp.value.trim();
+          if (!instr) { errEl2.textContent = "Instruction text is required."; return; }
+          saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+          try {
+            await API.post(token, "upsertFamilyRoutingStep", {
+              id: existing?.id,
+              family_id: selectedFamilyId,
+              step_number: Number(stepNumInp.value) || 1,
+              operation_type: opSel.value,
+              instruction_text: instr,
+              applies_to_component_id: appliesToSel.value || null,
+              reference_document_id: refDocSel.value || null,
+              notes: notesInp.value.trim() || null,
+            });
+            if (closeStepModal) closeStepModal();
+            await loadSteps(selectedFamilyId);
+          } catch (ex) { errEl2.textContent = ex.message; saveBtn.disabled = false; saveBtn.textContent = existing ? "Save changes" : "Add step"; }
+        };
+
+        closeStepModal = openModal(existing ? "Edit routing step" : "New routing step", el("div", {}, [
+          frow("Step #", stepNumInp),
+          frow("Operation type", opSel),
+          frow("Instruction for operator", instrInp),
+          frow("Applies to component", appliesToSel),
+          frow("Reference document", refDocSel),
+          frow("Notes", notesInp),
+          errEl2,
+          el("div", { style: "margin-top:0.75rem" }, saveBtn),
+        ]));
+      };
+
+      familySel.addEventListener("change", async () => {
+        selectedFamilyId = familySel.value || null;
+        if (selectedFamilyId) await loadSteps(selectedFamilyId);
+        else stepsArea.replaceChildren();
+      });
+
+      wrap.replaceChildren(
+        el("div", { style: "display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem" }, [
+          el("label", { class: "form-label", style: "margin:0;white-space:nowrap" }, "Product family:"),
+          familySel,
+        ]),
+        note,
+        stepsArea,
+      );
+      loadFamiliesIntoSel();
+      return wrap;
+    }
+
+    // ---- Work Orders sub-tab --------------------------------------------
+    function buildOrdersTab() {
+      const wrap = el("div", { style: "padding:1rem;max-width:860px" });
+      const listArea   = el("div", {});
+      const detailArea = el("div", { style: "margin-top:1rem" });
+
+      const reload = async () => {
+        listArea.replaceChildren(el("div", { class: "loading" }, "Loading work orders…"));
+        detailArea.replaceChildren();
+        try {
+          const r = await API.post(token, "listWorkOrders", {});
+          renderList(r.work_orders || []);
+        } catch (ex) { listArea.replaceChildren(el("div", { class: "error" }, ex.message)); }
+      };
+
+      const renderList = (orders) => {
+        if (!orders.length) { listArea.replaceChildren(el("div", { class: "empty" }, "No work orders yet.")); return; }
+        const TD = (content, style = "") => el("td", { style: "padding:0.4rem 0.5rem;" + style }, content);
+        listArea.replaceChildren(el("table", { style: "width:100%;border-collapse:collapse;font-size:0.875rem" }, [
+          el("thead", {}, [el("tr", { style: "border-bottom:2px solid var(--border,#e2e8f0)" }, [
+            el("th", { style: "text-align:left;padding:0.4rem 0.5rem" }, "Family"),
+            el("th", { style: "text-align:left;padding:0.4rem 0.5rem" }, "Order ref"),
+            el("th", { style: "text-align:left;padding:0.4rem 0.5rem" }, "Status"),
+            el("th", { style: "text-align:left;padding:0.4rem 0.5rem" }, "Steps"),
+            el("th", { style: "text-align:left;padding:0.4rem 0.5rem" }, "Created"),
+            el("th", {}),
+          ])]),
+          el("tbody", {}, orders.map((o) => el("tr", { style: "border-bottom:1px solid var(--border,#e2e8f0);cursor:pointer", onclick: () => openDetail(o.id) }, [
+            TD(o.family_name || "—"),
+            TD(o.external_order_id || el("span", { class: "muted" }, "—")),
+            TD(statusBadge(o.status)),
+            TD(`${o.steps_done}/${o.step_count}`),
+            TD(fmtDate(o.created_at), "color:var(--muted,#8b93a1)"),
+            TD(actionBtn("Open", "external", { onClick: (e) => { e.stopPropagation(); openDetail(o.id); } })),
+          ]))),
+        ]));
+      };
+
+      const openDetail = async (woId) => {
+        detailArea.replaceChildren(el("div", { class: "loading" }, "Loading work order…"));
+        detailArea.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        try {
+          const r = await API.post(token, "getWorkOrder", { id: woId });
+          const wo    = r.work_order;
+          const steps = r.steps || [];
+          const comps = r.components || [];
+          const processedCompIds = new Set(steps.map((s) => s.applies_to_component_id).filter(Boolean));
+          const processComps = comps.filter((c) => processedCompIds.has(c.component_id));
+          const packComps    = comps.filter((c) => !processedCompIds.has(c.component_id));
+          const selStr = Object.entries(wo.selections || {}).map(([k, v]) => `${k}: ${v}`).join(", ") || "—";
+
+          const statusSel = el("select", { class: "up-text", style: "font-size:0.85rem" },
+            STATUS_OPTS.map((s) => el("option", { value: s, selected: s === wo.status ? "selected" : null }, s.replace(/_/g, " ")))
+          );
+          const updateStatusBtn = actionBtn("Update", "refresh", { onClick: async () => {
+            updateStatusBtn.disabled = true;
+            try { await API.post(token, "updateWorkOrderStatus", { id: wo.id, status: statusSel.value }); await reload(); openDetail(woId); }
+            catch (ex) { alert(ex.message); updateStatusBtn.disabled = false; }
+          } });
+
+          const stepCheckRow = (s) => {
+            const cb = el("input", { type: "checkbox", checked: s.status === "done" ? "checked" : null, style: "cursor:pointer;margin-top:3px;flex-shrink:0" });
+            const rowEl = el("div", { style: `display:flex;align-items:flex-start;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid var(--border,#e2e8f0);opacity:${s.status==="done"?"0.6":"1"}` }, [
+              el("span", { style: "font-size:0.75rem;font-weight:700;color:var(--muted,#8b93a1);min-width:1.6rem;text-align:right;padding-top:3px" }, `${s.step_number}.`),
+              cb,
+              el("div", { style: "flex:1;min-width:0" }, [
+                el("div", { style: "font-size:0.88rem" }, s.instruction_text),
+                s.applies_to_name ? el("div", { class: "muted", style: "font-size:0.78rem" }, "→ " + s.applies_to_name) : null,
+                s.reference_document_url ? el("div", { style: "margin-top:0.15rem" }, actionBtn("Open reference", "external", { href: s.reference_document_url, target: "_blank" })) : null,
+              ].filter(Boolean)),
+            ]);
+            cb.onchange = async () => {
+              cb.disabled = true;
+              try {
+                const newStatus = cb.checked ? "done" : "pending";
+                await API.post(token, "updateWorkOrderStepStatus", { step_id: s.id, status: newStatus });
+                s.status = newStatus;
+                rowEl.style.opacity = cb.checked ? "0.6" : "1";
+              } catch (ex) { alert(ex.message); cb.checked = !cb.checked; }
+              cb.disabled = false;
+            };
+            return rowEl;
+          };
+
+          const compRow = (c) => el("div", { style: "display:flex;gap:0.5rem;padding:0.3rem 0;font-size:0.875rem;border-bottom:1px solid var(--border,#e2e8f0);align-items:center" }, [
+            el("span", { style: "min-width:2.5rem;text-align:right;color:var(--muted,#8b93a1);font-weight:600" }, `×${Number(c.quantity)}`),
+            el("span", { style: "flex:1" }, c.name || c.component_id),
+            c.part_number ? el("span", { class: "muted", style: "font-size:0.78rem" }, c.part_number) : null,
+          ].filter(Boolean));
+
+          detailArea.replaceChildren(el("div", { style: "border:1px solid var(--border,#e2e8f0);border-radius:8px;padding:1rem" }, [
+            el("div", { style: "display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;flex-wrap:wrap" }, [
+              el("h4", { style: "margin:0;font-size:1rem" }, `WO: ${wo.family_name}`),
+              statusBadge(wo.status),
+              el("span", { class: "spacer" }),
+              el("button", { class: "btn btn-sm", type: "button", onclick: () => detailArea.replaceChildren() }, "✕ Close"),
+            ]),
+            wo.external_order_id ? el("p", { class: "muted", style: "margin:0 0 0.25rem;font-size:0.85rem" }, `Order ref: ${wo.external_order_id}`) : null,
+            el("p", { class: "muted", style: "margin:0 0 0.75rem;font-size:0.85rem" }, `Config: ${selStr}`),
+            el("div", { style: "display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap" }, [
+              el("span", { class: "form-label", style: "margin:0" }, "Status:"),
+              statusSel,
+              updateStatusBtn,
+            ]),
+            steps.length ? el("div", { style: "margin-bottom:1rem" }, [
+              el("h5", { style: "margin:0 0 0.4rem;font-size:0.875rem;font-weight:700" }, "Processing steps"),
+              el("div", {}, steps.map(stepCheckRow)),
+            ]) : null,
+            processComps.length ? el("div", { style: "margin-bottom:1rem" }, [
+              el("h5", { style: "margin:0 0 0.4rem;font-size:0.875rem;font-weight:700" }, "Pull & process"),
+              el("div", {}, processComps.map(compRow)),
+            ]) : null,
+            packComps.length ? el("div", {}, [
+              el("h5", { style: "margin:0 0 0.4rem;font-size:0.875rem;font-weight:700" }, "Pull & pack"),
+              el("div", {}, packComps.map(compRow)),
+            ]) : null,
+          ].filter(Boolean)));
+        } catch (ex) { detailArea.replaceChildren(el("div", { class: "error" }, ex.message)); }
+      };
+
+      const openNewWoModal = async () => {
+        let families = [];
+        try { families = await loadFamilies(); } catch (ex) { alert("Could not load families: " + ex.message); return; }
+        if (!families.length) { alert("No product families defined yet."); return; }
+
+        const famSel = el("select", { class: "up-text" }, [
+          el("option", { value: "" }, "— choose product family —"),
+          ...families.map((f) => el("option", { value: f.id }, f.name)),
+        ]);
+        const extOrdInp = el("input", { type: "text", class: "up-text", placeholder: "Customer order ref (optional)" });
+        const notesInp2 = el("input", { type: "text", class: "up-text", placeholder: "Optional notes" });
+        const attrsArea = el("div", { style: "margin-top:0.5rem" });
+        const errEl2 = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+        const createBtn = el("button", { class: "btn btn-primary", type: "button" }, "Create work order");
+        let selections = {};
+        let closeWoModal;
+
+        const loadAttrs = async (familyId) => {
+          attrsArea.replaceChildren(el("div", { class: "loading" }, "Loading attributes…"));
+          selections = {};
+          try {
+            const r = await API.post(token, "listFamilyAttributes", { family_id: familyId });
+            const attrs = r.attributes || [];
+            if (!attrs.length) {
+              attrsArea.replaceChildren(el("p", { class: "muted" }, "No variant attributes — work order applies to all configurations."));
+            } else {
+              const LBL = "display:block;font-size:0.75rem;font-weight:600;color:var(--muted,#8b93a1);margin-bottom:0.15rem";
+              attrsArea.replaceChildren(
+                el("p", { class: "muted", style: "font-size:0.8rem;margin-bottom:0.5rem" }, "Select configuration attributes:"),
+                ...attrs.map((attr) => {
+                  const sel = el("select", { class: "up-text", style: "width:100%",
+                    onchange: () => { if (sel.value) selections[attr.name] = sel.value; else delete selections[attr.name]; },
+                  }, [
+                    el("option", { value: "" }, "— " + attr.display_name + " —"),
+                    ...(attr.values || []).map((v) => el("option", { value: v.value }, v.label)),
+                  ]);
+                  return el("div", { style: "margin-bottom:0.35rem" }, [el("label", { style: LBL }, attr.display_name), sel]);
+                }),
+              );
+            }
+          } catch (ex) { attrsArea.replaceChildren(el("div", { class: "error" }, ex.message)); }
+        };
+
+        famSel.addEventListener("change", () => { if (famSel.value) loadAttrs(famSel.value); else attrsArea.replaceChildren(); });
+
+        createBtn.onclick = async () => {
+          if (!famSel.value) { errEl2.textContent = "Choose a product family."; return; }
+          createBtn.disabled = true; createBtn.textContent = "Creating…";
+          try {
+            const r = await API.post(token, "createWorkOrder", {
+              family_id: famSel.value, selections,
+              external_order_id: extOrdInp.value.trim() || null,
+              notes: notesInp2.value.trim() || null,
+            });
+            if (closeWoModal) closeWoModal();
+            await reload();
+            openDetail(r.work_order_id);
+          } catch (ex) { errEl2.textContent = ex.message; createBtn.disabled = false; createBtn.textContent = "Create work order"; }
+        };
+
+        const frow = (lbl, inp) => el("label", { class: "form-row" }, [el("span", { class: "form-label" }, lbl), inp]);
+        closeWoModal = openModal("New Work Order", el("div", {}, [
+          frow("Product family", famSel),
+          frow("Order ref", extOrdInp),
+          attrsArea,
+          frow("Notes", notesInp2),
+          errEl2,
+          el("div", { style: "margin-top:0.75rem" }, createBtn),
+        ]));
+      };
+
+      wrap.replaceChildren(
+        el("div", { style: "display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem" }, [
+          actionBtn("+ New Work Order", "plus", { primary: true, onClick: () => openNewWoModal() }),
+          actionBtn("↺ Refresh", "refresh", { onClick: () => reload() }),
+        ]),
+        listArea,
+        detailArea,
+      );
+      reload();
+      return wrap;
+    }
+
+    mount.replaceChildren(subTabs("mbom", [
+      { id: "routing", label: "Routing",      icon: "layers", build: () => buildRoutingTab() },
+      { id: "orders",  label: "Work Orders",  icon: "printer", build: () => buildOrdersTab() },
+    ]));
+  }
+
   async function renderProduct(role, mount) {
     const token = API.getToken();
     mount.replaceChildren(subTabs("product", [
@@ -5863,6 +6260,7 @@
       ];
       if (role === "rushroom") docTabs.push({ id: "labels", label: "Labels and Instructions", icon: "tag", build: labelsTab });
       if (role === "rushroom") docTabs.push({ id: "bom", label: "Product BOM", icon: "grid", build: () => { const m = el("div", {}); renderProduct(role, m); return m; } });
+      if (role === "rushroom") docTabs.push({ id: "manufacturing", label: "Manufacturing BOM", icon: "gauge", build: () => { const m = el("div", {}); mBomView(role, m); return m; } });
       if (role === "rushroom") docTabs.push({ id: "uploads", label: "Supplier uploads", icon: "external", build: uploadsTab });
       docsPanel.replaceChildren(subTabs("documents", docTabs));
     };

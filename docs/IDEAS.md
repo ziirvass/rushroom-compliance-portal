@@ -624,3 +624,65 @@ The frontend has no guard on adding a second child — the +child button on the 
 **Related PROPs:** PROP-020 (introduced the three-tab split and the column header), PROP-025 (established the type vocabulary: part/raw_material/sub_assembly/finished_good/spare_part).
 
 **Status:** Raw idea — tiny effort, high clarity gain
+
+---
+### Manufacturing Routing — Postponement Model with Variant-Conditional Operations — 2026-09-01
+
+**One sentence:** Attach an ordered, variant-conditional sequence of in-house operations to each Dynamic BOM product family so that resolving a customer configuration yields both the parts to pull from semi-finished stock AND the exact operation sequence to perform — enabling a full postponement manufacturing model where generic inventory is finalised to order.
+
+**Business model context:**
+Rushroom operates a postponement (hedging) model. Semi-finished panels are bought and stocked generically with their own article numbers. When a customer order arrives, the specific configuration is resolved — the right panels are pulled and a sequence of operations (cut, drill, mill, surface treat, assemble) is performed to finalise them before shipment. Nothing is stocked as a finished configuration. This is the same model Dell applied to PCs: maximum inventory fungibility, minimum committed stock, full customer configuration at the point of order.
+
+**Key architectural truth:**
+- The **semi-finished panel** = the postponement point. Purchased, stocked, compliance-tracked.
+- The **routing** = what is done to it, determined by which configuration the customer ordered.
+- The **configured output** = ephemeral — made and shipped, not stocked under a new article number.
+- Different configurations within the same product family require **entirely different operation sequences** — not just different parameters on the same steps. A surface-treated config adds steps that a plain config never sees.
+
+**Therefore:** routing steps live on the **product family (Dynamic BOM)**, not on individual purchased components. Each step carries a `variant_condition JSONB` (same pattern as `bom_edges.variant_condition`) — `NULL` = always performed; `{"Surface": "anodised"}` = only for that variant. Resolving a customer configuration produces two outputs: a resolved BOM (parts to pull) and a resolved routing (operations to perform), together forming a complete production order specification.
+
+**Problem it solves today:**
+- Operations are invisible — no record of what work sequence was performed per order
+- Configurations that differ by process type (not just component selection) cannot be expressed in the current Dynamic BOM model — only `bom_edges` carry `variant_condition`, not operations
+- A work order issued to the shop floor has no system backing — it exists only on paper or in someone's head
+- Compliance cannot answer "which operations were performed on the panels in customer order #X, and did any of them involve SVHC process chemicals?"
+
+**MVP scope:**
+1. **New table `family_routing_steps`** — `{id, organization_id NOT NULL FK→organizations, family_id FK→bom_components (must be product_family type), step_number INTEGER, operation_type TEXT badge (drill/route/insert/attach/cut/surface_treat/inspect/other — visual categorisation only), instruction_text TEXT (the actual instruction: "Drill 4× Ø5mm holes per drilling template"), reference_document_id FK→document_versions NULLABLE (the PDF template, CNC drawing, or spec the operator opens on the shop floor), applies_to_component_id FK→bom_components NULLABLE (which panel/part this step acts on), variant_condition JSONB NULLABLE (null = always; same semantics as bom_edges.variant_condition), notes TEXT, created_at}`. Steps are atomic physical actions — one checkoff per action. The instruction_text is free-form; the reference_document_id links to the template or drawing from the document library.
+2. **New API action `listFamilyRoutingSteps(family_id)`** — returns all routing steps for the family, ordered by step_number.
+3. **New API action `upsertFamilyRoutingStep(...)`** and **`deleteFamilyRoutingStep(id)`**.
+4. **Extend `resolveVariant(family_id, selections)`** — currently returns resolved component tree only. Extend to also return `resolved_routing: []` — steps where `variant_condition IS NULL OR variant_condition <@ selections`, ordered by step_number.
+5. **New table `work_orders`** — `{id, organization_id NOT NULL, family_id FK→bom_components, external_order_id TEXT (from storefront), selections JSONB (the customer's configuration choices), status TEXT (planned/in_progress/completed/shipped), created_at, updated_at}`.
+6. **New table `work_order_steps`** — snapshot of the resolved routing at order creation time (immutable after creation): `{id, work_order_id FK→work_orders, step_number, operation_name, operation_type, applies_to_component_id, notes, status (pending/in_progress/done), completed_at, completed_by}`. Snapshot — not a live reference — so changes to routing definition do not silently change in-flight orders.
+7. **New table `work_order_components`** — snapshot of the resolved BOM at order creation time: `{id, work_order_id, component_id FK→bom_components, quantity}`.
+8. **API actions:** `createWorkOrder(family_id, selections, external_order_id)` — calls resolveVariant internally, snapshots routing + BOM into work_order_steps + work_order_components; `listWorkOrders`; `getWorkOrder(id)`; `updateWorkOrderStepStatus(step_id, status)` (shop floor progression); `completeWorkOrder(id)`.
+9. **Frontend — Dynamic BOM detail panel:** new "Routing" tab showing the step list. Steps editable (add/reorder/delete). variant_condition picker reuses the existing attribute/value selector from PROP-015.
+10. **Frontend — Work Orders view** (new sub-tab in the Product tab): list of orders with status, configuration summary, and a detail view showing the resolved routing checklist + component pull list.
+
+**Tables involved:**
+- New: `family_routing_steps`, `work_orders`, `work_order_steps`, `work_order_components` — all with `organization_id NOT NULL FK→organizations`
+- Extended: `resolveVariant` API action (return shape gains `resolved_routing`)
+
+**Effort estimate:** 20–28 hours
+- Migration (4 new tables): 2 h
+- Backend routing CRUD actions (3): 3 h
+- Extend `resolveVariant` to return routing: 2 h
+- Backend work order actions (5): 5 h
+- Frontend — routing tab on Dynamic BOM panel: 4 h
+- Frontend — Work Orders list + detail view: 7–10 h
+- Integration point with storefront `external_order_id`: 2 h
+
+**Risks:**
+- **Snapshot vs live routing:** Work order steps are snapshotted at creation — the right call for a production system (you cannot change what was planned after the order is in progress). Means a routing error discovered mid-production requires a new work order or a manual correction note, not an edit to the original.
+- **REACH/process chemistry (Layer 2):** Operations like surface treatment (anodising, powder coat) involve process chemicals that may be SVHC-relevant. MVP captures operation type — linking specific chemicals to operation types for REACH compliance is the natural Layer 2 once routing is established.
+- **Shop floor UX:** The Work Orders view needs to work on a tablet at the bench, not just a desktop. Mobile-first design for step progression (big tap targets, minimal scrolling). Not in MVP scope — desktop first, tablet-optimise in iteration 2.
+- **Stock reservation:** The work order pull list tells the operator which stock items to take, but does not decrement inventory — there is no inventory ledger yet. That is a future module. MVP: the pull list is informational.
+- **Cycle times and work centres:** Valid future additions (how long each step takes, which machine or bench it runs on) — add `estimated_minutes` and `work_centre TEXT` columns to `family_routing_steps` when needed. Schema is designed to accept them without breaking changes.
+
+**Related PROPs:**
+- PROP-015 (CTO Variant BOM — `variant_condition` pattern; `family_attributes`/`family_attribute_values` used by routing condition picker)
+- PROP-018 (Dynamic BOM order import — `external_order_id` on work orders is the join key to the storefront order)
+- PROP-014 (Compliance–BOM Integration — per-order routing record is the future anchor for process-chemical compliance evidence)
+- PROP-012 (Multi-tenancy — `organization_id NOT NULL` on all four new tables)
+
+**Status:** Raw idea — supersedes the earlier "manufactured part number" framing; correct model is variant-conditional routing on the product family, not routing on individual manufactured components

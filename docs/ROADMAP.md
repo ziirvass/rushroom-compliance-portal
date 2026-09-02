@@ -1,5 +1,5 @@
 # Rushroom Compliance Portal — Roadmap
-_Last updated: 2026-08-31 · Auto-maintained by /ship_
+_Last updated: 2026-09-02 · Auto-maintained by /ship_
 
 ## Now — In Progress
 - PROP-021 Component Document Lifecycle — Layer 1 shipped (upload & link from component panel); Layers 2–4 (new revision, AI diff, data extraction) pending; PROP-014 must be reviewed before Layer 2 design
@@ -15,6 +15,7 @@ _Last updated: 2026-08-31 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
+- **PROP-030 Manufacturing BOM — Postponement Routing & Work Orders** (4 new tables: family_routing_steps, work_orders, work_order_steps, work_order_components; 9 new API actions; mBomView() with Routing + Work Orders sub-tabs; variant-conditional atomic steps; work order snapshot model; split pull list; cache v184) — 2026-09-02
 - **Fix — Parts tab catalog-only; +child removed; sub_assembly always in Assemblies tab** (+child gated on allowExpand so Parts tab has no structural actions; sub_assembly type routes to Assemblies tab regardless of has_children; cache v183) — 2026-09-01
 - **Fix — Parts tab tree-state restore guard** (allowExpand guard added to expandedTrees restore block in renderRootRow; cached Assemblies-tab expansion no longer leaks into Parts tab on re-render; cache v182) — 2026-09-01
 - **Fix — Parts tab always flat catalog; no BOM trees** (renderRootRow gains allowExpand param; Parts tab suppresses expand regardless of has_children; cache v181) — 2026-09-01

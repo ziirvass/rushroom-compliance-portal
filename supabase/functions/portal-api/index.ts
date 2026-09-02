@@ -201,6 +201,8 @@ const TENANT_TABLES = new Set([
   "family_attributes", "family_attribute_values", "saved_configurations",
   // PROP-026: Component image gallery
   "component_images",
+  // PROP-030: Manufacturing BOM
+  "family_routing_steps", "work_orders", "work_order_steps", "work_order_components",
 ]);
 function makeTdb(orgId: string) {
   const stamp = (rows: any) => Array.isArray(rows)
@@ -4113,7 +4115,15 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
         }
       });
     }
-    return json({ nodes: Object.values(nodeMap), edges: resultEdges });
+    // Resolve routing steps for this configuration (PROP-030 extension)
+    const { data: routingSteps } = await tdb("family_routing_steps")
+      .select("id, step_number, operation_type, instruction_text, reference_document_id, applies_to_component_id, variant_condition, notes")
+      .eq("family_id", family_id).order("step_number");
+    const resolvedRouting = (routingSteps || []).filter((s: any) => {
+      const cond = s.variant_condition;
+      return !cond || Object.entries(cond as Record<string, string>).every(([k, v]) => selections[k] === v);
+    });
+    return json({ nodes: Object.values(nodeMap), edges: resultEdges, resolved_routing: resolvedRouting });
   }
 
   // --- Configurations: save a named configuration for a family --------------
@@ -4249,6 +4259,303 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       .filter(([, s]) => s.size > 1)
       .map(([component_id, s]) => ({ component_id, parent_count: s.size }));
     return json({ parentCounts });
+  }
+
+  // ==========================================================================
+  // PROP-030: Manufacturing BOM — Routing & Work Orders
+  // ==========================================================================
+
+  // --- Routing: list steps for a product family ----------------------------
+  if (action === "listFamilyRoutingSteps") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id } = body;
+    if (!family_id) return json({ error: "family_id required" }, 400);
+    const { data, error } = await tdb("family_routing_steps")
+      .select("id, step_number, operation_type, instruction_text, reference_document_id, applies_to_component_id, variant_condition, notes")
+      .eq("family_id", family_id).order("step_number");
+    if (error) return json({ error: error.message }, 500);
+    // Enrich with component name and document name for display
+    const steps = data || [];
+    const compIds = [...new Set(steps.map((s: any) => s.applies_to_component_id).filter(Boolean))];
+    const docIds  = [...new Set(steps.map((s: any) => s.reference_document_id).filter(Boolean))];
+    const compMap: Record<string, string> = {};
+    const docMap:  Record<string, string> = {};
+    if (compIds.length) {
+      const { data: comps } = await tdb("bom_components").select("id, name").in("id", compIds);
+      (comps || []).forEach((c: any) => { compMap[c.id] = c.name; });
+    }
+    if (docIds.length) {
+      const { data: docs } = await db.from("document_versions")
+        .select("id, version_label, document_id").in("id", docIds);
+      if (docs) {
+        const dDocIds = docs.map((d: any) => d.document_id);
+        const { data: dDocs } = await db.from("documents").select("id, name").in("id", dDocIds);
+        const dDocMap: Record<string, string> = {};
+        (dDocs || []).forEach((d: any) => { dDocMap[d.id] = d.name; });
+        docs.forEach((d: any) => { docMap[d.id] = `${dDocMap[d.document_id] || ""} (${d.version_label})`; });
+      }
+    }
+    const enriched = steps.map((s: any) => ({
+      ...s,
+      applies_to_name: compMap[s.applies_to_component_id] || null,
+      reference_document_name: docMap[s.reference_document_id] || null,
+    }));
+    return json({ steps: enriched });
+  }
+
+  // --- Routing: upsert a step ----------------------------------------------
+  if (action === "upsertFamilyRoutingStep") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { id: stepId, family_id, step_number, operation_type, instruction_text,
+            reference_document_id, applies_to_component_id, variant_condition, notes } = body;
+    if (!family_id || !step_number || !operation_type || !instruction_text)
+      return json({ error: "family_id, step_number, operation_type, instruction_text required" }, 400);
+    const row = {
+      family_id, step_number: Number(step_number), operation_type,
+      instruction_text: String(instruction_text).trim(),
+      reference_document_id: reference_document_id || null,
+      applies_to_component_id: applies_to_component_id || null,
+      variant_condition: variant_condition || null,
+      notes: notes || null,
+    };
+    if (stepId) {
+      const { error } = await tdb("family_routing_steps").update(row).eq("id", stepId);
+      if (error) return json({ error: error.message }, 400);
+      return json({ ok: true, id: stepId });
+    }
+    const { data, error } = await tdb("family_routing_steps").insert(row).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true, id: data.id });
+  }
+
+  // --- Routing: delete a step ----------------------------------------------
+  if (action === "deleteFamilyRoutingStep") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { id: stepId } = body;
+    if (!stepId) return json({ error: "id required" }, 400);
+    const { error } = await tdb("family_routing_steps").delete().eq("id", stepId);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- Routing: reorder steps (update step_number to match ordered_ids) ----
+  if (action === "reorderFamilyRoutingSteps") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id, ordered_ids } = body;
+    if (!family_id || !Array.isArray(ordered_ids)) return json({ error: "family_id and ordered_ids required" }, 400);
+    // Two-pass: high offset to avoid UNIQUE conflicts, then final numbering
+    const n = ordered_ids.length;
+    for (let i = 0; i < n; i++) {
+      await tdb("family_routing_steps").update({ step_number: 10000 + i + 1 }).eq("id", ordered_ids[i]);
+    }
+    for (let i = 0; i < n; i++) {
+      await tdb("family_routing_steps").update({ step_number: i + 1 }).eq("id", ordered_ids[i]);
+    }
+    return json({ ok: true });
+  }
+
+  // --- Work Orders: create (resolve + snapshot BOM + routing) --------------
+  if (action === "createWorkOrder") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id, selections, external_order_id, notes: woNotes } = body;
+    if (!family_id || !selections) return json({ error: "family_id and selections required" }, 400);
+
+    // Resolve BOM (same BFS as resolveVariant)
+    const nodeMap: Record<string, any> = {};
+    const edgeList: any[] = [];
+    const queue: Array<{ id: string; depth: number; qty: number }> = [{ id: family_id, depth: 0, qty: 1 }];
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const batch = queue.splice(0, queue.length);
+      const ids = batch.map((n: any) => n.id).filter((id: string) => !visited.has(id));
+      if (!ids.length) break;
+      ids.forEach((id: string) => visited.add(id));
+      const { data: comps } = await tdb("bom_components")
+        .select("id, name, part_number, type").in("id", ids);
+      (comps || []).forEach((c: any) => { nodeMap[c.id] = { ...c, qty: 1 }; });
+      const currentBatch = batch;
+      if (currentBatch[0].depth >= 10) continue;
+      const { data: childEdges } = await db.from("bom_edges")
+        .select("parent_id, child_id, quantity, variant_condition")
+        .in("parent_id", ids).is("effective_to", null).eq("organization_id", organizationId);
+      (childEdges || []).forEach((e: any) => {
+        const cond = e.variant_condition;
+        const included = !cond || Object.entries(cond as Record<string, string>).every(([k, v]) => selections[k] === v);
+        if (included) {
+          edgeList.push(e);
+          const parentItem = currentBatch.find((b: any) => b.id === e.parent_id);
+          const effectiveQty = (parentItem?.qty || 1) * Number(e.quantity);
+          if (!visited.has(e.child_id)) queue.push({ id: e.child_id, depth: currentBatch[0].depth + 1, qty: effectiveQty });
+          if (nodeMap[e.child_id]) nodeMap[e.child_id].qty = effectiveQty;
+        }
+      });
+    }
+    // Collect leaf components (not the root family itself)
+    const leafComponents = Object.values(nodeMap).filter((c: any) => c.id !== family_id);
+
+    // Resolve routing steps
+    const { data: routingSteps } = await tdb("family_routing_steps")
+      .select("step_number, operation_type, instruction_text, reference_document_id, applies_to_component_id, notes")
+      .eq("family_id", family_id).order("step_number");
+    const resolvedSteps = (routingSteps || []).filter((s: any) => {
+      const cond = s.variant_condition;
+      return !cond || Object.entries(cond as Record<string, string>).every(([k, v]) => selections[k] === v);
+    });
+
+    // Insert work order
+    const { data: wo, error: woErr } = await tdb("work_orders").insert({
+      family_id, selections, external_order_id: external_order_id || null,
+      notes: woNotes || null, status: "planned",
+    }).select("id").maybeSingle();
+    if (woErr) return json({ error: woErr.message }, 400);
+    const workOrderId = wo.id;
+
+    // Snapshot routing steps
+    if (resolvedSteps.length) {
+      const stepRows = resolvedSteps.map((s: any) => ({
+        work_order_id: workOrderId, step_number: s.step_number,
+        operation_type: s.operation_type, instruction_text: s.instruction_text,
+        reference_document_id: s.reference_document_id || null,
+        applies_to_component_id: s.applies_to_component_id || null,
+        notes: s.notes || null, status: "pending",
+      }));
+      const { error: stepsErr } = await tdb("work_order_steps").insert(stepRows);
+      if (stepsErr) return json({ error: stepsErr.message }, 400);
+    }
+
+    // Snapshot component pull list
+    if (leafComponents.length) {
+      const compRows = leafComponents.map((c: any) => ({
+        work_order_id: workOrderId, component_id: c.id, quantity: c.qty || 1,
+      }));
+      const { error: compsErr } = await tdb("work_order_components").insert(compRows);
+      if (compsErr) return json({ error: compsErr.message }, 400);
+    }
+
+    return json({ ok: true, work_order_id: workOrderId });
+  }
+
+  // --- Work Orders: list ---------------------------------------------------
+  if (action === "listWorkOrders") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id } = body;
+    let q = tdb("work_orders").select("id, family_id, external_order_id, selections, status, notes, created_at, updated_at");
+    if (family_id) q = (q as any).eq("family_id", family_id);
+    const { data, error } = await (q as any).order("created_at", { ascending: false });
+    if (error) return json({ error: error.message }, 500);
+    const orders = data || [];
+    // Enrich with family names
+    const familyIds = [...new Set(orders.map((o: any) => o.family_id))];
+    const familyMap: Record<string, string> = {};
+    if (familyIds.length) {
+      const { data: fams } = await tdb("bom_components").select("id, name").in("id", familyIds);
+      (fams || []).forEach((f: any) => { familyMap[f.id] = f.name; });
+    }
+    // Step counts
+    const orderIds = orders.map((o: any) => o.id);
+    const stepCounts: Record<string, { total: number; done: number }> = {};
+    if (orderIds.length) {
+      const { data: steps } = await tdb("work_order_steps")
+        .select("work_order_id, status").in("work_order_id", orderIds);
+      (steps || []).forEach((s: any) => {
+        if (!stepCounts[s.work_order_id]) stepCounts[s.work_order_id] = { total: 0, done: 0 };
+        stepCounts[s.work_order_id].total++;
+        if (s.status === "done") stepCounts[s.work_order_id].done++;
+      });
+    }
+    const enriched = orders.map((o: any) => ({
+      ...o,
+      family_name: familyMap[o.family_id] || o.family_id,
+      step_count: stepCounts[o.id]?.total || 0,
+      steps_done: stepCounts[o.id]?.done || 0,
+    }));
+    return json({ work_orders: enriched });
+  }
+
+  // --- Work Orders: get one (with steps + components) ----------------------
+  if (action === "getWorkOrder") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { id: woId } = body;
+    if (!woId) return json({ error: "id required" }, 400);
+    const { data: wo, error: woErr } = await tdb("work_orders")
+      .select("id, family_id, external_order_id, selections, status, notes, created_at, updated_at")
+      .eq("id", woId).maybeSingle();
+    if (woErr || !wo) return json({ error: woErr?.message || "Not found" }, 404);
+    // Steps
+    const { data: steps } = await tdb("work_order_steps")
+      .select("id, step_number, operation_type, instruction_text, reference_document_id, applies_to_component_id, notes, status, completed_at")
+      .eq("work_order_id", woId).order("step_number");
+    // Components
+    const { data: comps } = await tdb("work_order_components")
+      .select("id, component_id, quantity").eq("work_order_id", woId);
+    // Enrich component names
+    const compIds = (comps || []).map((c: any) => c.component_id);
+    const compMap: Record<string, any> = {};
+    if (compIds.length) {
+      const { data: bc } = await tdb("bom_components").select("id, name, part_number").in("id", compIds);
+      (bc || []).forEach((c: any) => { compMap[c.id] = c; });
+    }
+    // Enrich applies_to names on steps + signed URLs for reference docs
+    const docIds = [...new Set((steps || []).map((s: any) => s.reference_document_id).filter(Boolean))];
+    const docUrlMap: Record<string, string> = {};
+    if (docIds.length) {
+      const { data: dvs } = await db.from("document_versions").select("id, storage_path").in("id", docIds);
+      await Promise.all((dvs || []).map(async (dv: any) => {
+        const { data: signed } = await db.storage.from(DOC_BUCKET).createSignedUrl(dv.storage_path, 3600);
+        if (signed?.signedUrl) docUrlMap[dv.id] = signed.signedUrl;
+      }));
+    }
+    const compApplyIds = [...new Set((steps || []).map((s: any) => s.applies_to_component_id).filter(Boolean))];
+    const applyMap: Record<string, string> = {};
+    if (compApplyIds.length) {
+      const { data: ac } = await tdb("bom_components").select("id, name").in("id", compApplyIds);
+      (ac || []).forEach((c: any) => { applyMap[c.id] = c.name; });
+    }
+    const enrichedSteps = (steps || []).map((s: any) => ({
+      ...s,
+      applies_to_name: applyMap[s.applies_to_component_id] || null,
+      reference_document_url: docUrlMap[s.reference_document_id] || null,
+    }));
+    const enrichedComps = (comps || []).map((c: any) => ({
+      ...c,
+      name: compMap[c.component_id]?.name || c.component_id,
+      part_number: compMap[c.component_id]?.part_number || null,
+    }));
+    // Family name
+    const { data: fam } = await tdb("bom_components").select("name").eq("id", wo.family_id).maybeSingle();
+    return json({ work_order: { ...wo, family_name: fam?.name || wo.family_id }, steps: enrichedSteps, components: enrichedComps });
+  }
+
+  // --- Work Orders: update a single step status ----------------------------
+  if (action === "updateWorkOrderStepStatus") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { step_id, status } = body;
+    if (!step_id || !status) return json({ error: "step_id and status required" }, 400);
+    const patch: any = { status };
+    if (status === "done") { patch.completed_at = new Date().toISOString(); patch.completed_by = session.uid || null; }
+    else { patch.completed_at = null; patch.completed_by = null; }
+    const { data: step, error } = await tdb("work_order_steps").update(patch).eq("id", step_id).select("work_order_id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    // Bump work order updated_at; auto-advance to in_progress on first done step
+    if (step?.work_order_id) {
+      const woPatch: any = { updated_at: new Date().toISOString() };
+      if (status === "done") {
+        const { data: wo } = await tdb("work_orders").select("status").eq("id", step.work_order_id).maybeSingle();
+        if (wo?.status === "planned") woPatch.status = "in_progress";
+      }
+      await tdb("work_orders").update(woPatch).eq("id", step.work_order_id);
+    }
+    return json({ ok: true });
+  }
+
+  // --- Work Orders: update overall status ----------------------------------
+  if (action === "updateWorkOrderStatus") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { id: woId, status } = body;
+    if (!woId || !status) return json({ error: "id and status required" }, 400);
+    const { error } = await tdb("work_orders").update({ status, updated_at: new Date().toISOString() }).eq("id", woId);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
   }
 
   // ==========================================================================
