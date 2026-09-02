@@ -5219,14 +5219,17 @@
       style: `display:inline-block;font-size:0.7rem;font-weight:700;padding:2px 7px;border-radius:3px;background:${(STATUS_COLORS[status]||"#8b93a1")}22;color:${STATUS_COLORS[status]||"#8b93a1"};text-transform:uppercase`,
     }, status.replace(/_/g, " "));
 
-    // ---- Routing sub-tab ------------------------------------------------
+    // ---- Manufacturing Steps sub-tab ------------------------------------
     function buildRoutingTab() {
-      const wrap = el("div", { style: "padding:1rem;max-width:860px" });
+      const wrap = el("div", { style: "padding:1rem;max-width:900px" });
       const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
-      const familySel = el("select", { class: "up-text", style: "max-width:280px" }, [el("option", { value: "" }, "— choose product family —")]);
+      const familySel = el("select", { class: "up-text", style: "max-width:300px" }, [el("option", { value: "" }, "— choose product family —")]);
+      const compArea  = el("div", { style: "margin-top:1rem" });
       const stepsArea = el("div", { style: "margin-top:1rem" });
 
       let selectedFamilyId = null;
+      let selectedCompId   = null;
+      let selectedCompName = "";
       let steps = [];
 
       const loadFamiliesIntoSel = async () => {
@@ -5236,30 +5239,72 @@
         } catch (ex) { note.textContent = "Could not load families: " + ex.message; }
       };
 
-      const loadSteps = async (familyId) => {
-        stepsArea.replaceChildren(el("div", { class: "loading" }, "Loading routing steps…"));
+      // Fetch BOM components + step counts, render component cards
+      const loadComponentOverview = async (familyId) => {
+        compArea.replaceChildren(el("div", { class: "loading" }, "Loading components…"));
+        stepsArea.replaceChildren();
+        selectedCompId = null; selectedCompName = "";
         try {
-          const r = await API.post(token, "listFamilyRoutingSteps", { family_id: familyId });
+          const [bomR, ovR] = await Promise.all([
+            API.post(token, "getBom", { id: familyId }),
+            API.post(token, "listFamilyRoutingOverview", { family_id: familyId }),
+          ]);
+          const nodes = (bomR.nodes || []).filter((n) => n.id !== familyId);
+          const stepCounts = ovR.step_counts || {};
+          if (!nodes.length) {
+            compArea.replaceChildren(el("div", { class: "empty" }, "No components in this BOM yet."));
+            return;
+          }
+          compArea.replaceChildren(
+            el("p", { class: "muted", style: "font-size:0.82rem;margin-bottom:0.5rem" },
+              "Click a component to view and edit its manufacturing steps for this product family."),
+            el("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.5rem" },
+              nodes.map((n) => {
+                const count = stepCounts[n.id] || 0;
+                const card = el("button", {
+                  type: "button",
+                  style: "text-align:left;padding:0.6rem 0.75rem;border:1px solid var(--border,#e2e8f0);border-radius:6px;background:var(--bg-1,#fff);cursor:pointer;width:100%;transition:border-color 0.15s",
+                }, [
+                  el("div", { style: "font-size:0.875rem;font-weight:600;margin-bottom:0.2rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, n.name || n.part_number || n.id),
+                  n.part_number ? el("div", { class: "muted", style: "font-size:0.75rem;margin-bottom:0.3rem" }, n.part_number) : null,
+                  el("div", { style: `font-size:0.72rem;font-weight:700;padding:2px 6px;border-radius:3px;display:inline-block;background:${count?"#2fa56422":"#8b93a122"};color:${count?"#2fa564":"#8b93a1"}` },
+                    count ? `${count} step${count !== 1 ? "s" : ""}` : "No steps yet"),
+                ].filter(Boolean));
+                card.onclick = () => {
+                  compArea.querySelectorAll("button").forEach((b) => b.style.removeProperty("border-color"));
+                  card.style.borderColor = "var(--primary,#2fa564)";
+                  loadStepsForComponent(familyId, n.id, n.name || n.part_number || n.id);
+                };
+                return card;
+              })
+            ),
+          );
+        } catch (ex) { compArea.replaceChildren(el("div", { class: "error" }, ex.message)); }
+      };
+
+      // Load and render steps for one component within the selected family
+      const loadStepsForComponent = async (familyId, compId, compName) => {
+        selectedCompId = compId; selectedCompName = compName;
+        stepsArea.replaceChildren(el("div", { class: "loading" }, "Loading steps…"));
+        try {
+          const r = await API.post(token, "listFamilyRoutingSteps", { family_id: familyId, component_id: compId });
           steps = r.steps || [];
           renderSteps();
         } catch (ex) { stepsArea.replaceChildren(el("div", { class: "error" }, ex.message)); }
       };
 
       const renderSteps = () => {
+        const heading = el("div", { style: "display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem;padding-bottom:0.4rem;border-bottom:1px solid var(--border,#e2e8f0)" }, [
+          el("span", { style: "font-size:0.875rem;font-weight:700" }, selectedCompName),
+          el("span", { class: "muted", style: "font-size:0.8rem" }, `— ${steps.length} step${steps.length !== 1 ? "s" : ""}`),
+          el("span", { class: "spacer" }),
+          addStepBtn(),
+        ]);
         if (!steps.length) {
-          stepsArea.replaceChildren(
-            el("div", { class: "empty" }, "No routing steps defined for this family yet."),
-            el("div", { style: "margin-top:0.75rem" }, addStepBtn()),
-          );
+          stepsArea.replaceChildren(heading, el("div", { class: "empty" }, "No manufacturing steps defined for this component in this family yet."));
           return;
         }
-        stepsArea.replaceChildren(
-          el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem" }, [
-            el("span", { class: "muted" }, `${steps.length} step${steps.length !== 1 ? "s" : ""}`),
-            addStepBtn(),
-          ]),
-          el("div", {}, steps.map((s, i) => stepRow(s, i))),
-        );
+        stepsArea.replaceChildren(heading, el("div", {}, steps.map((s, i) => stepRow(s, i))));
       };
 
       const addStepBtn = () => actionBtn("+ Add step", "plus", { primary: true, onClick: () => openStepModal(null) });
@@ -5269,8 +5314,8 @@
         el("div", { style: "flex:1;min-width:0" }, [
           el("div", { style: "display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap" }, [
             opBadge(s.operation_type),
-            s.applies_to_name ? el("span", { class: "muted", style: "font-size:0.78rem" }, "→ " + s.applies_to_name) : null,
-            s.variant_condition && Object.keys(s.variant_condition).length ? el("span", { style: "font-size:0.7rem;background:var(--bg-2,#f5f5f5);border-radius:3px;padding:1px 5px;color:var(--muted,#8b93a1)" }, "conditional") : null,
+            s.variant_condition && Object.keys(s.variant_condition).length
+              ? el("span", { style: "font-size:0.7rem;background:var(--bg-2,#f5f5f5);border-radius:3px;padding:1px 5px;color:var(--muted,#8b93a1)" }, "conditional") : null,
           ].filter(Boolean)),
           el("div", { style: "margin-top:0.25rem;font-size:0.9rem" }, s.instruction_text),
           s.reference_document_name ? el("div", { class: "muted", style: "font-size:0.78rem;margin-top:0.1rem" }, "📎 " + s.reference_document_name) : null,
@@ -5290,8 +5335,8 @@
         const orderedIds = steps.map((s) => s.id);
         [orderedIds[idx], orderedIds[newIdx]] = [orderedIds[newIdx], orderedIds[idx]];
         try {
-          await API.post(token, "reorderFamilyRoutingSteps", { family_id: selectedFamilyId, ordered_ids: orderedIds });
-          await loadSteps(selectedFamilyId);
+          await API.post(token, "reorderFamilyRoutingSteps", { family_id: selectedFamilyId, component_id: selectedCompId, ordered_ids: orderedIds });
+          await loadStepsForComponent(selectedFamilyId, selectedCompId, selectedCompName);
         } catch (ex) { note.textContent = ex.message; }
       };
 
@@ -5299,17 +5344,19 @@
         if (!confirm(`Delete step ${s.step_number}: "${s.instruction_text.slice(0, 60)}"?`)) return;
         try {
           await API.post(token, "deleteFamilyRoutingStep", { id: s.id });
-          await loadSteps(selectedFamilyId);
+          await loadStepsForComponent(selectedFamilyId, selectedCompId, selectedCompName);
+          // Refresh step count badges
+          loadComponentOverview(selectedFamilyId).then(() => {
+            // Re-highlight the active card after reload
+            compArea.querySelectorAll("button").forEach((b) => {
+              if (b.textContent.includes(selectedCompName)) b.style.borderColor = "var(--primary,#2fa564)";
+            });
+          });
         } catch (ex) { note.textContent = ex.message; }
       };
 
       const openStepModal = async (existing) => {
-        let familyComps = [];
         let docVersions = [];
-        try {
-          const bom = await API.post(token, "getBom", { id: selectedFamilyId });
-          familyComps = (bom.nodes || []).filter((n) => n.id !== selectedFamilyId);
-        } catch { /* optional */ }
         try {
           const r = await API.post(token, "data", {});
           docVersions = (r.documents || []).flatMap((d) =>
@@ -5322,10 +5369,6 @@
         const stepNumInp = el("input", { type: "number", class: "up-text", min: "1", value: existing ? String(existing.step_number) : String(steps.length + 1) });
         const opSel = el("select", { class: "up-text" }, OPTYPES.map((t) => el("option", { value: t, selected: t === (v.operation_type || "drill") ? "selected" : null }, OP_LABEL[t])));
         const instrInp = el("textarea", { rows: "3", class: "up-text", placeholder: "Describe exactly what the operator must do…" }, v.instruction_text || "");
-        const appliesToSel = el("select", { class: "up-text" }, [
-          el("option", { value: "" }, "— whole assembly / no specific component —"),
-          ...familyComps.map((c) => el("option", { value: c.id, selected: c.id === v.applies_to_component_id ? "selected" : null }, c.name || c.part_number || c.id)),
-        ]);
         const refDocSel = el("select", { class: "up-text" }, [
           el("option", { value: "" }, "— no reference document —"),
           ...docVersions.map((d) => el("option", { value: d.id, selected: d.id === v.reference_document_id ? "selected" : null }, d.label)),
@@ -5343,34 +5386,37 @@
             await API.post(token, "upsertFamilyRoutingStep", {
               id: existing?.id,
               family_id: selectedFamilyId,
+              component_id: selectedCompId,
               step_number: Number(stepNumInp.value) || 1,
               operation_type: opSel.value,
               instruction_text: instr,
-              applies_to_component_id: appliesToSel.value || null,
               reference_document_id: refDocSel.value || null,
               notes: notesInp.value.trim() || null,
             });
             if (closeStepModal) closeStepModal();
-            await loadSteps(selectedFamilyId);
+            await loadStepsForComponent(selectedFamilyId, selectedCompId, selectedCompName);
           } catch (ex) { errEl2.textContent = ex.message; saveBtn.disabled = false; saveBtn.textContent = existing ? "Save changes" : "Add step"; }
         };
 
-        closeStepModal = openModal(existing ? "Edit routing step" : "New routing step", el("div", {}, [
-          frow("Step #", stepNumInp),
-          frow("Operation type", opSel),
-          frow("Instruction for operator", instrInp),
-          frow("Applies to component", appliesToSel),
-          frow("Reference document", refDocSel),
-          frow("Notes", notesInp),
-          errEl2,
-          el("div", { style: "margin-top:0.75rem" }, saveBtn),
-        ]));
+        closeStepModal = openModal(
+          `${existing ? "Edit" : "New"} step — ${selectedCompName}`,
+          el("div", {}, [
+            frow("Step #", stepNumInp),
+            frow("Operation type", opSel),
+            frow("Instruction for operator", instrInp),
+            frow("Reference document", refDocSel),
+            frow("Notes", notesInp),
+            errEl2,
+            el("div", { style: "margin-top:0.75rem" }, saveBtn),
+          ])
+        );
       };
 
       familySel.addEventListener("change", async () => {
         selectedFamilyId = familySel.value || null;
-        if (selectedFamilyId) await loadSteps(selectedFamilyId);
-        else stepsArea.replaceChildren();
+        stepsArea.replaceChildren();
+        if (selectedFamilyId) await loadComponentOverview(selectedFamilyId);
+        else compArea.replaceChildren();
       });
 
       wrap.replaceChildren(
@@ -5379,6 +5425,7 @@
           familySel,
         ]),
         note,
+        compArea,
         stepsArea,
       );
       loadFamiliesIntoSel();
@@ -5431,7 +5478,7 @@
           const wo    = r.work_order;
           const steps = r.steps || [];
           const comps = r.components || [];
-          const processedCompIds = new Set(steps.map((s) => s.applies_to_component_id).filter(Boolean));
+          const processedCompIds = new Set(steps.map((s) => s.component_id).filter(Boolean));
           const processComps = comps.filter((c) => processedCompIds.has(c.component_id));
           const packComps    = comps.filter((c) => !processedCompIds.has(c.component_id));
           const selStr = Object.entries(wo.selections || {}).map(([k, v]) => `${k}: ${v}`).join(", ") || "—";
@@ -5452,7 +5499,7 @@
               cb,
               el("div", { style: "flex:1;min-width:0" }, [
                 el("div", { style: "font-size:0.88rem" }, s.instruction_text),
-                s.applies_to_name ? el("div", { class: "muted", style: "font-size:0.78rem" }, "→ " + s.applies_to_name) : null,
+                s.component_name ? el("div", { class: "muted", style: "font-size:0.78rem" }, "→ " + s.component_name) : null,
                 s.reference_document_url ? el("div", { style: "margin-top:0.15rem" }, actionBtn("Open reference", "external", { href: s.reference_document_url, target: "_blank" })) : null,
               ].filter(Boolean)),
             ]);
@@ -5589,7 +5636,7 @@
     }
 
     mount.replaceChildren(subTabs("mbom", [
-      { id: "routing", label: "Routing",      icon: "layers", build: () => buildRoutingTab() },
+      { id: "routing", label: "Manufacturing Steps", icon: "layers", build: () => buildRoutingTab() },
       { id: "orders",  label: "Work Orders",  icon: "printer", build: () => buildOrdersTab() },
     ]));
   }
