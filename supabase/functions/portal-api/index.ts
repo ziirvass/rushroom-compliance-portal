@@ -201,7 +201,8 @@ const TENANT_TABLES = new Set([
   "family_attributes", "family_attribute_values", "saved_configurations",
   // PROP-026: Component image gallery
   "component_images",
-  // PROP-030: Manufacturing BOM
+  // PROP-030: Manufacturing BOM + product families (migration 0019)
+  "product_families", "product_family_members",
   "component_routing_steps", "work_orders", "work_order_steps", "work_order_components",
 ]);
 function makeTdb(orgId: string) {
@@ -4269,6 +4270,93 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // PROP-030: Manufacturing BOM — Routing & Work Orders
   // ==========================================================================
 
+  // --- Product Families CRUD -----------------------------------------------
+  if (action === "listProductFamilies") {
+    const { data, error } = await tdb("product_families").select("id, name, description, created_at").order("name");
+    if (error) return json({ error: error.message }, 500);
+    const families = data || [];
+    const ids = families.map((f: any) => f.id);
+    const memberCounts: Record<string, number> = {};
+    if (ids.length) {
+      const { data: members } = await tdb("product_family_members").select("family_id").in("family_id", ids);
+      (members || []).forEach((m: any) => { memberCounts[m.family_id] = (memberCounts[m.family_id] || 0) + 1; });
+    }
+    return json({ families: families.map((f: any) => ({ ...f, member_count: memberCounts[f.id] || 0 })) });
+  }
+
+  if (action === "createProductFamily") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { name, description } = body;
+    if (!name?.trim()) return json({ error: "name required" }, 400);
+    const { data, error } = await tdb("product_families")
+      .insert({ name: name.trim(), description: description?.trim() || null }).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true, id: data.id });
+  }
+
+  if (action === "updateProductFamily") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { id, name, description } = body;
+    if (!id || !name?.trim()) return json({ error: "id and name required" }, 400);
+    const { error } = await tdb("product_families")
+      .update({ name: name.trim(), description: description?.trim() || null }).eq("id", id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  if (action === "deleteProductFamily") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { id } = body;
+    if (!id) return json({ error: "id required" }, 400);
+    const { error } = await tdb("product_families").delete().eq("id", id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  // --- Product Family membership --------------------------------------------
+  if (action === "addFamilyMember") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id, component_id } = body;
+    if (!family_id || !component_id) return json({ error: "family_id and component_id required" }, 400);
+    const { error } = await tdb("product_family_members")
+      .upsert({ family_id, component_id }, { onConflict: "family_id,component_id", ignoreDuplicates: true });
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  if (action === "removeFamilyMember") {
+    if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
+    const { family_id, component_id } = body;
+    if (!family_id || !component_id) return json({ error: "family_id and component_id required" }, 400);
+    const { error } = await tdb("product_family_members").delete()
+      .eq("family_id", family_id).eq("component_id", component_id);
+    if (error) return json({ error: error.message }, 400);
+    return json({ ok: true });
+  }
+
+  if (action === "listFamilyMembers") {
+    const { family_id } = body;
+    if (!family_id) return json({ error: "family_id required" }, 400);
+    const { data, error } = await tdb("product_family_members").select("component_id").eq("family_id", family_id);
+    if (error) return json({ error: error.message }, 500);
+    const compIds = (data || []).map((m: any) => m.component_id);
+    if (!compIds.length) return json({ components: [] });
+    const { data: comps } = await tdb("bom_components")
+      .select("id, name, part_number, type, lifecycle_status").in("id", compIds).order("name");
+    return json({ components: comps || [] });
+  }
+
+  if (action === "listComponentFamilies") {
+    const { component_id } = body;
+    if (!component_id) return json({ error: "component_id required" }, 400);
+    const { data, error } = await tdb("product_family_members").select("family_id").eq("component_id", component_id);
+    if (error) return json({ error: error.message }, 500);
+    const famIds = (data || []).map((m: any) => m.family_id);
+    if (!famIds.length) return json({ families: [] });
+    const { data: fams } = await tdb("product_families").select("id, name").in("id", famIds).order("name");
+    return json({ families: fams || [] });
+  }
+
   // --- Routing: list steps for one component within a family ---------------
   if (action === "listFamilyRoutingSteps") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
@@ -4362,57 +4450,28 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   // --- Work Orders: create (resolve BOM + per-component routing snapshot) --
   if (action === "createWorkOrder") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
-    const { family_id, selections, external_order_id, notes: woNotes } = body;
-    if (!family_id || !selections) return json({ error: "family_id and selections required" }, 400);
+    const { family_id, external_order_id, notes: woNotes } = body;
+    if (!family_id) return json({ error: "family_id required" }, 400);
 
-    // BFS resolve BOM
-    const nodeMap: Record<string, any> = {};
-    const queue: Array<{ id: string; depth: number; qty: number }> = [{ id: family_id, depth: 0, qty: 1 }];
-    const visited = new Set<string>();
-    while (queue.length > 0) {
-      const batch = queue.splice(0, queue.length);
-      const ids = batch.map((n: any) => n.id).filter((id: string) => !visited.has(id));
-      if (!ids.length) break;
-      ids.forEach((id: string) => visited.add(id));
-      const { data: comps } = await tdb("bom_components").select("id, name, part_number, type").in("id", ids);
-      (comps || []).forEach((c: any) => { nodeMap[c.id] = { ...c, qty: 1 }; });
-      if (batch[0].depth >= 10) continue;
-      const { data: childEdges } = await db.from("bom_edges")
-        .select("parent_id, child_id, quantity, variant_condition")
-        .in("parent_id", ids).is("effective_to", null).eq("organization_id", organizationId);
-      (childEdges || []).forEach((e: any) => {
-        const cond = e.variant_condition;
-        const included = !cond || Object.entries(cond as Record<string, string>).every(([k, v]) => selections[k] === v);
-        if (included) {
-          const parentItem = batch.find((b: any) => b.id === e.parent_id);
-          const effectiveQty = (parentItem?.qty || 1) * Number(e.quantity);
-          if (!visited.has(e.child_id)) queue.push({ id: e.child_id, depth: batch[0].depth + 1, qty: effectiveQty });
-          if (nodeMap[e.child_id]) nodeMap[e.child_id].qty = effectiveQty;
-        }
-      });
-    }
-    const resolvedComponents = Object.values(nodeMap).filter((c: any) => c.id !== family_id);
+    // Pull list = all product_family_members for this family
+    const { data: members, error: membErr } = await tdb("product_family_members")
+      .select("component_id").eq("family_id", family_id);
+    if (membErr) return json({ error: membErr.message }, 500);
+    const memberIds = (members || []).map((m: any) => m.component_id);
 
-    // Fetch routing steps for all resolved components in this family, filter by variant
+    // Fetch routing steps for all members in this family, build global step sequence
     let allStepRows: any[] = [];
-    if (resolvedComponents.length) {
-      const compIds = resolvedComponents.map((c: any) => c.id);
+    if (memberIds.length) {
       const { data: routingSteps } = await tdb("component_routing_steps")
-        .select("component_id, step_number, operation_type, instruction_text, reference_document_id, variant_condition, notes")
-        .eq("family_id", family_id).in("component_id", compIds).order("component_id").order("step_number");
-      // Filter by variant_condition, then build flat ordered step list (per component, sequential global numbering)
+        .select("component_id, step_number, operation_type, instruction_text, reference_document_id, notes")
+        .eq("family_id", family_id).in("component_id", memberIds).order("component_id").order("step_number");
       let globalStepNum = 0;
-      // Group by component_id in resolved order
-      for (const comp of resolvedComponents) {
-        const compSteps = (routingSteps || []).filter((s: any) => {
-          if (s.component_id !== comp.id) return false;
-          const cond = s.variant_condition;
-          return !cond || Object.entries(cond as Record<string, string>).every(([k, v]) => selections[k] === v);
-        });
+      for (const compId of memberIds) {
+        const compSteps = (routingSteps || []).filter((s: any) => s.component_id === compId);
         for (const s of compSteps) {
           globalStepNum++;
           allStepRows.push({
-            component_id: comp.id, step_number: globalStepNum,
+            component_id: compId, step_number: globalStepNum,
             operation_type: s.operation_type, instruction_text: s.instruction_text,
             reference_document_id: s.reference_document_id || null,
             notes: s.notes || null, status: "pending",
@@ -4423,7 +4482,7 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
 
     // Insert work order
     const { data: wo, error: woErr } = await tdb("work_orders").insert({
-      family_id, selections, external_order_id: external_order_id || null,
+      family_id, external_order_id: external_order_id || null,
       notes: woNotes || null, status: "planned",
     }).select("id").maybeSingle();
     if (woErr) return json({ error: woErr.message }, 400);
@@ -4433,9 +4492,9 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       const { error: stepsErr } = await tdb("work_order_steps").insert(allStepRows.map((r: any) => ({ ...r, work_order_id: workOrderId })));
       if (stepsErr) return json({ error: stepsErr.message }, 400);
     }
-    if (resolvedComponents.length) {
+    if (memberIds.length) {
       const { error: compsErr } = await tdb("work_order_components").insert(
-        resolvedComponents.map((c: any) => ({ work_order_id: workOrderId, component_id: c.id, quantity: c.qty || 1 }))
+        memberIds.map((id: string) => ({ work_order_id: workOrderId, component_id: id, quantity: 1 }))
       );
       if (compsErr) return json({ error: compsErr.message }, 400);
     }
@@ -4447,16 +4506,16 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
   if (action === "listWorkOrders") {
     if (role !== "rushroom") return json({ error: "Not authorised" }, 403);
     const { family_id } = body;
-    let q = tdb("work_orders").select("id, family_id, external_order_id, selections, status, notes, created_at, updated_at");
+    let q = tdb("work_orders").select("id, family_id, external_order_id, status, notes, created_at, updated_at");
     if (family_id) q = (q as any).eq("family_id", family_id);
     const { data, error } = await (q as any).order("created_at", { ascending: false });
     if (error) return json({ error: error.message }, 500);
     const orders = data || [];
-    // Enrich with family names
+    // Enrich with family names from product_families
     const familyIds = [...new Set(orders.map((o: any) => o.family_id))];
     const familyMap: Record<string, string> = {};
     if (familyIds.length) {
-      const { data: fams } = await tdb("bom_components").select("id, name").in("id", familyIds);
+      const { data: fams } = await tdb("product_families").select("id, name").in("id", familyIds);
       (fams || []).forEach((f: any) => { familyMap[f.id] = f.name; });
     }
     // Step counts
@@ -4486,9 +4545,10 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
     const { id: woId } = body;
     if (!woId) return json({ error: "id required" }, 400);
     const { data: wo, error: woErr } = await tdb("work_orders")
-      .select("id, family_id, external_order_id, selections, status, notes, created_at, updated_at")
+      .select("id, family_id, external_order_id, status, notes, created_at, updated_at")
       .eq("id", woId).maybeSingle();
     if (woErr || !wo) return json({ error: woErr?.message || "Not found" }, 404);
+    const { data: fam } = await tdb("product_families").select("name").eq("id", wo.family_id).maybeSingle();
     // Steps
     const { data: steps } = await tdb("work_order_steps")
       .select("id, step_number, operation_type, instruction_text, reference_document_id, component_id, notes, status, completed_at")
@@ -4527,7 +4587,6 @@ For each item, choose exactly one lifecyclePhase and one scope, with a confidenc
       part_number: compMap[c.component_id]?.part_number || null,
     }));
     // Family name
-    const { data: fam } = await tdb("bom_components").select("name").eq("id", wo.family_id).maybeSingle();
     return json({ work_order: { ...wo, family_name: fam?.name || wo.family_id }, steps: enrichedSteps, components: enrichedComps });
   }
 

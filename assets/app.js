@@ -4170,7 +4170,11 @@
         API.post(token, "listFamilyAttributes", { family_id: componentId }),
         API.post(token, "listConfigurations",    { family_id: componentId }),
       ] : [null, null];
-      const [hist, docs, mats, cl, usedIn, imgData, familyAttrs, familyConfigs] = await Promise.all([...basePromises, ...familyPromises]);
+      const [hist, docs, mats, cl, usedIn, imgData, familyAttrs, familyConfigs, compFamiliesR, allFamiliesR] = await Promise.all([
+        ...basePromises, ...familyPromises,
+        API.post(token, "listComponentFamilies", { component_id: componentId }),
+        API.post(token, "listProductFamilies", {}),
+      ]);
       const history = hist.history || [];
       const current = history.find((v) => v.is_current) || history[0];
 
@@ -4833,6 +4837,62 @@
         ]);
       }
 
+      // ---- Product Families section ----------------------------------------
+      const compFamilies = (compFamiliesR && compFamiliesR.families) || [];
+      const allFamilies  = (allFamiliesR  && allFamiliesR.families)  || [];
+      const memberFamIds = new Set(compFamilies.map((f) => f.id));
+
+      const refreshFamilySection = () => openComponentDetail(componentId, token, panel, nodeData, role);
+
+      const familyChips = el("div", { style: "display:flex;flex-wrap:wrap;gap:0.3rem;margin-bottom:0.5rem" },
+        compFamilies.length
+          ? compFamilies.map((f) => {
+              const chip = el("span", {
+                style: "display:inline-flex;align-items:center;gap:0.25rem;padding:2px 8px;border-radius:99px;font-size:0.75rem;font-weight:600;background:var(--primary,#2fa564)22;color:var(--primary,#2fa564);border:1px solid var(--primary,#2fa564)44",
+              }, [
+                f.name,
+                ...(role === "rushroom" ? [el("button", {
+                  type: "button",
+                  style: "background:none;border:none;cursor:pointer;font-size:0.8rem;line-height:1;padding:0;color:inherit;opacity:0.7",
+                  title: `Remove from ${f.name}`,
+                  onclick: async (e) => {
+                    e.stopPropagation();
+                    try { await API.post(token, "removeFamilyMember", { family_id: f.id, component_id: componentId }); refreshFamilySection(); }
+                    catch (ex) { alert(ex.message); }
+                  },
+                }, "×")] : []),
+              ]);
+              return chip;
+            })
+          : [el("span", { style: "font-size:0.82rem;color:var(--muted,#8b93a1)" }, "Not assigned to any product family")]
+      );
+
+      let familyPickerEl = null;
+      if (role === "rushroom") {
+        const available = allFamilies.filter((f) => !memberFamIds.has(f.id));
+        if (available.length) {
+          const sel = el("select", { class: "up-text", style: "font-size:0.82rem;max-width:220px" }, [
+            el("option", { value: "" }, "+ Assign to family…"),
+            ...available.map((f) => el("option", { value: f.id }, f.name)),
+          ]);
+          sel.onchange = async () => {
+            if (!sel.value) return;
+            sel.disabled = true;
+            try { await API.post(token, "addFamilyMember", { family_id: sel.value, component_id: componentId }); refreshFamilySection(); }
+            catch (ex) { alert(ex.message); sel.disabled = false; sel.value = ""; }
+          };
+          familyPickerEl = sel;
+        }
+      }
+
+      const productFamiliesSection = el("div", { style: "margin-top:1rem" }, [
+        el("div", { style: "display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem;flex-wrap:wrap" }, [
+          el("h4", { style: "margin:0" }, "Product Families"),
+          familyPickerEl,
+        ].filter(Boolean)),
+        familyChips,
+      ]);
+
       panel.replaceChildren(
         el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem" }, [
           el("strong", {}, `Component: ${componentId.slice(0, 8)}…`),
@@ -4841,6 +4901,7 @@
         ...(statusSection ? [statusSection] : []),
         ...(typeSection ? [typeSection] : []),
         ...(configSection ? [configSection] : []),
+        productFamiliesSection,
         versionsSection, usedInSection, docsSection, matsSection, imagesSection, changelogSection,
       );
     } catch (ex) {
@@ -5223,6 +5284,7 @@
     function buildRoutingTab() {
       const wrap = el("div", { style: "padding:1rem;max-width:900px" });
       const note = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+      const mgmtArea  = el("div", { style: "margin-bottom:1rem" });
       const familySel = el("select", { class: "up-text", style: "max-width:300px" }, [el("option", { value: "" }, "— choose product family —")]);
       const compArea  = el("div", { style: "margin-top:1rem" });
       const stepsArea = el("div", { style: "margin-top:1rem" });
@@ -5231,25 +5293,89 @@
       let selectedCompId   = null;
       let selectedCompName = "";
       let steps = [];
+      let allFamilies = [];
 
-      const loadFamiliesIntoSel = async () => {
+      // ---- Family management (create / delete) ----------------------------
+      const renderFamilyMgmt = () => {
+        const createBtn = actionBtn("+ New Family", "plus", { primary: true, onClick: () => {
+          const nameInp = el("input", { type: "text", class: "up-text", placeholder: "Family name…", style: "max-width:240px" });
+          const descInp = el("input", { type: "text", class: "up-text", placeholder: "Description (optional)", style: "max-width:240px" });
+          const errEl = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
+          const saveBtn = el("button", { class: "btn btn-primary", type: "button" }, "Create");
+          let closeModal;
+          saveBtn.onclick = async () => {
+            const name = nameInp.value.trim();
+            if (!name) { errEl.textContent = "Name is required."; return; }
+            saveBtn.disabled = true; saveBtn.textContent = "Creating…";
+            try {
+              await API.post(token, "createProductFamily", { name, description: descInp.value.trim() || null });
+              if (closeModal) closeModal();
+              await reloadFamilies();
+            } catch (ex) { errEl.textContent = ex.message; saveBtn.disabled = false; saveBtn.textContent = "Create"; }
+          };
+          closeModal = openModal("New Product Family", el("div", {}, [
+            el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Name"), nameInp]),
+            el("label", { class: "form-row" }, [el("span", { class: "form-label" }, "Description"), descInp]),
+            errEl,
+            el("div", { style: "margin-top:0.75rem" }, saveBtn),
+          ]));
+        }});
+
+        const chips = allFamilies.map((f) => el("span", {
+          style: "display:inline-flex;align-items:center;gap:0.25rem;padding:2px 8px;border-radius:99px;font-size:0.75rem;font-weight:600;background:var(--bg-2,#f5f5f5);border:1px solid var(--border,#e2e8f0);cursor:default",
+        }, [
+          f.name,
+          el("span", { class: "muted", style: "font-size:0.7rem" }, `(${f.member_count})`),
+          el("button", {
+            type: "button", title: `Delete ${f.name}`,
+            style: "background:none;border:none;cursor:pointer;font-size:0.78rem;opacity:0.5;padding:0;line-height:1",
+            onclick: async () => {
+              if (!confirm(`Delete product family "${f.name}"? This will remove all step definitions for this family.`)) return;
+              try {
+                await API.post(token, "deleteProductFamily", { id: f.id });
+                if (selectedFamilyId === f.id) { selectedFamilyId = null; compArea.replaceChildren(); stepsArea.replaceChildren(); }
+                await reloadFamilies();
+              } catch (ex) { note.textContent = ex.message; }
+            },
+          }, "×"),
+        ]));
+
+        mgmtArea.replaceChildren(
+          el("div", { style: "display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.4rem" }, [
+            el("span", { class: "form-label", style: "margin:0" }, "Product families:"),
+            createBtn,
+          ]),
+          chips.length
+            ? el("div", { style: "display:flex;flex-wrap:wrap;gap:0.3rem" }, chips)
+            : el("span", { class: "muted", style: "font-size:0.82rem" }, "No product families yet — create one above."),
+        );
+      };
+
+      const reloadFamilies = async () => {
         try {
-          const families = await loadFamilies();
-          families.forEach((f) => familySel.appendChild(el("option", { value: f.id }, f.name)));
+          allFamilies = await loadFamilies();
+          // Repopulate family picker
+          const prev = familySel.value;
+          familySel.replaceChildren(el("option", { value: "" }, "— choose product family —"));
+          allFamilies.forEach((f) => familySel.appendChild(el("option", { value: f.id, selected: f.id === prev ? "selected" : null }, f.name)));
+          if (prev && allFamilies.some((f) => f.id === prev)) familySel.value = prev;
+          renderFamilyMgmt();
         } catch (ex) { note.textContent = "Could not load families: " + ex.message; }
       };
 
-      // Fetch BOM components + step counts, render component cards
+      const loadFamiliesIntoSel = reloadFamilies;
+
+      // Fetch family members + step counts, render component cards
       const loadComponentOverview = async (familyId) => {
         compArea.replaceChildren(el("div", { class: "loading" }, "Loading components…"));
         stepsArea.replaceChildren();
         selectedCompId = null; selectedCompName = "";
         try {
-          const [bomR, ovR] = await Promise.all([
-            API.post(token, "getBom", { root_component_id: familyId, max_depth: 10 }),
+          const [membersR, ovR] = await Promise.all([
+            API.post(token, "listFamilyMembers", { family_id: familyId }),
             API.post(token, "listFamilyRoutingOverview", { family_id: familyId }),
           ]);
-          const nodes = (bomR.nodes || []).filter((n) => n.id !== familyId);
+          const nodes = membersR.components || [];
           const stepCounts = ovR.step_counts || {};
           if (!nodes.length) {
             compArea.replaceChildren(el("div", { class: "empty" }, "No components in this BOM yet."));
@@ -5420,8 +5546,9 @@
       });
 
       wrap.replaceChildren(
-        el("div", { style: "display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem" }, [
-          el("label", { class: "form-label", style: "margin:0;white-space:nowrap" }, "Product family:"),
+        mgmtArea,
+        el("div", { style: "display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem;padding-top:0.75rem;border-top:1px solid var(--border,#e2e8f0)" }, [
+          el("label", { class: "form-label", style: "margin:0;white-space:nowrap" }, "Select family:"),
           familySel,
         ]),
         note,
@@ -5481,7 +5608,7 @@
           const processedCompIds = new Set(steps.map((s) => s.component_id).filter(Boolean));
           const processComps = comps.filter((c) => processedCompIds.has(c.component_id));
           const packComps    = comps.filter((c) => !processedCompIds.has(c.component_id));
-          const selStr = Object.entries(wo.selections || {}).map(([k, v]) => `${k}: ${v}`).join(", ") || "—";
+          const selStr = null;
 
           const statusSel = el("select", { class: "up-text", style: "font-size:0.85rem" },
             STATUS_OPTS.map((s) => el("option", { value: s, selected: s === wo.status ? "selected" : null }, s.replace(/_/g, " ")))
@@ -5559,50 +5686,20 @@
 
         const famSel = el("select", { class: "up-text" }, [
           el("option", { value: "" }, "— choose product family —"),
-          ...families.map((f) => el("option", { value: f.id }, f.name)),
+          ...families.map((f) => el("option", { value: f.id }, `${f.name} (${f.member_count} components)`)),
         ]);
         const extOrdInp = el("input", { type: "text", class: "up-text", placeholder: "Customer order ref (optional)" });
         const notesInp2 = el("input", { type: "text", class: "up-text", placeholder: "Optional notes" });
-        const attrsArea = el("div", { style: "margin-top:0.5rem" });
         const errEl2 = el("p", { class: "up-status", role: "status", "aria-live": "polite" }, "");
         const createBtn = el("button", { class: "btn btn-primary", type: "button" }, "Create work order");
-        let selections = {};
         let closeWoModal;
-
-        const loadAttrs = async (familyId) => {
-          attrsArea.replaceChildren(el("div", { class: "loading" }, "Loading attributes…"));
-          selections = {};
-          try {
-            const r = await API.post(token, "listFamilyAttributes", { family_id: familyId });
-            const attrs = r.attributes || [];
-            if (!attrs.length) {
-              attrsArea.replaceChildren(el("p", { class: "muted" }, "No variant attributes — work order applies to all configurations."));
-            } else {
-              const LBL = "display:block;font-size:0.75rem;font-weight:600;color:var(--muted,#8b93a1);margin-bottom:0.15rem";
-              attrsArea.replaceChildren(
-                el("p", { class: "muted", style: "font-size:0.8rem;margin-bottom:0.5rem" }, "Select configuration attributes:"),
-                ...attrs.map((attr) => {
-                  const sel = el("select", { class: "up-text", style: "width:100%",
-                    onchange: () => { if (sel.value) selections[attr.name] = sel.value; else delete selections[attr.name]; },
-                  }, [
-                    el("option", { value: "" }, "— " + attr.display_name + " —"),
-                    ...(attr.values || []).map((v) => el("option", { value: v.value }, v.label)),
-                  ]);
-                  return el("div", { style: "margin-bottom:0.35rem" }, [el("label", { style: LBL }, attr.display_name), sel]);
-                }),
-              );
-            }
-          } catch (ex) { attrsArea.replaceChildren(el("div", { class: "error" }, ex.message)); }
-        };
-
-        famSel.addEventListener("change", () => { if (famSel.value) loadAttrs(famSel.value); else attrsArea.replaceChildren(); });
 
         createBtn.onclick = async () => {
           if (!famSel.value) { errEl2.textContent = "Choose a product family."; return; }
           createBtn.disabled = true; createBtn.textContent = "Creating…";
           try {
             const r = await API.post(token, "createWorkOrder", {
-              family_id: famSel.value, selections,
+              family_id: famSel.value,
               external_order_id: extOrdInp.value.trim() || null,
               notes: notesInp2.value.trim() || null,
             });
@@ -5616,7 +5713,6 @@
         closeWoModal = openModal("New Work Order", el("div", {}, [
           frow("Product family", famSel),
           frow("Order ref", extOrdInp),
-          attrsArea,
           frow("Notes", notesInp2),
           errEl2,
           el("div", { style: "margin-top:0.75rem" }, createBtn),
