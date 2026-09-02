@@ -2,6 +2,7 @@
 _Last updated: 2026-09-02 · Auto-maintained by /ship_
 
 ## Now — In Progress
+- PROP-030 continuation — migration 0019: product_families + product_family_members tables; listProductFamilies/createProductFamily/addFamilyMember API actions; component detail panel family tagging; Manufacturing Steps loads from new tables
 - PROP-021 Component Document Lifecycle — Layer 1 shipped (upload & link from component panel); Layers 2–4 (new revision, AI diff, data extraction) pending; PROP-014 must be reviewed before Layer 2 design
 - PROP-012 Multi-tenant SaaS (organizations, memberships, invitations, platform_audit, ai_usage_events) — Stages 5b+6 remaining
 
@@ -15,7 +16,7 @@ _Last updated: 2026-09-02 · Auto-maintained by /ship_
 - PROP-007 Multi-language support EN/DE/SV
 
 ## Shipped
-- **PROP-030 Manufacturing BOM — Postponement Routing & Work Orders + Schema Correction** (schema corrected: component_routing_steps replaces family_routing_steps — steps owned by component, scoped to family; work_order_steps.component_id replaces applies_to_component_id; new listFamilyRoutingOverview action; Manufacturing Steps sub-tab: family→component card grid→per-component step editor; migration 0018; cache v186) — 2026-09-02
+- **PROP-030 Manufacturing BOM — Postponement Routing & Work Orders** (component_routing_steps(component_id, family_id); work_order_steps.component_id; listFamilyRoutingOverview; Manufacturing Steps sub-tab; migrations 0017+0018; cache v189) — 2026-09-02 · **BLOCKED on migration 0019** — product_family removed from BOM node type picker; Manufacturing Steps awaits new product_families + product_family_members tables
 - **Fix — Parts tab catalog-only; +child removed; sub_assembly always in Assemblies tab** (+child gated on allowExpand so Parts tab has no structural actions; sub_assembly type routes to Assemblies tab regardless of has_children; cache v183) — 2026-09-01
 - **Fix — Parts tab tree-state restore guard** (allowExpand guard added to expandedTrees restore block in renderRootRow; cached Assemblies-tab expansion no longer leaks into Parts tab on re-render; cache v182) — 2026-09-01
 - **Fix — Parts tab always flat catalog; no BOM trees** (renderRootRow gains allowExpand param; Parts tab suppresses expand regardless of has_children; cache v181) — 2026-09-01
