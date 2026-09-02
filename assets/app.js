@@ -5246,7 +5246,7 @@
         selectedCompId = null; selectedCompName = "";
         try {
           const [bomR, ovR] = await Promise.all([
-            API.post(token, "getBom", { id: familyId }),
+            API.post(token, "getBom", { root_component_id: familyId, max_depth: 10 }),
             API.post(token, "listFamilyRoutingOverview", { family_id: familyId }),
           ]);
           const nodes = (bomR.nodes || []).filter((n) => n.id !== familyId);
