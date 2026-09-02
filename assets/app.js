@@ -3483,7 +3483,7 @@
 
     wrap.replaceChildren(
       el("div", { class: "pis-toolbar", style: "display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap" }, [
-        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, () => { activeTab = "components"; refreshTree(); }) }, "+ New BOM Node"),
+        el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => openAddComponent(token, (id, type) => { activeTab = type === "product_family" ? "dynamic" : type === "sub_assembly" ? "assemblies" : "components"; refreshTree(); }) }, "+ New BOM Node"),
         el("button", { class: "btn btn-sm", type: "button", onclick: () => refreshTree() }, "↺ Refresh"),
         searchInp,
       ]),
@@ -4863,7 +4863,7 @@
     }
 
     // --- Fields --------------------------------------------------------------
-    const TYPE_OPTS = [["part", "Part"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"]];
+    const TYPE_OPTS = [["part", "Part"], ["sub_assembly", "Sub-Assembly"], ["finished_good", "Finished Good"], ["product_family", "Dynamic BOM (product family)"]];
     const pn   = el("input",    { class: "up-text", type: "text", placeholder: "Auto-generated if left empty" });
     const oem  = el("input",    { class: "up-text", type: "text", placeholder: "OEM / distributor reference (optional)" });
     const nm   = el("input",    { class: "up-text", type: "text", placeholder: "Name" });
@@ -4992,7 +4992,7 @@
         }
         document.removeEventListener("paste", handleModalPaste);
         overlay.remove();
-        if (onCreated) onCreated(r.id);
+        if (onCreated) onCreated(r.id, typ.value);
       } catch (ex) {
         errEl.textContent = ex.message;
         submitBtn.disabled = false; submitBtn.textContent = "Create BOM Node";
